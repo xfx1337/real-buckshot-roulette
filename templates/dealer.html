@@ -169,7 +169,8 @@ function render() {
     switch(s.phase) {
         case 'lobby': renderLobby(s); break;
         case 'round_start':
-        case 'dealer_loading': renderLoading(s); break;
+        case 'dealer_loading':
+        case 'dealer_reloading': renderLoading(s); break;
         case 'dealer_items': renderItems(s); break;
         case 'player_turn': renderTurn(s); break;
         case 'round_over': document.getElementById('panel-roundover').style.display = 'block'; break;
@@ -181,7 +182,8 @@ function render() {
 function phaseLabel(p) {
     const m = {
         lobby: 'ЛОББИ', round_start: 'НАЧАЛО РАУНДА',
-        dealer_loading: 'ЗАРЯДКА', dealer_items: 'ПРЕДМЕТЫ',
+        dealer_loading: 'ЗАРЯДКА', dealer_reloading: 'ДОЗАРЯДКА',
+        dealer_items: 'ПРЕДМЕТЫ',
         player_turn: 'ХОД', round_over: 'РАУНД ОКОНЧЕН',
         game_over: 'КОНЕЦ',
     };
@@ -227,6 +229,10 @@ function renderConfigEditor(s) {
                 <label style="width:auto; margin-right: 8px;">Показывать патроны игрокам при зарядке:</label>
                 <input type="checkbox" id="cfg_show_shells" ${isChecked} style="transform: scale(1.2);">
             </div>
+            <div class="config-round" style="margin-bottom: 12px;">
+                <label style="width:auto; margin-right: 8px;">Лимит патронов в магазине (0=нет):</label>
+                <input type="number" class="cfg-input" id="cfg_mag_limit" value="${s && s.physical_magazine_limit !== undefined ? s.physical_magazine_limit : 0}" min="0" max="20">
+            </div>
             <h4>РАУНДЫ</h4>
             ${rounds.map((r,i) => `
                 <div class="config-round">
@@ -268,19 +274,22 @@ function renderLoading(s) {
     document.getElementById('panel-loading').style.display = 'block';
     const seq = document.getElementById('shell-sequence');
     
-    // В реальности помповый дробовик заряжается снизу (в трубку магазина).
-    // Первым выстрелит тот патрон, который засунули ПОСЛЕДНИМ.
-    // Значит, чтобы соблюсти серверную очередь (где [0] - первый выстрел),
-    // в реальности [0] нужно совать в магазин самым последним.
     const reversed = [...(s.shells_sequence || [])].reverse();
     
     seq.innerHTML = reversed.map((sh, i) =>
         `<span class="shell-chip ${sh === 'live' ? 'shell-live' : 'shell-blank'}">${i+1}-й В МАГАЗИН<br>${sh === 'live' ? 'БОЕВОЙ' : 'ХОЛОСТОЙ'}</span>`
     ).join('');
     
+    const liveChunk = (s.shells_sequence || []).filter(x => x === 'live').length;
+    const blankChunk = (s.shells_sequence || []).filter(x => x === 'blank').length;
+
+    const isReload = s.phase === 'dealer_reloading';
+    document.querySelector('#panel-loading h2').textContent = isReload ? "ДОЗАРЯДКА ДРОБОВИКА" : "ЗАРЯДИТЕ ДРОБОВИК";
+
     document.getElementById('shell-counts').innerHTML =
-        `<span class="shell-live-count">Боевых: ${s.live_count || 0}</span>` +
-        `<span class="shell-blank-count">Холостых: ${s.blank_count || 0}</span>`;
+        `<span class="shell-live-count">Боевых: ${liveChunk}</span>` +
+        `<span class="shell-blank-count">Холостых: ${blankChunk}</span>` +
+        `<div style="margin-top: 10px; font-size: 0.9em; opacity: 0.8">Всего осталось в раунде: ${s.shells_remaining}</div>`;
     updateToggleShellsBtn(s);
 }
 
@@ -481,8 +490,11 @@ function saveConfig() {
     
     const show_shells_checkbox = document.getElementById('cfg_show_shells');
     const show_shells_to_players = show_shells_checkbox ? show_shells_checkbox.checked : true;
+    
+    const mag_limit_input = document.getElementById('cfg_mag_limit');
+    const physical_magazine_limit = mag_limit_input ? parseInt(mag_limit_input.value) || 0 : 0;
 
-    const config = JSON.stringify({rounds, item_weights, show_shells_to_players});
+    const config = JSON.stringify({rounds, item_weights, show_shells_to_players, physical_magazine_limit});
     apiPost('/api/update_config', {config_json: config});
 }
 

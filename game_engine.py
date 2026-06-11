@@ -15,6 +15,7 @@ class GamePhase(str, Enum):
     LOBBY = "lobby"
     ROUND_START = "round_start"
     DEALER_LOADING = "dealer_loading"      # Dealer must load shells
+    DEALER_RELOADING = "dealer_reloading"  # Dealer must reload remaining shells
     DEALER_ITEMS = "dealer_items"          # Dealer must distribute items
     PLAYER_TURN = "player_turn"            # Active player's turn
     ROUND_OVER = "round_over"
@@ -79,6 +80,7 @@ class GameConfig:
         {"hp": 6, "items_per_player": 4, "max_shells": 8},
     ])
     max_items_per_player: int = 8
+    physical_magazine_limit: int = 0  # 0 means unlimited
     # Item pool weights (higher = more likely)
     item_weights: dict = field(default_factory=lambda: {
         ItemType.BEER: 10,
@@ -131,6 +133,7 @@ class GameState:
         self.first_round_generated: bool = False
         # Whether to show shell counts to players during dealer_loading phase
         self.show_shells_to_players: bool = True
+        self.physical_loaded_count: int = 0
 
     def _log(self, msg: str, event_type: str = "info"):
         self.event_log.append(GameEvent(time.time(), msg, event_type))
@@ -208,6 +211,12 @@ class GameState:
         random.shuffle(self.shells)
         self.shells_display = list(self.shells)
 
+        limit = self.config.physical_magazine_limit
+        if limit > 0:
+            self.physical_loaded_count = min(len(self.shells), limit)
+        else:
+            self.physical_loaded_count = len(self.shells)
+
         self._log(
             f"Дробовик заряжен: {live_count} боевых, {blank_count} холостых (всего {total})",
             "round"
@@ -216,6 +225,11 @@ class GameState:
 
     def confirm_shells_loaded(self):
         """Dealer confirms they physically loaded the shells."""
+        if self.phase == GamePhase.DEALER_RELOADING:
+            self.phase = GamePhase.PLAYER_TURN
+            self._log(">> Дробовик дозаряжен, игра продолжается", "system")
+            return
+
         self.phase = GamePhase.DEALER_ITEMS
         rc = self.config.rounds[self.current_round]
         items_count = rc["items_per_player"]
@@ -306,18 +320,22 @@ class GameState:
         cp = self.players[self.turn_order[self.current_turn_idx]]
         self._log(f"Ход игрока #{cp.number} «{cp.name}»", "info")
 
-    def _check_shells_empty(self):
-        """If no shells left, reload or end round."""
+    def _check_shells_state(self):
+        """Check if round is over or if we need physical partial reload."""
         if len(self.shells) == 0:
             alive = self.get_alive_players()
             if len(alive) <= 1:
                 self._check_game_over()
                 return
-            # Check if we should go to next round or reload within same round
-            self._log(">> Все патроны расстреляны. Перезарядка...", "round")
+            self._log(">> Все патроны расстреляны. Новый магазин...", "round")
             self.saw_active = False
             self.inverted = False
             self._generate_shells()
+        elif self.physical_loaded_count <= 0:
+            self.phase = GamePhase.DEALER_RELOADING
+            limit = self.config.physical_magazine_limit
+            self.physical_loaded_count = min(len(self.shells), limit) if limit > 0 else len(self.shells)
+            self._log(">> В магазине закончились патроны. Требуется дозарядка!", "system")
 
     def _check_game_over(self):
         alive = self.get_alive_players()
@@ -348,6 +366,8 @@ class GameState:
             raise ValueError("Неверная цель")
 
         shell = self.shells.pop(0)
+        self.physical_loaded_count = max(0, self.physical_loaded_count - 1)
+
         # Apply inverter
         if self.inverted:
             shell = ShellType.BLANK if shell == ShellType.LIVE else ShellType.LIVE
@@ -387,8 +407,7 @@ class GameState:
                 self.current_turn_idx = (self.current_turn_idx + 1) % len(self.turn_order)
             else:
                 self._advance_turn()
-                if len(self.shells) == 0:
-                    self._check_shells_empty()
+                self._check_shells_state()
         else:
             # Blank
             self._log(
@@ -401,12 +420,10 @@ class GameState:
                 result["extra_turn"] = True
                 self._log(f">> Игрок #{shooter.number} получает дополнительный ход", "info")
                 # Don't advance turn — same player goes again
-                if len(self.shells) == 0:
-                    self._check_shells_empty()
+                self._check_shells_state()
             else:
                 self._advance_turn()
-                if len(self.shells) == 0:
-                    self._check_shells_empty()
+                self._check_shells_state()
 
         return result
 
@@ -419,12 +436,12 @@ class GameState:
         if not self.shells:
             raise ValueError("Нет патронов")
         ejected = self.shells.pop(0)
+        self.physical_loaded_count = max(0, self.physical_loaded_count - 1)
         if self.inverted:
             ejected = ShellType.BLANK if ejected == ShellType.LIVE else ShellType.LIVE
             self.inverted = False
         self._log(f">> #{p.number} использовал пиво. Выброшен: {'БОЕВОЙ' if ejected == ShellType.LIVE else 'ХОЛОСТОЙ'}", "item")
-        if len(self.shells) == 0:
-            self._check_shells_empty()
+        self._check_shells_state()
         return {"ejected": ejected.value}
 
     def use_item_handsaw(self, player_id: str):
@@ -611,7 +628,11 @@ class GameState:
         }
 
         if for_dealer:
-            data["shells_sequence"] = [s.value for s in self.shells]
+            if self.phase in (GamePhase.DEALER_LOADING, GamePhase.DEALER_RELOADING):
+                chunk = self.shells[:self.physical_loaded_count]
+                data["shells_sequence"] = [s.value for s in chunk]
+            else:
+                data["shells_sequence"] = [s.value for s in self.shells]
             data["shells_display"] = [s.value for s in self.shells_display]
             data["dealt_items"] = {
                 pid: [ITEM_LABELS[ItemType(i)][0] for i in items]
@@ -620,12 +641,13 @@ class GameState:
             data["last_burner_result"] = self.last_burner_result
             data["last_medicine_result"] = self.last_medicine_result
             data["last_magnify_result"] = self.last_magnify_result
-            # Live/blank counts
+            # Live/blank counts (total)
             live_c = sum(1 for s in self.shells if s == ShellType.LIVE)
             blank_c = sum(1 for s in self.shells if s == ShellType.BLANK)
             data["live_count"] = live_c
             data["blank_count"] = blank_c
             data["show_shells_to_players"] = self.show_shells_to_players
+            data["physical_magazine_limit"] = self.config.physical_magazine_limit
 
         # Recent log (last 20 events)
         data["log"] = [

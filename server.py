@@ -338,6 +338,8 @@ async def update_config(config_json: str = Form(...)):
             game.config.max_items_per_player = data["max_items_per_player"]
         if "show_shells_to_players" in data:
             game.show_shells_to_players = data["show_shells_to_players"]
+        if "physical_magazine_limit" in data:
+            game.config.physical_magazine_limit = data["physical_magazine_limit"]
         await broadcast_state()
         return {"ok": True}
     except Exception as e:
