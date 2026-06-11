@@ -88,6 +88,8 @@
     }
 
     let gameOverTimeout = null;
+    let roundOverTimeout = null;
+    let showingRoundOverScreen = false;
 
     function updateUI(data) {
         if (data.error) {
@@ -125,9 +127,29 @@
             }
         }
 
+        if (data.phase !== 'round_over') {
+            if (roundOverTimeout) {
+                clearTimeout(roundOverTimeout);
+                roundOverTimeout = null;
+            }
+            showingRoundOverScreen = false;
+        }
+
         if (data.phase === 'round_over') {
-            document.getElementById('state-roundover').style.display = 'flex';
-            return;
+            if (!roundOverTimeout && !showingRoundOverScreen) {
+                roundOverTimeout = setTimeout(() => {
+                    showingRoundOverScreen = true;
+                    const screens = ['state-lobby', 'state-game', 'state-dead', 'state-gameover', 'state-roundover', 'state-loading'];
+                    screens.forEach(s => document.getElementById(s).style.display = 'none');
+                    document.getElementById('state-roundover').style.display = 'flex';
+                }, 5000);
+            }
+            
+            if (showingRoundOverScreen) {
+                document.getElementById('state-roundover').style.display = 'flex';
+                return;
+            }
+            // If the 5 seconds haven't passed yet, fall through to render the actual HP/Dead state
         }
 
         if (data.phase === 'dealer_loading') {
