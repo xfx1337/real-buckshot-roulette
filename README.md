@@ -15,7 +15,9 @@ This system provides the digital backend and frontend interfaces needed to manag
 ### The Dealer (Game Master)
 The Dealer hosts the game from a tablet or PC and manages the physical components (the shotgun, the shells, the items).
 - Access the dealer interface via `/dealer`.
-- The Dealer configures the game, hands out physical items, loads the physical shotgun, and mirrors all physical actions in the digital interface.
+- The Dealer configures the game (including round lengths, item weights, and physical magazine limits), hands out physical items, loads the physical shotgun, and mirrors all physical actions in the digital interface.
+- The Dealer can **undo** any action if a mistake was made during tracking.
+- The system supports a physical magazine limit (e.g., a shotgun that only fits 4 shells). If a round requires more shells, the game will automatically pause and guide the dealer through a "Partial Reload" phase.
 - The Dealer interface contains all secret information (shell order, medicine contents, phone results).
 
 ### The Players
