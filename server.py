@@ -7,6 +7,8 @@ Dealer dashboard + Player phone view.
 import asyncio
 import json
 import os
+import copy
+import time
 from pathlib import Path
 from contextlib import asynccontextmanager
 
@@ -21,8 +23,15 @@ from game_engine import (
 
 # ── Globals ──
 game: GameState | None = None
+undo_stack: list[GameState] = []
 connected_clients: dict[str, list[WebSocket]] = {}  # "dealer" or player_id -> [ws]
 dealer_ws_list: list[WebSocket] = []
+
+def push_undo(state: GameState):
+    global undo_stack
+    undo_stack.append(state)
+    if len(undo_stack) > 50:
+        undo_stack.pop(0)
 
 
 STATIC_DIR = Path(__file__).parent / "static"
@@ -47,7 +56,9 @@ async def broadcast_state():
     if not game:
         return
     # Dealer
-    dealer_data = json.dumps(game.to_dict(for_dealer=True), ensure_ascii=False)
+    dealer_dict = game.to_dict(for_dealer=True)
+    dealer_dict["can_undo"] = len(undo_stack) > 0
+    dealer_data = json.dumps(dealer_dict, ensure_ascii=False)
     dead_ws = []
     for ws in dealer_ws_list:
         try:
@@ -101,8 +112,9 @@ async def join_page(request: Request):
 
 @app.post("/api/create_game")
 async def create_game():
-    global game
+    global game, undo_stack
     game = GameState()
+    undo_stack.clear()
     await broadcast_state()
     return {"ok": True, "game_id": game.game_id}
 
@@ -131,8 +143,10 @@ async def join_game(request: Request, name: str = Form(...)):
 async def start_game():
     if not game:
         raise HTTPException(400, "Игра не создана")
+    prev = copy.deepcopy(game)
     try:
         game.start_game()
+        push_undo(prev)
         await broadcast_state()
         return {"ok": True}
     except ValueError as e:
@@ -143,7 +157,9 @@ async def start_game():
 async def confirm_shells():
     if not game:
         raise HTTPException(400, "Игра не создана")
+    prev = copy.deepcopy(game)
     game.confirm_shells_loaded()
+    push_undo(prev)
     await broadcast_state()
     return {"ok": True}
 
@@ -152,7 +168,9 @@ async def confirm_shells():
 async def confirm_items():
     if not game:
         raise HTTPException(400, "Игра не создана")
+    prev = copy.deepcopy(game)
     game.confirm_items_dealt()
+    push_undo(prev)
     await broadcast_state()
     return {"ok": True}
 
@@ -161,8 +179,10 @@ async def confirm_items():
 async def shoot(target_id: str = Form(...)):
     if not game:
         raise HTTPException(400, "Игра не создана")
+    prev = copy.deepcopy(game)
     try:
         result = game.shoot(target_id)
+        push_undo(prev)
         await broadcast_state()
         return result
     except ValueError as e:
@@ -178,6 +198,7 @@ async def use_item(
 ):
     if not game:
         raise HTTPException(400, "Игра не создана")
+    prev = copy.deepcopy(game)
     try:
         result = {}
         if item == "beer":
@@ -207,6 +228,7 @@ async def use_item(
         else:
             raise ValueError(f"Неизвестный предмет: {item}")
 
+        push_undo(prev)
         await broadcast_state()
         return {"ok": True, **result}
     except ValueError as e:
@@ -217,7 +239,9 @@ async def use_item(
 async def adjust_hp(player_id: str = Form(...), delta: int = Form(...)):
     if not game:
         raise HTTPException(400, "Игра не создана")
+    prev = copy.deepcopy(game)
     game.dealer_adjust_hp(player_id, delta)
+    push_undo(prev)
     await broadcast_state()
     return {"ok": True}
 
@@ -226,7 +250,9 @@ async def adjust_hp(player_id: str = Form(...), delta: int = Form(...)):
 async def force_end():
     if not game:
         raise HTTPException(400, "Игра не создана")
+    prev = copy.deepcopy(game)
     game.force_end_game()
+    push_undo(prev)
     await broadcast_state()
     return {"ok": True}
 
@@ -235,7 +261,9 @@ async def force_end():
 async def api_force_round_over():
     if not game:
         raise HTTPException(400, "Игра не создана")
+    prev = copy.deepcopy(game)
     game.force_round_over()
+    push_undo(prev)
     await broadcast_state()
     return {"ok": True}
 
@@ -262,7 +290,9 @@ async def toggle_shells():
 async def next_round():
     if not game:
         raise HTTPException(400, "Игра не создана")
+    prev = copy.deepcopy(game)
     game.next_round()
+    push_undo(prev)
     await broadcast_state()
     return {"ok": True}
 
@@ -271,7 +301,22 @@ async def next_round():
 async def remove_player(player_id: str = Form(...)):
     if not game:
         raise HTTPException(400, "Игра не создана")
+    prev = copy.deepcopy(game)
     game.remove_player(player_id)
+    push_undo(prev)
+    await broadcast_state()
+    return {"ok": True}
+
+@app.post("/api/undo")
+async def undo_action():
+    global game, undo_stack
+    if not game:
+        raise HTTPException(400, "Игра не создана")
+    if not undo_stack:
+        raise HTTPException(400, "Нечего отменять")
+    game = undo_stack.pop()
+    from game_engine import GameEvent
+    game.event_log.append(GameEvent(time.time(), ">> ДЕЙСТВИЕ ОТМЕНЕНО ДИЛЕРОМ", "system"))
     await broadcast_state()
     return {"ok": True}
 
@@ -304,7 +349,9 @@ async def get_state(dealer: bool = False):
     if not game:
         return {"phase": "no_game"}
     if dealer:
-        return game.to_dict(for_dealer=True)
+        data = game.to_dict(for_dealer=True)
+        data["can_undo"] = len(undo_stack) > 0
+        return data
     return game.to_dict(for_dealer=False)
 
 
@@ -323,7 +370,9 @@ async def ws_dealer(ws: WebSocket):
     dealer_ws_list.append(ws)
     try:
         if game:
-            await ws.send_text(json.dumps(game.to_dict(for_dealer=True), ensure_ascii=False))
+            d = game.to_dict(for_dealer=True)
+            d["can_undo"] = len(undo_stack) > 0
+            await ws.send_text(json.dumps(d, ensure_ascii=False))
         while True:
             await ws.receive_text()  # Keep alive
     except WebSocketDisconnect:

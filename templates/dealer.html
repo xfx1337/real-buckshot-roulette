@@ -11,6 +11,7 @@
     <header class="dealer-header">
         <h1>DEALER</h1>
         <div class="header-controls">
+            <button class="btn btn-secondary btn-small" onclick="undoAction()" id="btn-undo" style="display:none; margin-right: 10px;">ОТКАТИТЬ</button>
             <span id="header-phase" class="phase-badge">---</span>
             <span id="header-round" class="round-badge">---</span>
             <button class="btn btn-secondary btn-small" id="btn-force-round" onclick="forceRoundOver()" style="display:none">КОНЕЦ РАУНДА</button>
@@ -154,6 +155,10 @@ function render() {
 
     const showForceRound = !['lobby', 'no_game', 'game_over', 'round_over'].includes(s.phase);
     document.getElementById('btn-force-round').style.display = showForceRound ? 'inline-flex' : 'none';
+
+    const showUndo = s.can_undo === true;
+    const btnUndo = document.getElementById('btn-undo');
+    if (btnUndo) btnUndo.style.display = showUndo ? 'inline-flex' : 'none';
 
     document.getElementById('header-phase').textContent = phaseLabel(s.phase);
     document.getElementById('header-round').textContent = `РАУНД ${s.current_round}/${s.total_rounds}`;
@@ -442,6 +447,7 @@ function nextRound() { apiPost('/api/next_round'); }
 function forceRoundOver() { if(confirm('Завершить раунд досрочно?')) apiPost('/api/force_round_over'); }
 function forceEnd() { if(confirm('Завершить игру полностью?')) apiPost('/api/force_end'); }
 function removePlayer(id) { if(confirm('Удалить игрока?')) apiPost('/api/remove_player', {player_id: id}); }
+function undoAction() { if(confirm('Откатить последнее действие?')) apiPost('/api/undo'); }
 function shoot(targetId) { apiPost('/api/shoot', {target_id: targetId}); }
 function adjustHp(id, delta) { apiPost('/api/adjust_hp', {player_id: id, delta: delta}); }
 function useItem(pid, item) { apiPost('/api/use_item', {player_id: pid, item: item}); }
