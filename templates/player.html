@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Игрок #{{ player.number }}</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body class="page-player">
+    <div id="player-app" data-player-id="{{ player.id }}">
+
+        <!-- Connecting -->
+        <div id="connecting" class="player-screen">
+            <div class="player-lobby-msg">
+                connecting<span class="cursor-blink">_</span>
+            </div>
+        </div>
+
+        <!-- Lobby -->
+        <div id="state-lobby" class="player-screen" style="display:none">
+            <div class="player-lobby-msg">
+                waiting for game<span class="cursor-blink">_</span>
+            </div>
+        </div>
+
+        <!-- In Game: just bolts + turn label -->
+        <div id="state-game" class="player-screen" style="display:none">
+            <div class="turn-label" id="turn-label">[Ходит]</div>
+            <div class="lightning-container" id="lightning-container"></div>
+        </div>
+
+        <!-- Dead -->
+        <div id="state-dead" class="dead-screen" style="display:none">
+            <div class="dead-text">ВЫБЫЛ</div>
+        </div>
+
+        <!-- Game Over -->
+        <div id="state-gameover" class="gameover-screen" style="display:none">
+            <div class="gameover-text" id="gameover-text">ИГРА ОКОНЧЕНА</div>
+            <div class="gameover-winner" id="gameover-winner"></div>
+        </div>
+    </div>
+
+    <div class="leave-btn-container">
+        <button class="btn" onclick="leaveGame()">выход</button>
+    </div>
+
+    <script>
+    const BOLT_SVG = '<svg viewBox="0 0 22 44" xmlns="http://www.w3.org/2000/svg"><path d="M13 0L4 18h6L6 44l14-26h-7L13 0z"/></svg>';
+
+    const playerId = document.getElementById('player-app').dataset.playerId;
+    let ws;
+    let reconnectTimer;
+
+    function connect() {
+        const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+        ws = new WebSocket(`${proto}://${location.host}/ws/player/${playerId}`);
+
+        ws.onopen = () => {
+            document.getElementById('connecting').style.display = 'none';
+            clearTimeout(reconnectTimer);
+        };
+
+        ws.onmessage = (e) => {
+            const data = JSON.parse(e.data);
+            updateUI(data);
+        };
+
+        ws.onclose = () => {
+            document.getElementById('connecting').style.display = 'flex';
+            reconnectTimer = setTimeout(connect, 2000);
+        };
+    }
+
+    let gameOverTimeout = null;
+
+    function updateUI(data) {
+        if (data.error) {
+            window.location.href = '/';
+            return;
+        }
+
+        const screens = ['state-lobby', 'state-game', 'state-dead', 'state-gameover'];
+        screens.forEach(s => document.getElementById(s).style.display = 'none');
+
+        if (data.phase === 'lobby') {
+            document.getElementById('state-lobby').style.display = 'flex';
+            return;
+        }
+
+        if (data.phase === 'game_over') {
+            document.getElementById('state-gameover').style.display = 'flex';
+            if (data.winner_name) {
+                document.getElementById('gameover-text').textContent = 'ПОБЕДИТЕЛЬ';
+                document.getElementById('gameover-winner').textContent = data.winner_name;
+            } else {
+                document.getElementById('gameover-text').textContent = 'ИГРА ОКОНЧЕНА';
+                document.getElementById('gameover-winner').textContent = '';
+            }
+            if (!gameOverTimeout) {
+                gameOverTimeout = setTimeout(() => {
+                    window.location.href = '/';
+                }, 8000); // 8 seconds delay before throwing them to main menu
+            }
+            return;
+        } else {
+            if (gameOverTimeout) {
+                clearTimeout(gameOverTimeout);
+                gameOverTimeout = null;
+            }
+        }
+
+        // Dead
+        if (!data.my_alive) {
+            document.getElementById('state-dead').style.display = 'flex';
+            return;
+        }
+
+        // In game — show lightning bolts
+        document.getElementById('state-game').style.display = 'flex';
+
+        // Turn label
+        const turnLabel = document.getElementById('turn-label');
+        if (data.my_handcuffed) {
+            turnLabel.textContent = '[Наручники]';
+            turnLabel.style.color = 'var(--red)';
+            turnLabel.classList.add('active');
+            // Remove blink animation so it's a solid warning
+            turnLabel.style.animation = 'none';
+        } else if (data.is_my_turn) {
+            turnLabel.textContent = '[Ходит]';
+            turnLabel.style.color = 'var(--green-bright)';
+            turnLabel.classList.add('active');
+            turnLabel.style.animation = ''; // Restore blink
+        } else {
+            turnLabel.classList.remove('active');
+        }
+
+        // Lightning bolts
+        renderBolts(data.my_hp, data.my_max_hp);
+    }
+
+    function renderBolts(hp, maxHp) {
+        const container = document.getElementById('lightning-container');
+        const isCritical = hp === 1 && maxHp > 1;
+        let html = '';
+        for (let i = 0; i < maxHp; i++) {
+            const alive = i < hp;
+            const cls = alive ? (isCritical ? 'alive critical' : 'alive') : 'dead';
+            html += `<div class="lightning-bolt ${cls}">${BOLT_SVG}</div>`;
+        }
+        container.innerHTML = html;
+    }
+
+    function leaveGame() {
+        if (confirm('Выйти из игры?')) {
+            fetch('/api/remove_player', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+                body: 'player_id=' + playerId
+            }).then(() => {
+                window.location.href = '/';
+            });
+        }
+    }
+
+    connect();
+    </script>
+</body>
+</html>

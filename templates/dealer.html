@@ -1,0 +1,454 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DEALER — Buckshot Roulette IRL</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body class="page-dealer">
+<div id="dealer-app">
+    <header class="dealer-header">
+        <h1>DEALER</h1>
+        <div class="header-controls">
+            <span id="header-phase" class="phase-badge">---</span>
+            <span id="header-round" class="round-badge">---</span>
+            <button class="btn btn-secondary btn-small" id="btn-force-round" onclick="forceRoundOver()" style="display:none">КОНЕЦ РАУНДА</button>
+            <button class="btn btn-danger btn-small" onclick="forceEnd()">ЗАВЕРШИТЬ ИГРУ</button>
+        </div>
+    </header>
+
+    <div class="dealer-layout">
+        <div class="dealer-main">
+            <!-- No Game -->
+            <div id="panel-nogame" class="panel">
+                <h2>НЕТ АКТИВНОЙ ИГРЫ</h2>
+                <button class="btn btn-dealer" onclick="createGame()">СОЗДАТЬ ИГРУ</button>
+            </div>
+
+            <!-- Lobby -->
+            <div id="panel-lobby" class="panel" style="display:none">
+                <h2>ЛОББИ</h2>
+                <div id="lobby-players" class="players-grid"></div>
+                <p class="hint" id="lobby-hint">Ожидание игроков... (мин. 2, макс. 4)</p>
+                <button class="btn btn-dealer" id="btn-start" onclick="startGame()" disabled>НАЧАТЬ ИГРУ</button>
+                <details class="config-panel">
+                    <summary>НАСТРОЙКИ ИГРЫ</summary>
+                    <div id="config-editor"></div>
+                    <button class="btn btn-secondary" onclick="saveConfig()">СОХРАНИТЬ</button>
+                </details>
+            </div>
+
+            <!-- Loading Shells -->
+            <div id="panel-loading" class="panel" style="display:none">
+                <h2>ЗАРЯДИТЕ ДРОБОВИК</h2>
+                <div class="shell-sequence" id="shell-sequence"></div>
+                <div class="shell-counts" id="shell-counts"></div>
+                <p class="hint">Зарядите патроны в указанном порядке слева направо</p>
+                <button class="btn btn-dealer" onclick="confirmShells()">ЗАРЯЖЕНО</button>
+            </div>
+
+            <!-- Distributing Items -->
+            <div id="panel-items" class="panel" style="display:none">
+                <h2>РАЗДАЙТЕ ПРЕДМЕТЫ</h2>
+                <div id="items-distribution"></div>
+                <button class="btn btn-dealer" onclick="confirmItems()">ПРЕДМЕТЫ РОЗДАНЫ</button>
+            </div>
+
+            <!-- Player Turn -->
+            <div id="panel-turn" class="panel" style="display:none">
+                <div class="current-turn-header">
+                    <h2>ХОД: <span id="turn-player-name">---</span></h2>
+                    <span class="saw-badge" id="saw-badge" style="display:none">СТВОЛ ОТПИЛЕН (x2)</span>
+                    <span class="invert-badge" id="invert-badge" style="display:none">ИНВЕРТИРОВАН</span>
+                </div>
+
+                <div class="shell-mini" id="shell-mini-info"></div>
+
+                <div class="items-section">
+                    <h3>ПРЕДМЕТЫ ИГРОКА</h3>
+                    <div id="player-items-list"></div>
+                </div>
+
+                <div class="shoot-section">
+                    <h3>ВЫСТРЕЛ</h3>
+                    <div id="shoot-targets"></div>
+                </div>
+
+                <div id="special-results" class="special-results" style="display:none">
+                    <div id="special-content"></div>
+                    <button class="btn btn-secondary" onclick="hideSpecial()">OK</button>
+                </div>
+            </div>
+
+            <!-- Round Over -->
+            <div id="panel-roundover" class="panel" style="display:none">
+                <h2>РАУНД ЗАВЕРШЕН</h2>
+                <button class="btn btn-dealer" onclick="nextRound()">СЛЕДУЮЩИЙ РАУНД</button>
+            </div>
+
+            <!-- Game Over -->
+            <div id="panel-gameover" class="panel" style="display:none">
+                <h2 id="gameover-title">ИГРА ОКОНЧЕНА</h2>
+                <p id="gameover-winner" style="color:var(--green-bright);font-size:1.1rem;font-weight:700;margin-bottom:12px"></p>
+                <button class="btn btn-dealer" onclick="createGame()">НОВАЯ ИГРА</button>
+            </div>
+        </div>
+
+        <!-- Sidebar -->
+        <div class="dealer-sidebar">
+            <div class="sidebar-section">
+                <h3>ИГРОКИ</h3>
+                <div id="sidebar-players"></div>
+            </div>
+            <div class="sidebar-section">
+                <h3>ЛОГ</h3>
+                <div id="event-log" class="event-log"></div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+let ws;
+let gameState = null;
+const ITEM_LABELS = {
+    beer: 'Пиво',
+    handsaw: 'Пила',
+    handcuffs: 'Наручники',
+    magnifying_glass: 'Лупа',
+    cigarettes: 'Сигареты',
+    adrenaline: 'Адреналин',
+    burner_phone: 'Телефон',
+    inverter: 'Инвертор',
+    expired_medicine: 'Лекарство',
+    medicine_vodka: 'Лекарство (Водка)',
+    medicine_water: 'Лекарство (Вода)',
+};
+
+const DEFAULT_WEIGHTS = {
+    beer: 10, handsaw: 6, handcuffs: 7,
+    magnifying_glass: 8, cigarettes: 8,
+    adrenaline: 4, burner_phone: 5,
+    inverter: 5, expired_medicine: 3,
+};
+
+function connect() {
+    const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+    ws = new WebSocket(`${proto}://${location.host}/ws/dealer`);
+    ws.onmessage = (e) => {
+        gameState = JSON.parse(e.data);
+        render();
+    };
+    ws.onclose = () => setTimeout(connect, 2000);
+}
+
+function render() {
+    if (!gameState) return;
+    const s = gameState;
+    const panels = ['panel-nogame','panel-lobby','panel-loading','panel-items','panel-turn','panel-roundover','panel-gameover'];
+    panels.forEach(p => document.getElementById(p).style.display = 'none');
+
+    const showForceRound = !['lobby', 'no_game', 'game_over', 'round_over'].includes(s.phase);
+    document.getElementById('btn-force-round').style.display = showForceRound ? 'inline-flex' : 'none';
+
+    document.getElementById('header-phase').textContent = phaseLabel(s.phase);
+    document.getElementById('header-round').textContent = `РАУНД ${s.current_round}/${s.total_rounds}`;
+
+    renderSidebar(s);
+    renderLog(s.log);
+
+    switch(s.phase) {
+        case 'lobby': renderLobby(s); break;
+        case 'round_start':
+        case 'dealer_loading': renderLoading(s); break;
+        case 'dealer_items': renderItems(s); break;
+        case 'player_turn': renderTurn(s); break;
+        case 'round_over': document.getElementById('panel-roundover').style.display = 'block'; break;
+        case 'game_over': renderGameOver(s); break;
+        default: document.getElementById('panel-nogame').style.display = 'block';
+    }
+}
+
+function phaseLabel(p) {
+    const m = {
+        lobby: 'ЛОББИ', round_start: 'НАЧАЛО РАУНДА',
+        dealer_loading: 'ЗАРЯДКА', dealer_items: 'ПРЕДМЕТЫ',
+        player_turn: 'ХОД', round_over: 'РАУНД ОКОНЧЕН',
+        game_over: 'КОНЕЦ',
+    };
+    return m[p] || p;
+}
+
+function weightToOdds(weight, allWeights) {
+    const total = Object.values(allWeights).reduce((a, b) => a + b, 0);
+    if (weight <= 0 || total <= 0) return 'нет';
+    const ratio = total / weight;
+    return `1 к ${Math.round(ratio)}`;
+}
+
+// ── Render ──
+
+function renderLobby(s) {
+    document.getElementById('panel-lobby').style.display = 'block';
+    const el = document.getElementById('lobby-players');
+    el.innerHTML = s.players.map(p => `
+        <div class="lobby-player-card">
+            <span class="lp-badge">#${p.number}</span>
+            <span class="lp-name">${p.name}</span>
+            <button class="btn btn-danger btn-tiny" onclick="removePlayer('${p.id}')">X</button>
+        </div>
+    `).join('') || '<p class="hint">---</p>';
+    document.getElementById('btn-start').disabled = s.players.length < 2;
+    document.getElementById('lobby-hint').textContent = `Игроков: ${s.players.length}/4`;
+    renderConfigEditor();
+}
+
+function renderConfigEditor() {
+    const el = document.getElementById('config-editor');
+    const rounds = [
+        {hp:2, items_per_player:0, max_shells:4},
+        {hp:4, items_per_player:2, max_shells:6},
+        {hp:6, items_per_player:4, max_shells:6}
+    ];
+    el.innerHTML = `
+        <div class="config-group">
+            <h4>РАУНДЫ</h4>
+            ${rounds.map((r,i) => `
+                <div class="config-round">
+                    <label>Р${i+1}:</label>
+                    HP: <input type="number" class="cfg-input" id="r${i}_hp" value="${r.hp}" min="1" max="20">
+                    Предм.: <input type="number" class="cfg-input" id="r${i}_items" value="${r.items_per_player}" min="0" max="8">
+                    Макс.патр.: <input type="number" class="cfg-input" id="r${i}_shells" value="${r.max_shells}" min="2" max="8">
+                </div>
+            `).join('')}
+            <h4>ШАНСЫ ПРЕДМЕТОВ</h4>
+            ${Object.entries(ITEM_LABELS).map(([k,v]) => {
+                const w = DEFAULT_WEIGHTS[k] || 5;
+                const odds = weightToOdds(w, DEFAULT_WEIGHTS);
+                return `
+                <div class="config-weight">
+                    <label>${v}:</label>
+                    <input type="number" class="cfg-input" id="w_${k}" value="${w}" min="0" max="50"
+                        oninput="updateOddsDisplay()">
+                    <span class="config-odds-display" id="odds_${k}">${odds}</span>
+                </div>`;
+            }).join('')}
+        </div>
+    `;
+}
+
+function updateOddsDisplay() {
+    const weights = {};
+    Object.keys(ITEM_LABELS).forEach(k => {
+        const el = document.getElementById('w_' + k);
+        if (el) weights[k] = parseInt(el.value) || 0;
+    });
+    Object.keys(ITEM_LABELS).forEach(k => {
+        const oddsEl = document.getElementById('odds_' + k);
+        if (oddsEl) oddsEl.textContent = weightToOdds(weights[k], weights);
+    });
+}
+
+function renderLoading(s) {
+    document.getElementById('panel-loading').style.display = 'block';
+    const seq = document.getElementById('shell-sequence');
+    seq.innerHTML = (s.shells_sequence || []).map((sh, i) =>
+        `<span class="shell-chip ${sh === 'live' ? 'shell-live' : 'shell-blank'}">${i+1}. ${sh === 'live' ? 'БОЕВОЙ' : 'ХОЛОСТОЙ'}</span>`
+    ).join('');
+    document.getElementById('shell-counts').innerHTML =
+        `<span class="shell-live-count">Боевых: ${s.live_count || 0}</span>` +
+        `<span class="shell-blank-count">Холостых: ${s.blank_count || 0}</span>`;
+}
+
+function renderItems(s) {
+    document.getElementById('panel-items').style.display = 'block';
+    const el = document.getElementById('items-distribution');
+    const dealt = s.dealt_items || {};
+    el.innerHTML = s.players.filter(p => p.alive).map(p => {
+        const items = dealt[p.id] || [];
+        return `
+            <div class="item-deal-card">
+                <div class="idc-header">#${p.number} ${p.name}</div>
+                <div class="idc-items">${items.length > 0 ? items.join(', ') : '---'}</div>
+            </div>
+        `;
+    }).join('');
+}
+
+function renderTurn(s) {
+    document.getElementById('panel-turn').style.display = 'block';
+    const cp = s.current_player;
+    if (!cp) return;
+    document.getElementById('turn-player-name').textContent = `#${cp.number} ${cp.name}`;
+
+    document.getElementById('saw-badge').style.display = s.saw_active ? 'inline-block' : 'none';
+    document.getElementById('invert-badge').style.display = s.inverted ? 'inline-block' : 'none';
+
+    const seq = s.shells_sequence.map(x => x === 'live' ? '<span style="color:var(--red)">Боевой</span>' : '<span style="color:var(--green-muted)">Холостой</span>').join(' - ');
+    document.getElementById('shell-mini-info').innerHTML =
+        `Патронов: ${s.shells_remaining} | Боевых: ${s.live_count} | Холостых: ${s.blank_count}<br><br><span style="opacity:0.6;font-size:0.9em">Порядок (слева направо):</span><br>${seq}`;
+
+    if (s.last_magnify_result || s.last_burner_result || s.last_medicine_result) {
+        const parts = [];
+        if (s.last_magnify_result) parts.push(`ЛУПА: ${s.last_magnify_result}`);
+        if (s.last_burner_result) parts.push(`ТЕЛЕФОН: ${s.last_burner_result}`);
+        if (s.last_medicine_result) parts.push(`ЛЕКАРСТВО: ${s.last_medicine_result}`);
+        document.getElementById('special-content').innerHTML = parts.join('<br>');
+        document.getElementById('special-results').style.display = 'block';
+    }
+
+    const currentPlayer = s.players.find(p => p.id === cp.id);
+    const itemsEl = document.getElementById('player-items-list');
+    if (currentPlayer && currentPlayer.items.length > 0) {
+        itemsEl.innerHTML = currentPlayer.items.map((item, idx) => {
+            const label = ITEM_LABELS[item] || item;
+            const needsTarget = ['handcuffs', 'adrenaline'].includes(item);
+            if (needsTarget) {
+                const targets = s.players.filter(p => p.alive && p.id !== cp.id);
+                if (item === 'adrenaline') {
+                    return `<div class="item-btn-row">
+                        <span class="item-label">${label}</span>
+                        <select id="adr_target_${idx}" class="item-select"
+                            onchange="updateAdrItems(${idx}, this.value)">
+                            ${targets.map(t => `<option value="${t.id}">#${t.number} ${t.name}</option>`).join('')}
+                        </select>
+                        <select id="adr_item_${idx}" class="item-select">
+                            ${targets.length > 0 ? getTargetItems(targets[0].id, s) : ''}
+                        </select>
+                        <button class="btn btn-item" onclick="useAdrenaline('${cp.id}', document.getElementById('adr_target_${idx}').value, document.getElementById('adr_item_${idx}').value)">USE</button>
+                    </div>`;
+                }
+                return `<div class="item-btn-row">
+                    <span class="item-label">${label}</span>
+                    <select id="cuff_target_${idx}" class="item-select">
+                        ${targets.map(t => `<option value="${t.id}">#${t.number} ${t.name}</option>`).join('')}
+                    </select>
+                    <button class="btn btn-item" onclick="useItemTarget('${cp.id}','${item}',document.getElementById('cuff_target_${idx}').value)">USE</button>
+                </div>`;
+            }
+            return `<div class="item-btn-row">
+                <button class="btn btn-item" onclick="useItem('${cp.id}','${item}')">${label}</button>
+            </div>`;
+        }).join('');
+    } else {
+        itemsEl.innerHTML = '<p class="hint">---</p>';
+    }
+
+    const shootEl = document.getElementById('shoot-targets');
+    const shootTargets = s.players.filter(p => p.alive);
+    shootEl.innerHTML = shootTargets.map(p => {
+        const isSelf = p.id === cp.id;
+        return `<button class="btn ${isSelf ? 'btn-self-shot' : 'btn-shoot'}" onclick="shoot('${p.id}')">
+            ${isSelf ? 'В СЕБЯ' : `>> #${p.number} ${p.name}`}
+        </button>`;
+    }).join('');
+}
+
+function getTargetItems(targetId, s) {
+    const t = s.players.find(p => p.id === targetId);
+    if (!t) return '';
+    return t.items.map(i => `<option value="${i}">${ITEM_LABELS[i] || i}</option>`).join('');
+}
+
+function updateAdrItems(idx, targetId) {
+    if (!gameState) return;
+    const sel = document.getElementById('adr_item_' + idx);
+    if (sel) sel.innerHTML = getTargetItems(targetId, gameState);
+}
+
+function renderGameOver(s) {
+    document.getElementById('panel-gameover').style.display = 'block';
+    if (s.winner_name) {
+        document.getElementById('gameover-title').textContent = 'ПОБЕДИТЕЛЬ';
+        document.getElementById('gameover-winner').textContent = s.winner_name;
+    } else {
+        document.getElementById('gameover-title').textContent = 'ИГРА ЗАВЕРШЕНА';
+        document.getElementById('gameover-winner').textContent = '';
+    }
+}
+
+function renderSidebar(s) {
+    const el = document.getElementById('sidebar-players');
+    el.innerHTML = s.players.map(p => `
+        <div class="sidebar-player ${!p.alive ? 'sp-dead' : ''}">
+            <div class="sp-top">
+                <span class="sp-badge">#${p.number}</span>
+                <span class="sp-name">${p.name}</span>
+                <span class="sp-hp">${p.alive ? `${p.hp}/${p.max_hp}` : 'X'}</span>
+            </div>
+            ${p.alive ? `
+            <div class="sp-controls">
+                <button class="btn btn-tiny btn-hp-minus" onclick="adjustHp('${p.id}',-1)">-1</button>
+                <button class="btn btn-tiny btn-hp-plus" onclick="adjustHp('${p.id}',1)">+1</button>
+            </div>` : ''}
+            ${p.skip_next_turn ? '<span class="sp-cuff">НАРУЧНИКИ</span>' : ''}
+        </div>
+    `).join('');
+}
+
+function renderLog(log) {
+    const el = document.getElementById('event-log');
+    el.innerHTML = (log || []).slice().reverse().map(e => {
+        const cls = 'log-' + e.type;
+        return `<div class="log-entry ${cls}">${e.message}</div>`;
+    }).join('');
+}
+
+// ── API ──
+
+async function apiPost(url, body = {}) {
+    const form = new URLSearchParams(body);
+    const res = await fetch(url, { method: 'POST', body: form });
+    if (!res.ok) {
+        const err = await res.json().catch(() => ({detail: 'error'}));
+        alert(err.detail || 'error');
+    }
+    return res;
+}
+
+function createGame() { apiPost('/api/create_game'); }
+function startGame() { apiPost('/api/start_game'); }
+function confirmShells() { apiPost('/api/confirm_shells'); }
+function confirmItems() { apiPost('/api/confirm_items'); }
+function nextRound() { apiPost('/api/next_round'); }
+function forceRoundOver() { if(confirm('Завершить раунд досрочно?')) apiPost('/api/force_round_over'); }
+function forceEnd() { if(confirm('Завершить игру полностью?')) apiPost('/api/force_end'); }
+function removePlayer(id) { if(confirm('Удалить игрока?')) apiPost('/api/remove_player', {player_id: id}); }
+function shoot(targetId) { apiPost('/api/shoot', {target_id: targetId}); }
+function adjustHp(id, delta) { apiPost('/api/adjust_hp', {player_id: id, delta: delta}); }
+function useItem(pid, item) { apiPost('/api/use_item', {player_id: pid, item: item}); }
+function useItemTarget(pid, item, tid) { apiPost('/api/use_item', {player_id: pid, item: item, target_id: tid}); }
+function useAdrenaline(pid, tid, stolen) { apiPost('/api/use_item', {player_id: pid, item: 'adrenaline', target_id: tid, stolen_item: stolen}); }
+function hideSpecial() { 
+    document.getElementById('special-results').style.display = 'none'; 
+    apiPost('/api/clear_special');
+}
+
+function saveConfig() {
+    const rounds = [];
+    for (let i = 0; i < 3; i++) {
+        const hp = document.getElementById(`r${i}_hp`);
+        const items = document.getElementById(`r${i}_items`);
+        const shells = document.getElementById(`r${i}_shells`);
+        if (hp && items && shells) {
+            rounds.push({
+                hp: parseInt(hp.value),
+                items_per_player: parseInt(items.value),
+                max_shells: parseInt(shells.value)
+            });
+        }
+    }
+    const item_weights = {};
+    Object.keys(ITEM_LABELS).forEach(k => {
+        const el = document.getElementById('w_' + k);
+        if (el) item_weights[k] = parseInt(el.value);
+    });
+    const config = JSON.stringify({rounds, item_weights});
+    apiPost('/api/update_config', {config_json: config});
+}
+
+connect();
+</script>
+</body>
+</html>

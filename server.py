@@ -1,0 +1,349 @@
+"""
+Buckshot Roulette IRL — Web Server
+FastAPI server with WebSocket for real-time updates.
+Dealer dashboard + Player phone view.
+"""
+
+import asyncio
+import json
+import os
+from pathlib import Path
+from contextlib import asynccontextmanager
+
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request, Form, HTTPException
+from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
+from fastapi.templating import Jinja2Templates
+
+from game_engine import (
+    GameState, GamePhase, GameConfig, ItemType, ITEM_LABELS, ShellType
+)
+
+# ── Globals ──
+game: GameState | None = None
+connected_clients: dict[str, list[WebSocket]] = {}  # "dealer" or player_id -> [ws]
+dealer_ws_list: list[WebSocket] = []
+
+
+STATIC_DIR = Path(__file__).parent / "static"
+TEMPLATE_DIR = Path(__file__).parent / "templates"
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    os.makedirs(STATIC_DIR, exist_ok=True)
+    os.makedirs(TEMPLATE_DIR, exist_ok=True)
+    yield
+
+app = FastAPI(title="Buckshot Roulette IRL", lifespan=lifespan)
+app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+templates = Jinja2Templates(directory=str(TEMPLATE_DIR))
+
+
+# ── Broadcast ──
+
+async def broadcast_state():
+    """Send updated game state to all connected clients."""
+    if not game:
+        return
+    # Dealer
+    dealer_data = json.dumps(game.to_dict(for_dealer=True), ensure_ascii=False)
+    dead_ws = []
+    for ws in dealer_ws_list:
+        try:
+            await ws.send_text(dealer_data)
+        except Exception:
+            dead_ws.append(ws)
+    for ws in dead_ws:
+        dealer_ws_list.remove(ws)
+
+    # Players
+    for pid, ws_list in list(connected_clients.items()):
+        if pid == "dealer":
+            continue
+        player_data = json.dumps(game.player_view(pid), ensure_ascii=False)
+        dead = []
+        for ws in ws_list:
+            try:
+                await ws.send_text(player_data)
+            except Exception:
+                dead.append(ws)
+        for ws in dead:
+            ws_list.remove(ws)
+
+
+# ── Pages ──
+
+@app.get("/", response_class=HTMLResponse)
+async def index(request: Request):
+    return templates.TemplateResponse("index.html", {"request": request})
+
+
+@app.get("/dealer", response_class=HTMLResponse)
+async def dealer_page(request: Request):
+    return templates.TemplateResponse("dealer.html", {"request": request, "game": game})
+
+
+@app.get("/player/{player_id}", response_class=HTMLResponse)
+async def player_page(request: Request, player_id: str):
+    if not game or player_id not in game.players:
+        return templates.TemplateResponse("join.html", {"request": request, "error": "Игра не найдена или вы не зарегистрированы"})
+    p = game.players[player_id]
+    return templates.TemplateResponse("player.html", {"request": request, "player": p})
+
+
+@app.get("/join", response_class=HTMLResponse)
+async def join_page(request: Request):
+    return templates.TemplateResponse("join.html", {"request": request, "error": None})
+
+
+# ── API: Game Management ──
+
+@app.post("/api/create_game")
+async def create_game():
+    global game
+    game = GameState()
+    await broadcast_state()
+    return {"ok": True, "game_id": game.game_id}
+
+
+@app.post("/api/join")
+async def join_game(request: Request, name: str = Form(...)):
+    global game
+    if not game:
+        # Instead of 400 error, return to join page with error
+        return templates.TemplateResponse("join.html", {
+            "request": request,
+            "error": "Игра не создана. Подождите, пока дилер создаст игру.",
+        })
+    try:
+        player = game.add_player(name)
+        await broadcast_state()
+        return RedirectResponse(f"/player/{player.id}", status_code=303)
+    except ValueError as e:
+        return templates.TemplateResponse("join.html", {
+            "request": request,
+            "error": str(e),
+        })
+
+
+@app.post("/api/start_game")
+async def start_game():
+    if not game:
+        raise HTTPException(400, "Игра не создана")
+    try:
+        game.start_game()
+        await broadcast_state()
+        return {"ok": True}
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.post("/api/confirm_shells")
+async def confirm_shells():
+    if not game:
+        raise HTTPException(400, "Игра не создана")
+    game.confirm_shells_loaded()
+    await broadcast_state()
+    return {"ok": True}
+
+
+@app.post("/api/confirm_items")
+async def confirm_items():
+    if not game:
+        raise HTTPException(400, "Игра не создана")
+    game.confirm_items_dealt()
+    await broadcast_state()
+    return {"ok": True}
+
+
+@app.post("/api/shoot")
+async def shoot(target_id: str = Form(...)):
+    if not game:
+        raise HTTPException(400, "Игра не создана")
+    try:
+        result = game.shoot(target_id)
+        await broadcast_state()
+        return result
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.post("/api/use_item")
+async def use_item(
+    player_id: str = Form(...),
+    item: str = Form(...),
+    target_id: str = Form(None),
+    stolen_item: str = Form(None),
+):
+    if not game:
+        raise HTTPException(400, "Игра не создана")
+    try:
+        result = {}
+        if item == "beer":
+            result = game.use_item_beer(player_id)
+        elif item == "handsaw":
+            game.use_item_handsaw(player_id)
+        elif item == "handcuffs":
+            if not target_id:
+                raise ValueError("Нужно выбрать цель для наручников")
+            game.use_item_handcuffs(player_id, target_id)
+        elif item == "magnifying_glass":
+            result = game.use_item_magnifying_glass(player_id)
+        elif item == "cigarettes":
+            game.use_item_cigarettes(player_id)
+        elif item == "adrenaline":
+            if not target_id or not stolen_item:
+                raise ValueError("Нужно выбрать цель и предмет для адреналина")
+            result = game.use_item_adrenaline(player_id, target_id, stolen_item)
+        elif item == "burner_phone":
+            result = game.use_item_burner_phone(player_id)
+        elif item == "inverter":
+            game.use_item_inverter(player_id)
+        elif item == "medicine_vodka":
+            result = game.use_item_expired_medicine(player_id, True)
+        elif item == "medicine_water":
+            result = game.use_item_expired_medicine(player_id, False)
+        else:
+            raise ValueError(f"Неизвестный предмет: {item}")
+
+        await broadcast_state()
+        return {"ok": True, **result}
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.post("/api/adjust_hp")
+async def adjust_hp(player_id: str = Form(...), delta: int = Form(...)):
+    if not game:
+        raise HTTPException(400, "Игра не создана")
+    game.dealer_adjust_hp(player_id, delta)
+    await broadcast_state()
+    return {"ok": True}
+
+
+@app.post("/api/force_end")
+async def force_end():
+    if not game:
+        raise HTTPException(400, "Игра не создана")
+    game.force_end_game()
+    await broadcast_state()
+    return {"ok": True}
+
+
+@app.post("/api/force_round_over")
+async def api_force_round_over():
+    if not game:
+        raise HTTPException(400, "Игра не создана")
+    game.force_round_over()
+    await broadcast_state()
+    return {"ok": True}
+
+
+@app.post("/api/clear_special")
+async def clear_special():
+    if game:
+        game.last_magnify_result = None
+        game.last_burner_result = None
+        game.last_medicine_result = None
+    return {"ok": True}
+
+
+@app.post("/api/next_round")
+async def next_round():
+    if not game:
+        raise HTTPException(400, "Игра не создана")
+    game.next_round()
+    await broadcast_state()
+    return {"ok": True}
+
+
+@app.post("/api/remove_player")
+async def remove_player(player_id: str = Form(...)):
+    if not game:
+        raise HTTPException(400, "Игра не создана")
+    game.remove_player(player_id)
+    await broadcast_state()
+    return {"ok": True}
+
+
+@app.post("/api/update_config")
+async def update_config(config_json: str = Form(...)):
+    """Update game config from dealer menu (only in lobby)."""
+    if not game:
+        raise HTTPException(400, "Игра не создана")
+    if game.phase != GamePhase.LOBBY:
+        raise HTTPException(400, "Конфигурацию можно менять только в лобби")
+    try:
+        data = json.loads(config_json)
+        if "rounds" in data:
+            game.config.rounds = data["rounds"]
+        if "item_weights" in data:
+            game.config.item_weights = {ItemType(k): v for k, v in data["item_weights"].items()}
+        if "max_items_per_player" in data:
+            game.config.max_items_per_player = data["max_items_per_player"]
+        await broadcast_state()
+        return {"ok": True}
+    except Exception as e:
+        raise HTTPException(400, str(e))
+
+
+@app.get("/api/state")
+async def get_state(dealer: bool = False):
+    if not game:
+        return {"phase": "no_game"}
+    if dealer:
+        return game.to_dict(for_dealer=True)
+    return game.to_dict(for_dealer=False)
+
+
+@app.get("/api/player_state/{player_id}")
+async def get_player_state(player_id: str):
+    if not game:
+        return {"phase": "no_game"}
+    return game.player_view(player_id)
+
+
+# ── WebSockets ──
+
+@app.websocket("/ws/dealer")
+async def ws_dealer(ws: WebSocket):
+    await ws.accept()
+    dealer_ws_list.append(ws)
+    try:
+        if game:
+            await ws.send_text(json.dumps(game.to_dict(for_dealer=True), ensure_ascii=False))
+        while True:
+            await ws.receive_text()  # Keep alive
+    except WebSocketDisconnect:
+        pass
+    finally:
+        if ws in dealer_ws_list:
+            dealer_ws_list.remove(ws)
+
+
+@app.websocket("/ws/player/{player_id}")
+async def ws_player(ws: WebSocket, player_id: str):
+    await ws.accept()
+    if player_id not in connected_clients:
+        connected_clients[player_id] = []
+    connected_clients[player_id].append(ws)
+    if game and player_id in game.players:
+        game.players[player_id].connected = True
+    try:
+        if game:
+            await ws.send_text(json.dumps(game.player_view(player_id), ensure_ascii=False))
+        while True:
+            await ws.receive_text()
+    except WebSocketDisconnect:
+        pass
+    finally:
+        if player_id in connected_clients and ws in connected_clients[player_id]:
+            connected_clients[player_id].remove(ws)
+
+
+# ── Run ──
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run("server:app", host="0.0.0.0", port=8000, reload=True)
