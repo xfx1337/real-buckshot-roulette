@@ -44,7 +44,7 @@
                 <h2>ЗАРЯДИТЕ ДРОБОВИК</h2>
                 <div class="shell-sequence" id="shell-sequence"></div>
                 <div class="shell-counts" id="shell-counts"></div>
-                <p class="hint">Зарядите патроны в указанном порядке слева направо</p>
+                <p class="hint" style="color: var(--red); font-weight: bold; margin-bottom: 20px;">ВНИМАНИЕ: Заряжайте патроны в магазин строго в таком порядке (LIFO) 👇</p>
                 <div class="loading-actions">
                     <button class="btn btn-dealer" onclick="confirmShells()">ЗАРЯЖЕНО</button>
                     <button class="btn btn-toggle-shells" id="btn-toggle-shells" onclick="toggleShells()"></button>
@@ -262,9 +262,17 @@ function updateOddsDisplay() {
 function renderLoading(s) {
     document.getElementById('panel-loading').style.display = 'block';
     const seq = document.getElementById('shell-sequence');
-    seq.innerHTML = (s.shells_sequence || []).map((sh, i) =>
-        `<span class="shell-chip ${sh === 'live' ? 'shell-live' : 'shell-blank'}">${i+1}. ${sh === 'live' ? 'БОЕВОЙ' : 'ХОЛОСТОЙ'}</span>`
+    
+    // В реальности помповый дробовик заряжается снизу (в трубку магазина).
+    // Первым выстрелит тот патрон, который засунули ПОСЛЕДНИМ.
+    // Значит, чтобы соблюсти серверную очередь (где [0] - первый выстрел),
+    // в реальности [0] нужно совать в магазин самым последним.
+    const reversed = [...(s.shells_sequence || [])].reverse();
+    
+    seq.innerHTML = reversed.map((sh, i) =>
+        `<span class="shell-chip ${sh === 'live' ? 'shell-live' : 'shell-blank'}">${i+1}-й В МАГАЗИН<br>${sh === 'live' ? 'БОЕВОЙ' : 'ХОЛОСТОЙ'}</span>`
     ).join('');
+    
     document.getElementById('shell-counts').innerHTML =
         `<span class="shell-live-count">Боевых: ${s.live_count || 0}</span>` +
         `<span class="shell-blank-count">Холостых: ${s.blank_count || 0}</span>`;
@@ -304,9 +312,9 @@ function renderTurn(s) {
     document.getElementById('saw-badge').style.display = s.saw_active ? 'inline-block' : 'none';
     document.getElementById('invert-badge').style.display = s.inverted ? 'inline-block' : 'none';
 
-    const seq = s.shells_sequence.map(x => x === 'live' ? '<span style="color:var(--red)">Боевой</span>' : '<span style="color:var(--green-muted)">Холостой</span>').join(' - ');
+    const seq = s.shells_sequence.map((x, i) => `<span style="color:${x === 'live' ? 'var(--red)' : 'var(--green-muted)'}">${i+1}-й: ${x === 'live' ? 'Боевой' : 'Холостой'}</span>`).join('<br>');
     document.getElementById('shell-mini-info').innerHTML =
-        `Патронов: ${s.shells_remaining} | Боевых: ${s.live_count} | Холостых: ${s.blank_count}<br><br><span style="opacity:0.6;font-size:0.9em">Порядок (слева направо):</span><br>${seq}`;
+        `Патронов: ${s.shells_remaining} | Боевых: ${s.live_count} | Холостых: ${s.blank_count}<br><br><span style="opacity:0.6;font-size:0.9em">Порядок ВЫСТРЕЛОВ:</span><br>${seq}`;
 
     if (s.last_magnify_result || s.last_burner_result || s.last_medicine_result) {
         const parts = [];
