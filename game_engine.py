@@ -129,6 +129,8 @@ class GameState:
         self.last_magnify_result: Optional[str] = None
         # Track if we have performed the hardcoded 1st round initialization
         self.first_round_generated: bool = False
+        # Whether to show shell counts to players during dealer_loading phase
+        self.show_shells_to_players: bool = True
 
     def _log(self, msg: str, event_type: str = "info"):
         self.event_log.append(GameEvent(time.time(), msg, event_type))
@@ -600,6 +602,7 @@ class GameState:
             blank_c = sum(1 for s in self.shells if s == ShellType.BLANK)
             data["live_count"] = live_c
             data["blank_count"] = blank_c
+            data["show_shells_to_players"] = self.show_shells_to_players
 
         # Recent log (last 20 events)
         data["log"] = [
@@ -617,9 +620,14 @@ class GameState:
         current = self.get_current_player()
         is_my_turn = current and current.id == player_id
 
+        # When shells are hidden, show HP screen instead of shell counts during loading
+        effective_phase = self.phase.value
+        if not self.show_shells_to_players and self.phase == GamePhase.DEALER_LOADING:
+            effective_phase = "player_turn"
+
         return {
             "game_id": self.game_id,
-            "phase": self.phase.value,
+            "phase": effective_phase,
             "my_number": p.number,
             "my_name": p.name,
             "my_hp": p.hp,
@@ -630,6 +638,8 @@ class GameState:
             "current_round": self.current_round + 1,
             "total_rounds": len(self.config.rounds),
             "shells_remaining": len(self.shells),
+            "live_count": sum(1 for s in self.shells if s == ShellType.LIVE),
+            "blank_count": sum(1 for s in self.shells if s == ShellType.BLANK),
             "saw_active": self.saw_active,
             "current_player_name": current.name if current else None,
             "current_player_number": current.number if current else None,

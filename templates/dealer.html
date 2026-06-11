@@ -45,7 +45,10 @@
                 <div class="shell-sequence" id="shell-sequence"></div>
                 <div class="shell-counts" id="shell-counts"></div>
                 <p class="hint">Зарядите патроны в указанном порядке слева направо</p>
-                <button class="btn btn-dealer" onclick="confirmShells()">ЗАРЯЖЕНО</button>
+                <div class="loading-actions">
+                    <button class="btn btn-dealer" onclick="confirmShells()">ЗАРЯЖЕНО</button>
+                    <button class="btn btn-toggle-shells" id="btn-toggle-shells" onclick="toggleShells()"></button>
+                </div>
             </div>
 
             <!-- Distributing Items -->
@@ -201,11 +204,12 @@ function renderLobby(s) {
     `).join('') || '<p class="hint">---</p>';
     document.getElementById('btn-start').disabled = s.players.length < 2;
     document.getElementById('lobby-hint').textContent = `Игроков: ${s.players.length}/4`;
-    renderConfigEditor();
+    renderConfigEditor(s);
 }
 
-function renderConfigEditor() {
+function renderConfigEditor(s) {
     const el = document.getElementById('config-editor');
+    const isChecked = s && s.show_shells_to_players !== false ? 'checked' : '';
     const rounds = [
         {hp:2, items_per_player:0, max_shells:4},
         {hp:4, items_per_player:2, max_shells:6},
@@ -213,6 +217,11 @@ function renderConfigEditor() {
     ];
     el.innerHTML = `
         <div class="config-group">
+            <h4>ОБЩИЕ</h4>
+            <div class="config-round" style="margin-bottom: 12px;">
+                <label style="width:auto; margin-right: 8px;">Показывать патроны игрокам при зарядке:</label>
+                <input type="checkbox" id="cfg_show_shells" ${isChecked} style="transform: scale(1.2);">
+            </div>
             <h4>РАУНДЫ</h4>
             ${rounds.map((r,i) => `
                 <div class="config-round">
@@ -259,6 +268,16 @@ function renderLoading(s) {
     document.getElementById('shell-counts').innerHTML =
         `<span class="shell-live-count">Боевых: ${s.live_count || 0}</span>` +
         `<span class="shell-blank-count">Холостых: ${s.blank_count || 0}</span>`;
+    updateToggleShellsBtn(s);
+}
+
+function updateToggleShellsBtn(s) {
+    const btn = document.getElementById('btn-toggle-shells');
+    if (!btn) return;
+    const showing = s.show_shells_to_players !== false;
+    btn.textContent = showing ? '🔓 ПАТРОНЫ ВИДНЫ' : '🔒 ПАТРОНЫ СКРЫТЫ';
+    btn.classList.toggle('shells-hidden', !showing);
+    btn.classList.toggle('shells-visible', showing);
 }
 
 function renderItems(s) {
@@ -419,6 +438,7 @@ function shoot(targetId) { apiPost('/api/shoot', {target_id: targetId}); }
 function adjustHp(id, delta) { apiPost('/api/adjust_hp', {player_id: id, delta: delta}); }
 function useItem(pid, item) { apiPost('/api/use_item', {player_id: pid, item: item}); }
 function useItemTarget(pid, item, tid) { apiPost('/api/use_item', {player_id: pid, item: item, target_id: tid}); }
+function toggleShells() { apiPost('/api/toggle_shells'); }
 function useAdrenaline(pid, tid, stolen) { apiPost('/api/use_item', {player_id: pid, item: 'adrenaline', target_id: tid, stolen_item: stolen}); }
 function hideSpecial() { 
     document.getElementById('special-results').style.display = 'none'; 
@@ -444,7 +464,11 @@ function saveConfig() {
         const el = document.getElementById('w_' + k);
         if (el) item_weights[k] = parseInt(el.value);
     });
-    const config = JSON.stringify({rounds, item_weights});
+    
+    const show_shells_checkbox = document.getElementById('cfg_show_shells');
+    const show_shells_to_players = show_shells_checkbox ? show_shells_checkbox.checked : true;
+
+    const config = JSON.stringify({rounds, item_weights, show_shells_to_players});
     apiPost('/api/update_config', {config_json: config});
 }
 

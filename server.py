@@ -249,6 +249,15 @@ async def clear_special():
     return {"ok": True}
 
 
+@app.post("/api/toggle_shells")
+async def toggle_shells():
+    if not game:
+        raise HTTPException(400, "Игра не создана")
+    game.show_shells_to_players = not game.show_shells_to_players
+    await broadcast_state()
+    return {"ok": True, "show_shells": game.show_shells_to_players}
+
+
 @app.post("/api/next_round")
 async def next_round():
     if not game:
@@ -282,6 +291,8 @@ async def update_config(config_json: str = Form(...)):
             game.config.item_weights = {ItemType(k): v for k, v in data["item_weights"].items()}
         if "max_items_per_player" in data:
             game.config.max_items_per_player = data["max_items_per_player"]
+        if "show_shells_to_players" in data:
+            game.show_shells_to_players = data["show_shells_to_players"]
         await broadcast_state()
         return {"ok": True}
     except Exception as e:

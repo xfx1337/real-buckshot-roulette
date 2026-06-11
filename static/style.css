@@ -307,7 +307,7 @@ body {
     top: 5vh;
     right: 5vw;
     font-family: var(--font);
-    font-size: 1.5rem;
+    font-size: 2.5rem;
     font-weight: 600;
     color: var(--green-bright);
     letter-spacing: 2px;
@@ -369,7 +369,7 @@ body {
 /* Player waiting in lobby */
 .player-lobby-msg {
     font-family: var(--font);
-    font-size: 0.85rem;
+    font-size: 1.5rem;
     color: var(--text-dim);
     text-align: center;
     letter-spacing: 1px;
@@ -391,7 +391,7 @@ body {
 
 .dead-text {
     font-family: var(--font);
-    font-size: 1.2rem;
+    font-size: 3.5rem;
     font-weight: 700;
     color: var(--red-bright);
     letter-spacing: 4px;
@@ -416,7 +416,7 @@ body {
 
 .gameover-text {
     font-family: var(--font);
-    font-size: 1rem;
+    font-size: 2.5rem;
     color: var(--text);
     letter-spacing: 2px;
     text-align: center;
@@ -424,7 +424,7 @@ body {
 
 .gameover-winner {
     font-family: var(--font);
-    font-size: 1.4rem;
+    font-size: 3.5rem;
     font-weight: 700;
     color: var(--green-bright);
     letter-spacing: 3px;
@@ -439,8 +439,8 @@ body {
 }
 
 .leave-btn-container .btn {
-    font-size: 0.65rem;
-    padding: 4px 10px;
+    font-size: 0.9rem;
+    padding: 8px 14px;
     opacity: 0.3;
     border-color: var(--text-dark);
     color: var(--text-dark);
@@ -613,6 +613,43 @@ body {
 
 .shell-live-count { color: var(--red-bright); }
 .shell-blank-count { color: var(--text-dim); }
+
+/* Loading actions (confirm + toggle) */
+.loading-actions {
+    display: flex;
+    gap: 10px;
+    margin-top: 12px;
+    align-items: center;
+    flex-wrap: wrap;
+}
+
+.btn-toggle-shells {
+    border-color: var(--green);
+    color: var(--green-bright);
+    font-size: 0.78rem;
+    padding: 8px 16px;
+    transition: background 0.2s, border-color 0.2s, color 0.2s;
+}
+
+.btn-toggle-shells.shells-visible {
+    border-color: var(--green);
+    color: var(--green-bright);
+}
+
+.btn-toggle-shells.shells-visible:hover {
+    background: var(--green-dim);
+}
+
+.btn-toggle-shells.shells-hidden {
+    border-color: var(--red);
+    color: var(--red-bright);
+    animation: blink 2s step-end infinite;
+}
+
+.btn-toggle-shells.shells-hidden:hover {
+    background: var(--red-dim);
+    animation: none;
+}
 
 /* Items Distribution */
 .item-deal-card {
@@ -849,6 +886,28 @@ body {
     font-size: 0.75rem;
     min-width: 60px;
 }
+
+.loading-title {
+    font-family: var(--font);
+    font-size: 3rem;
+    font-weight: 700;
+    color: var(--amber-bright);
+    letter-spacing: 4px;
+    margin-bottom: 24px;
+    animation: blink 2s step-end infinite;
+    text-transform: uppercase;
+}
+
+.shell-counts-display {
+    display: flex;
+    gap: 16px;
+    font-family: var(--font);
+    font-size: 1.8rem;
+    font-weight: 800;
+}
+
+.sc-live { color: var(--red-bright); }
+.sc-blank { color: var(--text-dim); }
 
 /* ═══ Animations ═══ */
 
