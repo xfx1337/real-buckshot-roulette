@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Игрок #{{ player.number }}</title>
+    <title>Player #{{ player.number }}</title>
     <link rel="stylesheet" href="/static/style.css">
 </head>
 <body class="page-player">
@@ -25,26 +25,30 @@
 
         <!-- In Game: just bolts + turn label -->
         <div id="state-game" class="player-screen" style="display:none">
-            <div class="turn-label" id="turn-label">[Ходит]</div>
+            <div class="turn-label" id="turn-label">[Your Turn]</div>
             <div class="lightning-container" id="lightning-container"></div>
         </div>
 
         <!-- Dead -->
         <div id="state-dead" class="dead-screen" style="display:none">
-            <div class="dead-text">ВЫБЫЛ</div>
+            <div class="dead-text">dead</div>
         </div>
 
         <!-- Game Over -->
         <div id="state-gameover" class="gameover-screen" style="display:none">
-            <div class="gameover-text" id="gameover-text">ИГРА ОКОНЧЕНА</div>
+            <div class="gameover-text" id="gameover-text">game over</div>
             <div class="gameover-winner" id="gameover-winner"></div>
         </div>
 
         <!-- Round Over -->
         <div id="state-roundover" class="gameover-screen" style="display:none">
-            <div class="gameover-text">СМЕНА РАУНДА</div>
-            <div class="player-lobby-msg" style="margin-top: 10px;">
-                ожидание дилера<span class="cursor-blink">_</span>
+            <div class="round-transition-container">
+                <div class="round-indicators" id="round-indicators">
+                    <!-- injected by JS -->
+                </div>
+                <div class="player-lobby-msg" id="roundover-msg" style="margin-top: 30px; opacity: 0; transition: opacity 0.5s;">
+                    waiting for dealer<span class="cursor-blink">_</span>
+                </div>
             </div>
         </div>
 
@@ -57,7 +61,7 @@
     </div>
 
     <div class="leave-btn-container">
-        <button class="btn" onclick="leaveGame()">выход</button>
+        <button class="btn" onclick="leaveGame()">exit</button>
     </div>
 
     <script>
@@ -108,10 +112,10 @@
         if (data.phase === 'game_over') {
             document.getElementById('state-gameover').style.display = 'flex';
             if (data.winner_name) {
-                document.getElementById('gameover-text').textContent = 'ПОБЕДИТЕЛЬ';
+                document.getElementById('gameover-text').textContent = 'winner';
                 document.getElementById('gameover-winner').textContent = data.winner_name;
             } else {
-                document.getElementById('gameover-text').textContent = 'ИГРА ОКОНЧЕНА';
+                document.getElementById('gameover-text').textContent = 'game over';
                 document.getElementById('gameover-winner').textContent = '';
             }
             if (!gameOverTimeout) {
@@ -142,6 +146,37 @@
                     const screens = ['state-lobby', 'state-game', 'state-dead', 'state-gameover', 'state-roundover', 'state-loading'];
                     screens.forEach(s => document.getElementById(s).style.display = 'none');
                     document.getElementById('state-roundover').style.display = 'flex';
+                    
+                    const container = document.getElementById('round-indicators');
+                    const msg = document.getElementById('roundover-msg');
+                    const ROMAN = ["I", "II", "III", "IV", "V", "VI", "VII"];
+                    let html = '';
+                    for (let i = 1; i <= data.total_rounds; i++) {
+                        let icon = i === data.total_rounds ? '<svg class="skull-icon-svg" viewBox="0 0 24 24"><path d="M12 2C8.13 2 5 5.13 5 9c0 2.38 1.19 4.47 3 5.74V17c0 .55.45 1 1 1h6c.55 0 1-.45 1-1v-2.26c1.81-1.27 3-3.36 3-5.74 0-3.87-3.13-7-7-7zm-1.5 8c-.83 0-1.5-.67-1.5-1.5S9.67 7 10.5 7s1.5.67 1.5 1.5-.67 1.5-1.5 1.5zm3 0c-.83 0-1.5-.67-1.5-1.5S12.67 7 13.5 7s1.5.67 1.5 1.5-.67 1.5-1.5 1.5z"/><path d="M8 20v2h8v-2H8z"/></svg>' : ROMAN[i - 1];
+                        html += `
+                            <div class="round-col">
+                                <div class="round-icon">${icon}</div>
+                                <div class="round-circle ${i === data.current_round ? 'active' : ''}" id="round-circle-${i}">
+                                    <div class="inner-circle"></div>
+                                </div>
+                            </div>
+                        `;
+                    }
+                    container.innerHTML = html;
+                    msg.style.opacity = '0';
+                    
+                    setTimeout(() => {
+                        const cur = document.getElementById(`round-circle-${data.current_round}`);
+                        if (cur) cur.classList.remove('active');
+                        
+                        const next = document.getElementById(`round-circle-${data.current_round + 1}`);
+                        if (next) next.classList.add('active');
+                        
+                        setTimeout(() => {
+                            msg.style.opacity = '1';
+                        }, 1000);
+                    }, 1500);
+                    
                 }, 5000);
             }
             
@@ -155,7 +190,7 @@
         if (data.phase === 'dealer_loading') {
             document.getElementById('state-loading').style.display = 'flex';
             document.getElementById('player-shell-counts').innerHTML = 
-                `<span class="sc-live">${data.live_count} БОЕВЫХ</span> // <span class="sc-blank">${data.blank_count} ХОЛОСТЫХ</span>`;
+                `<span class="sc-live">${data.live_count} live</span> // <span class="sc-blank">${data.blank_count} blank</span>`;
             return;
         }
 
@@ -171,13 +206,13 @@
         // Turn label
         const turnLabel = document.getElementById('turn-label');
         if (data.my_handcuffed) {
-            turnLabel.textContent = '[Наручники]';
+            turnLabel.textContent = '[ handcuffed ]';
             turnLabel.style.color = 'var(--red)';
             turnLabel.classList.add('active');
             // Remove blink animation so it's a solid warning
             turnLabel.style.animation = 'none';
         } else if (data.is_my_turn) {
-            turnLabel.textContent = '[Ходит]';
+            turnLabel.textContent = '[ this player turn ]';
             turnLabel.style.color = 'var(--green-bright)';
             turnLabel.classList.add('active');
             turnLabel.style.animation = ''; // Restore blink
@@ -202,7 +237,7 @@
     }
 
     function leaveGame() {
-        if (confirm('Выйти из игры?')) {
+        if (confirm('leave the game?')) {
             fetch('/api/remove_player', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/x-www-form-urlencoded'},

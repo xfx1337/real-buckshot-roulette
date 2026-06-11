@@ -64,7 +64,7 @@ class Player:
     items: list = field(default_factory=list)
     alive: bool = True
     connected: bool = True
-    skip_next_turn: bool = False
+    handcuffs_state: int = 0
     # For multiplayer: player number shown on screen
     number: int = 0
 
@@ -179,7 +179,7 @@ class GameState:
             p.alive = True
             p.hp = rc["hp"]
             p.max_hp = rc["hp"]
-            p.skip_next_turn = False
+            p.handcuffs_state = 0
             p.items = []  # Clear items at round start
 
         self.saw_active = False
@@ -283,12 +283,17 @@ class GameState:
         n = len(self.turn_order)
         next_idx = (self.current_turn_idx + 1) % n
 
+        # Clear handcuffs that have finished their visual duration
+        for p in self.players.values():
+            if p.handcuffs_state == 1:
+                p.handcuffs_state = 0
+
         # Find next alive, non-skipped player
         for _ in range(n):
             p = self.players[self.turn_order[next_idx]]
             if p.alive:
-                if p.skip_next_turn:
-                    p.skip_next_turn = False
+                if p.handcuffs_state == 2:
+                    p.handcuffs_state = 1
                     self._log(f">> Игрок #{p.number} [{p.name}] пропускает ход (наручники)", "info")
                     next_idx = (next_idx + 1) % n
                     continue
@@ -432,7 +437,9 @@ class GameState:
         p = self.players[player_id]
         t = self.players[target_id]
         self._remove_item(p, ItemType.HANDCUFFS)
-        t.skip_next_turn = True
+        if t.handcuffs_state > 0:
+            raise ValueError(f"Игрок #{t.number} уже в наручниках")
+        t.handcuffs_state = 2
         self._log(f">> #{p.number} надел наручники на #{t.number} [{t.name}]", "item")
 
     def use_item_magnifying_glass(self, player_id: str) -> dict:
@@ -473,6 +480,12 @@ class GameState:
         self._remove_item(p, ItemType.BURNER_PHONE)
         if not self.shells:
             raise ValueError("Нет патронов")
+
+        if len(self.shells) <= 2:
+            self.last_burner_result = "Голос в трубке молчит... (слишком мало патронов)"
+            self._log(f">> #{p.number} слушает телефон, но там лишь тишина", "item")
+            return {"index": -1, "shell": "unknown", "display": self.last_burner_result}
+
         # Reveal a random shell position
         idx = random.randint(0, len(self.shells) - 1)
         shell = self.shells[idx]
@@ -589,7 +602,7 @@ class GameState:
                     "connected": p.connected,
                     "items": [i.value for i in p.items] if for_dealer else [],
                     "items_display": [ITEM_LABELS[i][0] for i in p.items] if for_dealer else [],
-                    "skip_next_turn": p.skip_next_turn,
+                    "skip_next_turn": p.handcuffs_state > 0,
                 }
                 for p in sorted(self.players.values(), key=lambda x: x.number)
             ],
@@ -643,7 +656,7 @@ class GameState:
             "my_hp": p.hp,
             "my_max_hp": p.max_hp,
             "my_alive": p.alive,
-            "my_handcuffed": p.skip_next_turn,
+            "my_handcuffed": p.handcuffs_state > 0,
             "is_my_turn": is_my_turn,
             "current_round": self.current_round + 1,
             "total_rounds": len(self.config.rounds),

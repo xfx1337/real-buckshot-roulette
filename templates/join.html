@@ -3,24 +3,24 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Вход — Buckshot Roulette</title>
+    <title>join — buckshot roulette</title>
     <link rel="stylesheet" href="/static/style.css">
 </head>
 <body class="page-join">
     <div class="container center-content">
         <div class="logo-block small">
-            <h1>ВХОД ИГРОКА</h1>
+            <h1>join game</h1>
         </div>
         <div class="card">
             {% if error %}
             <div class="alert-error">{{ error }}</div>
             {% endif %}
             <form method="POST" action="/api/join" class="join-form">
-                <label for="name">ИМЯ:</label>
+                <label for="name">name:</label>
                 <input type="text" id="name" name="name" placeholder="..." required maxlength="20" autocomplete="off">
-                <button type="submit" class="btn btn-player">ВОЙТИ</button>
+                <button type="submit" class="btn btn-player">join</button>
             </form>
-            <a href="/" class="btn btn-back">&lt; НАЗАД</a>
+            <a href="/" class="btn btn-back">&lt; back</a>
         </div>
     </div>
 </body>

@@ -430,6 +430,69 @@ body {
     letter-spacing: 3px;
 }
 
+/* Round transition indicators */
+.round-transition-container {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 40px;
+}
+
+.round-indicators {
+    display: flex;
+    gap: 30px;
+}
+
+.round-col {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 15px;
+}
+
+.round-icon {
+    font-size: 4rem;
+    font-weight: 700;
+    color: var(--text-dim);
+    line-height: 1;
+}
+
+.round-circle {
+    width: 60px;
+    height: 60px;
+    border: 4px solid var(--text-dim);
+    border-radius: 50%;
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.round-circle.active {
+    border-color: var(--green-bright);
+    box-shadow: 0 0 10px var(--green-glow);
+}
+
+.round-circle.active .inner-circle {
+    opacity: 1;
+}
+
+.inner-circle {
+    width: 26px;
+    height: 26px;
+    background-color: var(--green-bright);
+    border-radius: 50%;
+    opacity: 0;
+    transition: opacity 0.5s ease;
+    box-shadow: 0 0 8px var(--green-glow);
+}
+
+.skull-icon-svg {
+    width: 60px;
+    height: 60px;
+    fill: var(--text-dim);
+}
+
 .leave-btn-container {
     position: fixed;
     bottom: 12px;
