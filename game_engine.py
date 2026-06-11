@@ -255,7 +255,7 @@ class GameState:
         self._confirm_items_dealt()
 
     def _confirm_items_dealt(self):
-        self.current_turn_idx = self._find_first_alive_idx(0)
+        self.current_turn_idx = self._find_first_alive_idx(self.current_turn_idx)
         self.phase = GamePhase.PLAYER_TURN
         cp = self.players[self.turn_order[self.current_turn_idx]]
         self._log(f">> Ход игрока #{cp.number} [{cp.name}]", "info")
@@ -378,11 +378,12 @@ class GameState:
 
             self.saw_active = False
 
-            if not self._check_game_over():
+            if self._check_game_over():
+                self.current_turn_idx = (self.current_turn_idx + 1) % len(self.turn_order)
+            else:
+                self._advance_turn()
                 if len(self.shells) == 0:
                     self._check_shells_empty()
-                else:
-                    self._advance_turn()
         else:
             # Blank
             self._log(
@@ -398,10 +399,9 @@ class GameState:
                 if len(self.shells) == 0:
                     self._check_shells_empty()
             else:
+                self._advance_turn()
                 if len(self.shells) == 0:
                     self._check_shells_empty()
-                else:
-                    self._advance_turn()
 
         return result
 
@@ -504,7 +504,12 @@ class GameState:
             if p.hp <= 0:
                 p.alive = False
                 self._log(f">>> Игрок #{p.number} [{p.name}] выбыл от испорченного лекарства", "shot")
-                self._check_game_over()
+                if self._check_game_over():
+                    if self.turn_order[self.current_turn_idx] == player_id:
+                        self.current_turn_idx = (self.current_turn_idx + 1) % len(self.turn_order)
+                else:
+                    if self.turn_order[self.current_turn_idx] == player_id:
+                        self._advance_turn()
         return {"success": is_vodka, "display": self.last_medicine_result}
 
     def dealer_adjust_hp(self, player_id: str, delta: int):
@@ -516,7 +521,12 @@ class GameState:
         if p.hp <= 0 and p.alive:
             p.alive = False
             self._log(f">>> Игрок #{p.number} [{p.name}] выбыл", "shot")
-            self._check_game_over()
+            if self._check_game_over():
+                if self.turn_order and self.turn_order[self.current_turn_idx] == player_id:
+                    self.current_turn_idx = (self.current_turn_idx + 1) % len(self.turn_order)
+            else:
+                if self.turn_order and self.turn_order[self.current_turn_idx] == player_id:
+                    self._advance_turn()
 
     def force_end_game(self):
         """Dealer force-ends the game."""
