@@ -366,7 +366,112 @@ body {
     animation: boltFlicker 0.8s step-end infinite;
 }
 
-/* Player waiting in lobby */
+/* Solo Mode Layout */
+.solo-layout {
+    display: flex;
+    flex-direction: row;
+    width: 100%;
+    height: 100vh;
+    position: relative;
+    background: #000;
+}
+
+.solo-t-horizontal {
+    position: absolute;
+    top: 35%;
+    left: 15vw;
+    right: 15vw;
+    height: 6px;
+    background: #e1dac6; /* Bone white line like in game */
+    z-index: 10;
+}
+
+.solo-t-vertical {
+    position: absolute;
+    top: 35%;
+    bottom: 20vh;
+    left: 50%;
+    width: 6px;
+    background: #e1dac6;
+    z-index: 10;
+    transform: translateX(-50%);
+}
+
+.solo-half {
+    flex: 1;
+    position: relative;
+}
+
+.solo-label {
+    position: absolute;
+    bottom: 68%; /* Position above horizontal line */
+    font-family: var(--font);
+    font-size: 9vh;
+    font-weight: 800;
+    color: var(--text-bright);
+    letter-spacing: 8px;
+    width: 100%;
+    text-align: center;
+    transition: color 0.3s;
+}
+
+.left-half .solo-label {
+    padding-right: 2vw;
+}
+
+.right-half .solo-label {
+    padding-left: 2vw;
+}
+
+.solo-bolts {
+    position: absolute;
+    top: 40%; /* Below the horizontal line */
+    bottom: 10vh;
+    left: 0;
+    right: 0;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    align-content: center;
+    flex-wrap: nowrap; /* Do not wrap! */
+    gap: 1vw;
+    padding: 2vw;
+}
+
+.solo-bolts .lightning-bolt {
+    height: 70%;
+    width: auto;
+    max-width: none;
+    max-height: none;
+    aspect-ratio: 0.5; /* 1/2 */
+    flex: 0 1 auto; /* Allow shrinking */
+    min-width: 0; /* Let flexbox shrink it */
+}
+
+.solo-turn-label {
+    position: absolute;
+    top: 5vh;
+    font-size: 1.5rem;
+    font-weight: bold;
+    letter-spacing: 2px;
+    width: 100%;
+    text-align: center;
+    font-family: var(--font);
+}
+
+.left-half .solo-turn-label {
+    padding-right: 5vw;
+}
+
+.right-half .solo-turn-label {
+    padding-left: 5vw;
+}
+
+.solo-label.active {
+    animation: terminalBlink 1.2s step-end infinite;
+}
+
+/* Fallback for lobby/dead screens */
 .player-lobby-msg {
     font-family: var(--font);
     font-size: 1.5rem;
