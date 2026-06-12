@@ -23,10 +23,32 @@
             </div>
         </div>
 
-        <!-- In Game: just bolts + turn label -->
+        <!-- In Game -->
         <div id="state-game" class="player-screen" style="display:none">
-            <div class="turn-label" id="turn-label">[Your Turn]</div>
-            <div class="lightning-container" id="lightning-container"></div>
+            
+            <!-- MULTIPLAYER MODE -->
+            <div id="mp-layout" style="display:none; width:100%; height:100%; flex-direction:column; align-items:center;">
+                <div class="turn-label" id="turn-label-mp">[Your Turn]</div>
+                <div class="lightning-container" id="lightning-container-mp"></div>
+            </div>
+
+            <!-- SOLO MODE -->
+            <div id="solo-layout" class="solo-layout" style="display:none">
+                <div class="solo-t-horizontal"></div>
+                <div class="solo-t-vertical"></div>
+                
+                <div class="solo-half left-half">
+                    <div class="solo-turn-label" id="solo-dealer-turn"></div>
+                    <div class="solo-label" id="solo-dealer-label">DEALER</div>
+                    <div class="solo-bolts" id="opponent-lightning-container"></div>
+                </div>
+                
+                <div class="solo-half right-half">
+                    <div class="solo-turn-label" id="solo-player-turn"></div>
+                    <div class="solo-label" id="solo-player-label">PLAYER</div>
+                    <div class="solo-bolts" id="solo-lightning-container"></div>
+                </div>
+            </div>
         </div>
 
         <!-- Dead -->
@@ -202,37 +224,94 @@
         }
 
         // Dead
-        if (!data.my_alive) {
-            document.getElementById('state-dead').style.display = 'flex';
-            return;
+        if (data.game_mode === 'solo') {
+            // In solo mode, show game over screen if either dies (no dead screen)
+            if (!data.my_alive || (data.opponent_alive !== undefined && !data.opponent_alive)) {
+                // If it's not game_over phase yet, it will be soon. Just wait.
+                if (data.phase !== 'game_over') return;
+            }
+        } else {
+            if (!data.my_alive) {
+                document.getElementById('state-dead').style.display = 'flex';
+                return;
+            }
         }
 
         // In game — show lightning bolts
         document.getElementById('state-game').style.display = 'flex';
 
-        // Turn label
-        const turnLabel = document.getElementById('turn-label');
-        if (data.my_handcuffed) {
-            turnLabel.textContent = '[ handcuffed ]';
-            turnLabel.style.color = 'var(--red)';
-            turnLabel.classList.add('active');
-            // Remove blink animation so it's a solid warning
-            turnLabel.style.animation = 'none';
-        } else if (data.is_my_turn) {
-            turnLabel.textContent = '[ this player turn ]';
-            turnLabel.style.color = 'var(--green-bright)';
-            turnLabel.classList.add('active');
-            turnLabel.style.animation = ''; // Restore blink
+        // Solo Mode adjustments
+        if (data.game_mode === 'solo') {
+            document.getElementById('mp-layout').style.display = 'none';
+            document.getElementById('solo-layout').style.display = 'flex';
+            
+            // Opponent Turn label (DEALER)
+            const dLabel = document.getElementById('solo-dealer-label');
+            const dTurn = document.getElementById('solo-dealer-turn');
+            if (data.opponent_handcuffed) {
+                dLabel.style.color = 'var(--red)';
+                dLabel.classList.remove('active');
+                dTurn.textContent = '[ handcuffed ]';
+                dTurn.style.color = 'var(--red)';
+            } else if (data.is_opponent_turn) {
+                dLabel.style.color = 'var(--red)';
+                dLabel.classList.add('active');
+                dTurn.textContent = '[ dealer turn ]';
+                dTurn.style.color = 'var(--red)';
+            } else {
+                dLabel.style.color = 'var(--text-bright)';
+                dLabel.classList.remove('active');
+                dTurn.textContent = '';
+            }
+            
+            // Player Turn label (PLAYER)
+            const pLabel = document.getElementById('solo-player-label');
+            const pTurn = document.getElementById('solo-player-turn');
+            if (data.my_handcuffed) {
+                pLabel.style.color = 'var(--red)';
+                pLabel.classList.remove('active');
+                pTurn.textContent = '[ handcuffed ]';
+                pTurn.style.color = 'var(--red)';
+            } else if (data.is_my_turn) {
+                pLabel.style.color = 'var(--green-bright)';
+                pLabel.classList.add('active');
+                pTurn.textContent = '[ player turn ]';
+                pTurn.style.color = 'var(--green-bright)';
+            } else {
+                pLabel.style.color = 'var(--text-bright)';
+                pLabel.classList.remove('active');
+                pTurn.textContent = '';
+            }
+            
+            // Bolts
+            renderBolts(data.opponent_hp, data.opponent_max_hp, 'opponent-lightning-container');
+            renderBolts(data.my_hp, data.my_max_hp, 'solo-lightning-container');
         } else {
-            turnLabel.classList.remove('active');
-        }
+            document.getElementById('mp-layout').style.display = 'flex';
+            document.getElementById('solo-layout').style.display = 'none';
 
-        // Lightning bolts
-        renderBolts(data.my_hp, data.my_max_hp);
+            // Player Turn label
+            const turnLabel = document.getElementById('turn-label-mp');
+            if (data.my_handcuffed) {
+                turnLabel.textContent = '[ handcuffed ]';
+                turnLabel.style.color = 'var(--red)';
+                turnLabel.classList.add('active');
+                turnLabel.style.animation = 'none';
+            } else if (data.is_my_turn) {
+                turnLabel.textContent = '[ this player turn ]';
+                turnLabel.style.color = 'var(--green-bright)';
+                turnLabel.classList.add('active');
+                turnLabel.style.animation = ''; // Restore blink
+            } else {
+                turnLabel.classList.remove('active');
+            }
+
+            renderBolts(data.my_hp, data.my_max_hp, 'lightning-container-mp');
+        }
     }
 
-    function renderBolts(hp, maxHp) {
-        const container = document.getElementById('lightning-container');
+    function renderBolts(hp, maxHp, containerId) {
+        const container = document.getElementById(containerId);
         const isCritical = hp === 1 && maxHp > 1;
         let html = '';
         for (let i = 0; i < maxHp; i++) {
