@@ -41,6 +41,15 @@ class ItemType(str, Enum):
     MEDICINE_WATER = "medicine_water"
 
 
+# Base item pool for generation (medicine in both modes)
+# MEDICINE_VODKA/MEDICINE_WATER are never in the pool — they replace EXPIRED_MEDICINE at deal time
+ITEM_POOL_BASE = [
+    ItemType.BEER, ItemType.HANDSAW, ItemType.HANDCUFFS,
+    ItemType.MAGNIFYING_GLASS, ItemType.CIGARETTES,
+    ItemType.ADRENALINE, ItemType.BURNER_PHONE,
+    ItemType.INVERTER, ItemType.EXPIRED_MEDICINE,
+]
+
 ITEM_LABELS = {
     ItemType.BEER: ("Пиво", "Выбросить текущий патрон"),
     ItemType.HANDSAW: ("Пила", "Следующий выстрел x2"),
@@ -50,9 +59,9 @@ ITEM_LABELS = {
     ItemType.ADRENALINE: ("Адреналин", "Украсть предмет"),
     ItemType.BURNER_PHONE: ("Телефон", "Узнать патрон по номеру"),
     ItemType.INVERTER: ("Инвертор", "Инвертировать патрон"),
-    ItemType.EXPIRED_MEDICINE: ("Лекарство", "50%: +2 HP / -1 HP"),
-    ItemType.MEDICINE_VODKA: ("Лекарство (ВОДКА)", "+2 HP (знает только дилер)"),
-    ItemType.MEDICINE_WATER: ("Лекарство (ВОДА)", "-1 HP (знает только дилер)"),
+    ItemType.EXPIRED_MEDICINE: ("Лекарство", "50%: +2 HP или -1 HP"),
+    ItemType.MEDICINE_VODKA: ("Лекарство (Водка)", "+2 HP"),
+    ItemType.MEDICINE_WATER: ("Лекарство (Вода)", "-1 HP"),
 }
 
 
@@ -70,29 +79,30 @@ class Player:
     number: int = 0
 
 
+SOLO_DEFAULT_ROUNDS = [
+    {"hp": 2, "items_per_player": 0, "max_shells": 3},
+    {"hp": 4, "items_per_player": 2, "max_shells": 6},
+    {"hp": 6, "items_per_player": 4, "max_shells": 8},
+]
+
+MULTIPLAYER_DEFAULT_ROUNDS = [
+    {"hp": 0, "items_per_player": 0, "max_shells": 4},
+    {"hp": 0, "items_per_player": 2, "max_shells": 6},
+    {"hp": 0, "items_per_player": 4, "max_shells": 8},
+]
+
+
 @dataclass
 class GameConfig:
     """Configurable game parameters."""
+    game_mode: str = "multiplayer"  # "solo" or "multiplayer"
     # Per-round settings: list of dicts with keys: hp, items_per_player, max_shells
-    rounds: list = field(default_factory=lambda: [
-        {"hp": 2, "items_per_player": 0, "max_shells": 4},
-        {"hp": 4, "items_per_player": 2, "max_shells": 6},
-        {"hp": 6, "items_per_player": 4, "max_shells": 8},
-    ])
+    rounds: list = field(default_factory=lambda: list(MULTIPLAYER_DEFAULT_ROUNDS))
     max_items_per_player: int = 8
     physical_magazine_limit: int = 0  # 0 means unlimited
-    # Item pool weights (higher = more likely)
-    item_weights: dict = field(default_factory=lambda: {
-        ItemType.BEER: 10,
-        ItemType.HANDSAW: 6,
-        ItemType.HANDCUFFS: 7,
-        ItemType.MAGNIFYING_GLASS: 8,
-        ItemType.CIGARETTES: 8,
-        ItemType.ADRENALINE: 4,
-        ItemType.BURNER_PHONE: 5,
-        ItemType.INVERTER: 5,
-        ItemType.EXPIRED_MEDICINE: 3,
-    })
+    # Item limits per item type (0 = disabled/unlimited)
+    item_limits_global: dict = field(default_factory=dict)
+    item_limits_per_player: dict = field(default_factory=dict)
 
 
 @dataclass
@@ -166,10 +176,24 @@ class GameState:
     # ── Game Flow ──
 
     def start_game(self):
-        if len(self.players) < 2:
-            raise ValueError("Нужно минимум 2 игрока")
+        # Solo mode: if only 1 player joined, auto-create DEALER as opponent
+        if self.config.game_mode == "solo":
+            if len(self.players) < 1:
+                raise ValueError("Нужен хотя бы 1 игрок")
+            if len(self.players) == 1:
+                dealer_p = self.add_player("DEALER")
+                dealer_p.connected = False  # virtual player, no phone
+                self._log(">> Режим 1 на 1: DEALER добавлен автоматически", "system")
+            if len(self.players) != 2:
+                raise ValueError("В режиме 1 на 1 должно быть ровно 2 игрока")
+            # Apply solo round config
+            self.config.rounds = [dict(r) for r in SOLO_DEFAULT_ROUNDS]
+        else:
+            if len(self.players) < 2:
+                raise ValueError("Нужно минимум 2 игрока")
         self.turn_order = [p.id for p in sorted(self.players.values(), key=lambda x: x.number)]
         self.current_round = 0
+        self.first_round_generated = False
         self._start_round()
 
     def _start_round(self):
@@ -178,10 +202,19 @@ class GameState:
         self._log(f"=== РАУНД {self.current_round + 1} ===", "round")
 
         # Все игроки возрождаются в новом раунде
+        num_players = len(self.players)
+        
+        # Calculate random starting HP for the round if not fixed by config
+        hp_for_round = rc["hp"]
+        if hp_for_round <= 0:  # Random mode
+            if num_players == 2: hp_for_round = random.randint(3, 4)
+            elif num_players == 3: hp_for_round = random.randint(4, 5)
+            else: hp_for_round = random.randint(3, 5)
+        
         for p in self.players.values():
             p.alive = True
-            p.hp = rc["hp"]
-            p.max_hp = rc["hp"]
+            p.hp = hp_for_round
+            p.max_hp = hp_for_round
             p.handcuffs_state = 0
             p.items = []  # Clear items at round start
 
@@ -190,20 +223,54 @@ class GameState:
         self._generate_shells()
 
     def _generate_shells(self):
+        if self.config.game_mode == "solo":
+            self._generate_shells_solo()
+        else:
+            self._generate_shells_multiplayer()
+
+    def _generate_shells_solo(self):
+        """Original singleplayer shell generation."""
         rc = self.config.rounds[self.current_round]
-        
-        # Hardcode first round rule: exactly 1 live, 2 blanks
+
+        # Hardcode first load of round 1: exactly 1 live, 2 blanks
         if self.current_round == 0 and not self.first_round_generated:
             live_count = 1
             blank_count = 2
-            total = 3
             self.first_round_generated = True
         else:
             total = random.randint(2, rc["max_shells"])
-            # Формула для ограничения перекосов (избегаем 5:1 при 6 патронах)
-            live_count = random.randint(max(1, total//2 - 1), min(total - 1, total//2 + 1))
+            # Balanced distribution (avoid extreme skew like 5:1)
+            live_count = random.randint(max(1, total // 2 - 1), min(total - 1, total // 2 + 1))
             blank_count = total - live_count
 
+        self._finalize_shells(live_count, blank_count)
+
+    def _generate_shells_multiplayer(self):
+        """Multiplayer shell generation using batches by player count."""
+        num_players = len(self.players)
+
+        batches_2 = [
+            (1, 2), (2, 1), (2, 2), (3, 2), (1, 1), (2, 3), (3, 3), (3, 1), (4, 2)
+        ]
+        batches_3 = [
+            (2, 3), (3, 2), (3, 3), (4, 3), (2, 2), (3, 4), (4, 4), (4, 2), (3, 1), (1, 1)
+        ]
+        batches_4 = [
+            (3, 4), (3, 2), (3, 3), (4, 3), (2, 2), (3, 4), (4, 4), (4, 2), (3, 1), (2, 1)
+        ]
+
+        if num_players == 2:
+            live_count, blank_count = random.choice(batches_2)
+        elif num_players == 3:
+            live_count, blank_count = random.choice(batches_3)
+        else:
+            live_count, blank_count = random.choice(batches_4)
+
+        self._finalize_shells(live_count, blank_count)
+
+    def _finalize_shells(self, live_count: int, blank_count: int):
+        """Common shell finalization for both modes."""
+        total = live_count + blank_count
         self.shells = (
             [ShellType.LIVE] * live_count +
             [ShellType.BLANK] * blank_count
@@ -241,23 +308,51 @@ class GameState:
 
         # Generate items for each alive player
         self.dealt_items = {}
-        pool = list(self.config.item_weights.keys())
-        weights = [self.config.item_weights[i] for i in pool]
+        
+        # Build available pool (medicine pre-generated as vodka/water at deal time)
+        base_pool = list(ITEM_POOL_BASE)
 
         for p in self.get_alive_players():
             slots_free = self.config.max_items_per_player - len(p.items)
             count = min(items_count, slots_free)
-            chosen = random.choices(pool, weights=weights, k=count)
-            
             final_chosen = []
-            for item in chosen:
-                if item == ItemType.EXPIRED_MEDICINE:
+            
+            for _ in range(count):
+                # Count current items on table globally
+                table_counts = {item: 0 for item in base_pool}
+                for alive_p in self.get_alive_players():
+                    for i in alive_p.items:
+                        if i in table_counts:
+                            table_counts[i] += 1
+                for i in final_chosen:
+                    if i in table_counts:
+                        table_counts[i] += 1
+                
+                # Filter pool by global and personal limits
+                current_pool = []
+                for item in base_pool:
+                    g_limit = self.config.item_limits_global.get(item, 0)
+                    global_ok = (g_limit == 0) or (table_counts.get(item, 0) < g_limit)
+                    
+                    personal_count = sum(1 for x in p.items if x == item) + sum(1 for x in final_chosen if x == item)
+                    p_limit = self.config.item_limits_per_player.get(item, 0)
+                    personal_limit = p_limit if p_limit > 0 else self.config.max_items_per_player
+                    personal_ok = personal_count < personal_limit
+                    
+                    if global_ok and personal_ok:
+                        current_pool.append(item)
+                
+                if not current_pool:
+                    break  # Cannot add more items due to limits
+                    
+                chosen = random.choice(current_pool)
+                # Pre-generate medicine outcome (so dealer knows what to pour)
+                if chosen == ItemType.EXPIRED_MEDICINE:
                     if random.random() < 0.5:
-                        final_chosen.append(ItemType.MEDICINE_VODKA)
+                        chosen = ItemType.MEDICINE_VODKA
                     else:
-                        final_chosen.append(ItemType.MEDICINE_WATER)
-                else:
-                    final_chosen.append(item)
+                        chosen = ItemType.MEDICINE_WATER
+                final_chosen.append(chosen)
 
             p.items.extend(final_chosen)
             self.dealt_items[p.id] = final_chosen
@@ -598,6 +693,7 @@ class GameState:
         data = {
             "game_id": self.game_id,
             "phase": self.phase.value,
+            "game_mode": self.config.game_mode,
             "current_round": self.current_round + 1,
             "total_rounds": len(self.config.rounds),
             "shells_remaining": len(self.shells),
@@ -648,6 +744,9 @@ class GameState:
             data["blank_count"] = blank_c
             data["show_shells_to_players"] = self.show_shells_to_players
             data["physical_magazine_limit"] = self.config.physical_magazine_limit
+            data["item_limits_global"] = self.config.item_limits_global
+            data["item_limits_per_player"] = self.config.item_limits_per_player
+            data["game_mode"] = self.config.game_mode
 
         # Recent log (last 20 events)
         data["log"] = [
@@ -670,9 +769,10 @@ class GameState:
         if not self.show_shells_to_players and self.phase == GamePhase.DEALER_LOADING:
             effective_phase = "player_turn"
 
-        return {
+        view = {
             "game_id": self.game_id,
             "phase": effective_phase,
+            "game_mode": self.config.game_mode,
             "my_number": p.number,
             "my_name": p.name,
             "my_hp": p.hp,
@@ -695,8 +795,27 @@ class GameState:
                     "hp": pl.hp,
                     "max_hp": pl.max_hp,
                     "alive": pl.alive,
+                    "handcuffed": pl.handcuffs_state > 0,
                 }
                 for pl in sorted(self.players.values(), key=lambda x: x.number)
             ],
             "winner_name": self.players[self.winner_id].name if self.winner_id else None,
         }
+
+        # Solo mode: add opponent info for dual-HP display on single phone
+        if self.config.game_mode == "solo":
+            opponent = None
+            for pl in self.players.values():
+                if pl.id != player_id:
+                    opponent = pl
+                    break
+            if opponent:
+                view["opponent_number"] = opponent.number
+                view["opponent_name"] = opponent.name
+                view["opponent_hp"] = opponent.hp
+                view["opponent_max_hp"] = opponent.max_hp
+                view["opponent_alive"] = opponent.alive
+                view["opponent_handcuffed"] = opponent.handcuffs_state > 0
+                view["is_opponent_turn"] = current and current.id == opponent.id
+
+        return view

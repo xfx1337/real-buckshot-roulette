@@ -23,9 +23,22 @@ The Dealer hosts the game from a tablet or PC and manages the physical component
 ### The Players
 The Players use their smartphones as visual monitors. 
 - Access the player interface via `/` and click "join game".
-- The player screens should be placed horizontally in front of each player.
-- The screens display current HP (lightning bolts), turn status (`[ this player turn ]`, `[ handcuffed ]`), and game outcomes.
 - Players **do not** interact with their phones. All actions are performed in real life and logged by the Dealer.
+
+#### Game Modes
+
+**1. Multiplayer (2-4 Players)**
+- Requires 2 to 4 real players connecting with their own phones.
+- Player screens are placed horizontally in front of each player, displaying their personal HP and turn status.
+- Shell generation follows a batch logic.
+
+**2. Solo / 1v1 (Player vs Dealer)**
+- Authentically recreates the original video game experience.
+- Requires only **1 player** to connect via phone. The game automatically spawns a virtual `DEALER` opponent.
+- The player's smartphone acts as the **central table monitor** and must be placed horizontally between the player and the physical dealer.
+- The interface features a **split-screen (Dual-HP)** design: The Dealer's HP is displayed on the top half (inverted for the dealer to read from across the table) and the Player's HP on the bottom half.
+- **Exclusive Item (Expired Medicine):** Available only in this mode. Functions with a true 50/50 chance (+2 HP or -1 HP). The physical dealer will be informed whether it is "Vodka" (+2) or "Water" (-1) via their interface to pour the correct drink.
+- Shell generation mimics the original game (e.g., Round 1 is strictly 1 Live, 2 Blank).
 
 ## How to Run
 

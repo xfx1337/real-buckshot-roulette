@@ -24,6 +24,13 @@
             <!-- No Game -->
             <div id="panel-nogame" class="panel">
                 <h2>НЕТ АКТИВНОЙ ИГРЫ</h2>
+                <div style="margin-bottom: 20px;">
+                    <label for="game-mode-select" style="display: block; margin-bottom: 10px; color: var(--green-muted); font-weight: bold;">РЕЖИМ ИГРЫ:</label>
+                    <select id="game-mode-select" class="cfg-input" style="width: 100%; padding: 10px; font-size: 1.1rem; background: var(--bg-dark); color: var(--text-main); border: 2px solid var(--border-color); border-radius: 4px;">
+                        <option value="multiplayer">Мультиплеер (2-4 игрока)</option>
+                        <option value="solo">Соло / 1 на 1 (1 телефон на двоих)</option>
+                    </select>
+                </div>
                 <button class="btn btn-dealer" onclick="createGame()">СОЗДАТЬ ИГРУ</button>
             </div>
 
@@ -34,7 +41,7 @@
                 <p class="hint" id="lobby-hint">Ожидание игроков... (мин. 2, макс. 4)</p>
                 <button class="btn btn-dealer" id="btn-start" onclick="startGame()" disabled>НАЧАТЬ ИГРУ</button>
                 <details class="config-panel">
-                    <summary>НАСТРОЙКИ ИГРЫ</summary>
+                    <summary>НАСТРОЙКИ ИГРЫ <span id="current-mode-badge" style="font-size: 0.8em; opacity: 0.7; margin-left: 10px; font-weight: normal;"></span></summary>
                     <div id="config-editor"></div>
                     <button class="btn btn-secondary" onclick="saveConfig()">СОХРАНИТЬ</button>
                 </details>
@@ -126,15 +133,6 @@ const ITEM_LABELS = {
     burner_phone: 'Телефон',
     inverter: 'Инвертор',
     expired_medicine: 'Лекарство',
-    medicine_vodka: 'Лекарство (Водка)',
-    medicine_water: 'Лекарство (Вода)',
-};
-
-const DEFAULT_WEIGHTS = {
-    beer: 10, handsaw: 6, handcuffs: 7,
-    magnifying_glass: 8, cigarettes: 8,
-    adrenaline: 4, burner_phone: 5,
-    inverter: 5, expired_medicine: 3,
 };
 
 function connect() {
@@ -190,17 +188,19 @@ function phaseLabel(p) {
     return m[p] || p;
 }
 
-function weightToOdds(weight, allWeights) {
-    const total = Object.values(allWeights).reduce((a, b) => a + b, 0);
-    if (weight <= 0 || total <= 0) return 'нет';
-    const ratio = total / weight;
-    return `1 к ${Math.round(ratio)}`;
-}
+
 
 // ── Render ──
 
 function renderLobby(s) {
     document.getElementById('panel-lobby').style.display = 'block';
+    
+    // Show current mode
+    const modeBadge = document.getElementById('current-mode-badge');
+    if (modeBadge) {
+        modeBadge.textContent = s.game_mode === 'solo' ? '[ РЕЖИМ 1 на 1 ]' : '[ МУЛЬТИПЛЕЕР ]';
+    }
+
     const el = document.getElementById('lobby-players');
     el.innerHTML = s.players.map(p => `
         <div class="lobby-player-card">
@@ -209,8 +209,14 @@ function renderLobby(s) {
             <button class="btn btn-danger btn-tiny" onclick="removePlayer('${p.id}')">X</button>
         </div>
     `).join('') || '<p class="hint">---</p>';
-    document.getElementById('btn-start').disabled = s.players.length < 2;
-    document.getElementById('lobby-hint').textContent = `Игроков: ${s.players.length}/4`;
+    
+    if (s.game_mode === 'solo') {
+        document.getElementById('btn-start').disabled = s.players.length !== 1;
+        document.getElementById('lobby-hint').textContent = `Игроков: ${s.players.length}/1 (Только один игрок должен зайти с телефона)`;
+    } else {
+        document.getElementById('btn-start').disabled = s.players.length < 2;
+        document.getElementById('lobby-hint').textContent = `Игроков: ${s.players.length}/4 (мин. 2, макс. 4)`;
+    }
     renderConfigEditor(s);
 }
 
@@ -218,9 +224,9 @@ function renderConfigEditor(s) {
     const el = document.getElementById('config-editor');
     const isChecked = s && s.show_shells_to_players !== false ? 'checked' : '';
     const rounds = [
-        {hp:2, items_per_player:0, max_shells:4},
-        {hp:4, items_per_player:2, max_shells:6},
-        {hp:6, items_per_player:4, max_shells:6}
+        {hp:0, items_per_player:0, max_shells:4},
+        {hp:0, items_per_player:2, max_shells:6},
+        {hp:0, items_per_player:4, max_shells:8}
     ];
     el.innerHTML = `
         <div class="config-group">
@@ -233,41 +239,39 @@ function renderConfigEditor(s) {
                 <label style="width:auto; margin-right: 8px;">Лимит патронов в магазине (0=нет):</label>
                 <input type="number" class="cfg-input" id="cfg_mag_limit" value="${s && s.physical_magazine_limit !== undefined ? s.physical_magazine_limit : 0}" min="0" max="20">
             </div>
-            <h4>РАУНДЫ</h4>
+            <h4>ЛИМИТЫ ПРЕДМЕТОВ (0 = нет лимита)</h4>
+            ${Object.entries(ITEM_LABELS).map(([k,v]) => {
+                // Don't show expired_medicine in multiplayer mode
+                if (k === 'expired_medicine' && s && s.game_mode !== 'solo') return '';
+                
+                const glob = s && s.item_limits_global && s.item_limits_global[k] !== undefined ? s.item_limits_global[k] : 0;
+                const pers = s && s.item_limits_per_player && s.item_limits_per_player[k] !== undefined ? s.item_limits_per_player[k] : 0;
+                return `
+                <div class="config-weight" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; border-bottom: 1px solid #333; padding-bottom: 5px;">
+                    <label style="width: 120px; font-weight: bold; color: var(--green-muted);">${v}</label>
+                    <div style="display: flex; gap: 15px; font-size: 0.9em; align-items: center;">
+                        <span style="display: flex; align-items: center; gap: 5px; color: #888;">
+                            На столе:
+                            <input type="number" class="cfg-input" id="gl_${k}" value="${glob}" min="0" max="32" style="width: 50px;">
+                        </span>
+                        <span style="display: flex; align-items: center; gap: 5px; color: #888;">
+                            У игрока:
+                            <input type="number" class="cfg-input" id="pl_${k}" value="${pers}" min="0" max="8" style="width: 50px;">
+                        </span>
+                    </div>
+                </div>`;
+            }).join('')}
+            <h4>РАУНДЫ (Начальное HP 0 = СЛУЧАЙНО ПО ПРАВИЛАМ)</h4>
             ${rounds.map((r,i) => `
                 <div class="config-round">
                     <label>Р${i+1}:</label>
-                    HP: <input type="number" class="cfg-input" id="r${i}_hp" value="${r.hp}" min="1" max="20">
+                    HP: <input type="number" class="cfg-input" id="r${i}_hp" value="${r.hp}" min="0" max="20">
                     Предм.: <input type="number" class="cfg-input" id="r${i}_items" value="${r.items_per_player}" min="0" max="8">
                     Макс.патр.: <input type="number" class="cfg-input" id="r${i}_shells" value="${r.max_shells}" min="2" max="8">
                 </div>
             `).join('')}
-            <h4>ШАНСЫ ПРЕДМЕТОВ</h4>
-            ${Object.entries(ITEM_LABELS).map(([k,v]) => {
-                const w = DEFAULT_WEIGHTS[k] || 5;
-                const odds = weightToOdds(w, DEFAULT_WEIGHTS);
-                return `
-                <div class="config-weight">
-                    <label>${v}:</label>
-                    <input type="number" class="cfg-input" id="w_${k}" value="${w}" min="0" max="50"
-                        oninput="updateOddsDisplay()">
-                    <span class="config-odds-display" id="odds_${k}">${odds}</span>
-                </div>`;
-            }).join('')}
         </div>
     `;
-}
-
-function updateOddsDisplay() {
-    const weights = {};
-    Object.keys(ITEM_LABELS).forEach(k => {
-        const el = document.getElementById('w_' + k);
-        if (el) weights[k] = parseInt(el.value) || 0;
-    });
-    Object.keys(ITEM_LABELS).forEach(k => {
-        const oddsEl = document.getElementById('odds_' + k);
-        if (oddsEl) oddsEl.textContent = weightToOdds(weights[k], weights);
-    });
 }
 
 function renderLoading(s) {
@@ -448,7 +452,11 @@ async function apiPost(url, body = {}) {
     return res;
 }
 
-function createGame() { apiPost('/api/create_game'); }
+function createGame() { 
+    const modeSelect = document.getElementById('game-mode-select');
+    const mode = modeSelect ? modeSelect.value : 'multiplayer';
+    apiPost('/api/create_game', { game_mode: mode }); 
+}
 function startGame() { apiPost('/api/start_game'); }
 function confirmShells() { apiPost('/api/confirm_shells'); }
 function confirmItems() { apiPost('/api/confirm_items'); }
@@ -482,19 +490,23 @@ function saveConfig() {
             });
         }
     }
-    const item_weights = {};
-    Object.keys(ITEM_LABELS).forEach(k => {
-        const el = document.getElementById('w_' + k);
-        if (el) item_weights[k] = parseInt(el.value);
-    });
     
     const show_shells_checkbox = document.getElementById('cfg_show_shells');
     const show_shells_to_players = show_shells_checkbox ? show_shells_checkbox.checked : true;
     
     const mag_limit_input = document.getElementById('cfg_mag_limit');
     const physical_magazine_limit = mag_limit_input ? parseInt(mag_limit_input.value) || 0 : 0;
+    
+    const item_limits_global = {};
+    const item_limits_per_player = {};
+    Object.keys(ITEM_LABELS).forEach(k => {
+        const glEl = document.getElementById('gl_' + k);
+        const plEl = document.getElementById('pl_' + k);
+        if (glEl) item_limits_global[k] = parseInt(glEl.value) || 0;
+        if (plEl) item_limits_per_player[k] = parseInt(plEl.value) || 0;
+    });
 
-    const config = JSON.stringify({rounds, item_weights, show_shells_to_players, physical_magazine_limit});
+    const config = JSON.stringify({rounds, show_shells_to_players, physical_magazine_limit, item_limits_global, item_limits_per_player});
     apiPost('/api/update_config', {config_json: config});
 }
 

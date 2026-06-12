@@ -18,7 +18,8 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from game_engine import (
-    GameState, GamePhase, GameConfig, ItemType, ITEM_LABELS, ShellType
+    GameState, GamePhase, GameConfig, ItemType, ITEM_LABELS, ShellType,
+    SOLO_DEFAULT_ROUNDS, MULTIPLAYER_DEFAULT_ROUNDS
 )
 
 # ── Globals ──
@@ -111,12 +112,15 @@ async def join_page(request: Request):
 # ── API: Game Management ──
 
 @app.post("/api/create_game")
-async def create_game():
+async def create_game(game_mode: str = Form("multiplayer")):
     global game, undo_stack
     game = GameState()
+    game.config.game_mode = game_mode
+    if game_mode == "solo":
+        game.config.rounds = [dict(r) for r in SOLO_DEFAULT_ROUNDS]
     undo_stack.clear()
     await broadcast_state()
-    return {"ok": True, "game_id": game.game_id}
+    return {"ok": True, "game_id": game.game_id, "game_mode": game_mode}
 
 
 @app.post("/api/join")
@@ -222,9 +226,9 @@ async def use_item(
         elif item == "inverter":
             game.use_item_inverter(player_id)
         elif item == "medicine_vodka":
-            result = game.use_item_expired_medicine(player_id, True)
+            result = game.use_item_expired_medicine(player_id, is_vodka=True)
         elif item == "medicine_water":
-            result = game.use_item_expired_medicine(player_id, False)
+            result = game.use_item_expired_medicine(player_id, is_vodka=False)
         else:
             raise ValueError(f"Неизвестный предмет: {item}")
 
@@ -330,12 +334,18 @@ async def update_config(config_json: str = Form(...)):
         raise HTTPException(400, "Конфигурацию можно менять только в лобби")
     try:
         data = json.loads(config_json)
+        if "game_mode" in data:
+            game.config.game_mode = data["game_mode"]
+            if data["game_mode"] == "solo":
+                game.config.rounds = [dict(r) for r in SOLO_DEFAULT_ROUNDS]
+            else:
+                game.config.rounds = [dict(r) for r in MULTIPLAYER_DEFAULT_ROUNDS]
         if "rounds" in data:
             game.config.rounds = data["rounds"]
-        if "item_weights" in data:
-            game.config.item_weights = {ItemType(k): v for k, v in data["item_weights"].items()}
-        if "max_items_per_player" in data:
-            game.config.max_items_per_player = data["max_items_per_player"]
+        if "item_limits_global" in data:
+            game.config.item_limits_global = {k: int(v) for k, v in data["item_limits_global"].items()}
+        if "item_limits_per_player" in data:
+            game.config.item_limits_per_player = {k: int(v) for k, v in data["item_limits_per_player"].items()}
         if "show_shells_to_players" in data:
             game.show_shells_to_players = data["show_shells_to_players"]
         if "physical_magazine_limit" in data:
