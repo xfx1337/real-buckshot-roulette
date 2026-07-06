@@ -152,6 +152,7 @@ class GameState:
         # Whether to show shell counts to players during dealer_loading phase
         self.show_shells_to_players: bool = True
         self.physical_loaded_count: int = 0
+        self.pending_shot: bool = False
 
     def _log(self, msg: str, event_type: str = "info"):
         self.event_log.append(GameEvent(time.time(), msg, event_type))
@@ -522,6 +523,8 @@ class GameState:
         if not target or not target.alive:
             raise ValueError("Неверная цель")
 
+        self.pending_shot = False
+
         shell = self.shells.pop(0)
         self.physical_loaded_count = max(0, self.physical_loaded_count - 1)
 
@@ -767,6 +770,7 @@ class GameState:
             "shells_remaining": len(self.shells),
             "saw_active": self.saw_active,
             "inverted": self.inverted,
+            "pending_shot": self.pending_shot,
             "current_player": {
                 "id": current.id,
                 "name": current.name,

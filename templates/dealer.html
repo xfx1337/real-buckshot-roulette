@@ -118,6 +118,19 @@
                 <div id="event-log" class="event-log"></div>
             </div>
         </div>
+        <!-- Shot Prompt Overlay (ESP32 Shot trigger) -->
+        <div id="shot-prompt-overlay" class="shot-prompt-overlay" style="display:none">
+            <div class="shot-prompt-card">
+                <div class="shot-prompt-title">⚠️ ЗАРЕГИСТРИРОВАН ВЫСТРЕЛ</div>
+                <div class="shot-prompt-subtitle">
+                    Зафиксирован выстрел с физического дробовика.<br>
+                    Пожалуйста, укажите, в кого был произведен выстрел:
+                </div>
+                <div id="shot-prompt-buttons" class="shot-prompt-buttons">
+                    <!-- Dynamically populated buttons -->
+                </div>
+            </div>
+        </div>
     </div>
 </div>
 
@@ -164,6 +177,26 @@ function render() {
 
     renderSidebar(s);
     renderLog(s.log);
+
+    // Show/hide physical shot prompt modal
+    const overlay = document.getElementById('shot-prompt-overlay');
+    if (overlay) {
+        if (s.pending_shot) {
+            overlay.style.display = 'flex';
+            const cp = s.current_player;
+            const buttonsEl = document.getElementById('shot-prompt-buttons');
+            if (buttonsEl) {
+                buttonsEl.innerHTML = s.players.filter(p => p.alive).map(p => {
+                    const isSelf = cp && p.id === cp.id;
+                    const btnClass = isSelf ? 'btn-self-shot' : 'btn-shoot';
+                    const btnLabel = isSelf ? `В СЕБЯ (игрок #${p.number} ${p.name})` : `В ОППОНЕНТА (игрок #${p.number} ${p.name})`;
+                    return `<button class="btn ${btnClass}" onclick="shoot('${p.id}')">${btnLabel}</button>`;
+                }).join('');
+            }
+        } else {
+            overlay.style.display = 'none';
+        }
+    }
 
     switch(s.phase) {
         case 'lobby': renderLobby(s); break;

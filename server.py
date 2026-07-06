@@ -283,6 +283,48 @@ async def clear_special():
     return {"ok": True}
 
 
+@app.get("/api/esp/next_shell")
+async def esp_next_shell():
+    if not game:
+        return {"shell": "empty"}
+    if not game.shells:
+        return {"shell": "empty"}
+    
+    # Get the next shell
+    next_shell = game.shells[0]
+    
+    # Take into account the inverter
+    if game.inverted:
+        from game_engine import ShellType
+        next_shell = ShellType.BLANK if next_shell == ShellType.LIVE else ShellType.LIVE
+        
+    return {"shell": next_shell.value}
+
+
+@app.get("/api/esp/shot_fired")
+async def esp_shot_fired_get():
+    if not game:
+        raise HTTPException(400, "Игра не создана")
+    if game.phase != GamePhase.PLAYER_TURN:
+        raise HTTPException(400, "Сейчас не фаза стрельбы")
+    
+    game.pending_shot = True
+    await broadcast_state()
+    return {"ok": True}
+
+
+@app.post("/api/esp/shot_fired")
+async def esp_shot_fired_post():
+    if not game:
+        raise HTTPException(400, "Игра не создана")
+    if game.phase != GamePhase.PLAYER_TURN:
+        raise HTTPException(400, "Сейчас не фаза стрельбы")
+    
+    game.pending_shot = True
+    await broadcast_state()
+    return {"ok": True}
+
+
 @app.post("/api/toggle_shells")
 async def toggle_shells():
     if not game:
