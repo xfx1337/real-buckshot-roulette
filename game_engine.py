@@ -232,6 +232,15 @@ class GameState:
         self.saw_active = False
         self.inverted = False
         self.shells_generated_in_round = 0
+
+        if self.config.game_mode in ("solo", "story"):
+            for idx, pid in enumerate(self.turn_order):
+                if self.players[pid].number == 1:
+                    self.current_turn_idx = idx
+                    break
+            else:
+                self.current_turn_idx = 0
+
         self._generate_shells()
 
     def _generate_shells(self):
