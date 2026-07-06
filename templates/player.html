@@ -162,51 +162,45 @@
         }
 
         if (data.phase === 'round_over') {
-            if (!roundOverTimeout && !showingRoundOverScreen) {
-                roundOverTimeout = setTimeout(() => {
-                    showingRoundOverScreen = true;
-                    const screens = ['state-lobby', 'state-game', 'state-dead', 'state-gameover', 'state-roundover', 'state-loading'];
-                    screens.forEach(s => document.getElementById(s).style.display = 'none');
-                    document.getElementById('state-roundover').style.display = 'flex';
-                    
-                    const container = document.getElementById('round-indicators');
-                    const msg = document.getElementById('roundover-msg');
-                    const ROMAN = ["I", "II", "III", "IV", "V", "VI", "VII"];
-                    let html = '';
-                    for (let i = 1; i <= data.total_rounds; i++) {
-                        let icon = i === data.total_rounds ? '<svg class="skull-icon-svg" viewBox="0 0 24 24"><path d="M12 2C8.13 2 5 5.13 5 9c0 2.38 1.19 4.47 3 5.74V17c0 .55.45 1 1 1h6c.55 0 1-.45 1-1v-2.26c1.81-1.27 3-3.36 3-5.74 0-3.87-3.13-7-7-7zm-1.5 8c-.83 0-1.5-.67-1.5-1.5S9.67 7 10.5 7s1.5.67 1.5 1.5-.67 1.5-1.5 1.5zm3 0c-.83 0-1.5-.67-1.5-1.5S12.67 7 13.5 7s1.5.67 1.5 1.5-.67 1.5-1.5 1.5z"/><path d="M8 20v2h8v-2H8z"/></svg>' : ROMAN[i - 1];
-                        html += `
-                            <div class="round-col">
-                                <div class="round-icon">${icon}</div>
-                                <div class="round-circle ${i === data.current_round ? 'active' : ''}" id="round-circle-${i}">
-                                    <div class="inner-circle"></div>
-                                </div>
+            if (!showingRoundOverScreen) {
+                showingRoundOverScreen = true;
+                const screens = ['state-lobby', 'state-game', 'state-dead', 'state-gameover', 'state-roundover', 'state-loading'];
+                screens.forEach(s => document.getElementById(s).style.display = 'none');
+                document.getElementById('state-roundover').style.display = 'flex';
+                
+                const container = document.getElementById('round-indicators');
+                const msg = document.getElementById('roundover-msg');
+                const ROMAN = ["I", "II", "III", "IV", "V", "VI", "VII"];
+                let html = '';
+                for (let i = 1; i <= data.total_rounds; i++) {
+                    let icon = i === data.total_rounds ? '<svg class="skull-icon-svg" viewBox="0 0 24 24"><path d="M12 2C8.13 2 5 5.13 5 9c0 2.38 1.19 4.47 3 5.74V17c0 .55.45 1 1 1h6c.55 0 1-.45 1-1v-2.26c1.81-1.27 3-3.36 3-5.74 0-3.87-3.13-7-7-7zm-1.5 8c-.83 0-1.5-.67-1.5-1.5S9.67 7 10.5 7s1.5.67 1.5 1.5-.67 1.5-1.5 1.5zm3 0c-.83 0-1.5-.67-1.5-1.5S12.67 7 13.5 7s1.5.67 1.5 1.5-.67 1.5-1.5 1.5z"/><path d="M8 20v2h8v-2H8z"/></svg>' : ROMAN[i - 1];
+                    html += `
+                        <div class="round-col">
+                            <div class="round-icon">${icon}</div>
+                            <div class="round-circle ${i === data.current_round ? 'active' : ''}" id="round-circle-${i}">
+                                <div class="inner-circle"></div>
                             </div>
-                        `;
-                    }
-                    container.innerHTML = html;
-                    msg.style.opacity = '0';
+                        </div>
+                    `;
+                }
+                container.innerHTML = html;
+                msg.style.opacity = '0';
+                
+                roundOverTimeout = setTimeout(() => {
+                    const cur = document.getElementById(`round-circle-${data.current_round}`);
+                    if (cur) cur.classList.remove('active');
+                    
+                    const next = document.getElementById(`round-circle-${data.current_round + 1}`);
+                    if (next) next.classList.add('active');
                     
                     setTimeout(() => {
-                        const cur = document.getElementById(`round-circle-${data.current_round}`);
-                        if (cur) cur.classList.remove('active');
-                        
-                        const next = document.getElementById(`round-circle-${data.current_round + 1}`);
-                        if (next) next.classList.add('active');
-                        
-                        setTimeout(() => {
-                            msg.style.opacity = '1';
-                        }, 1000);
-                    }, 1500);
-                    
-                }, 5000);
+                        msg.style.opacity = '1';
+                    }, 1000);
+                }, 1500);
             }
             
-            if (showingRoundOverScreen) {
-                document.getElementById('state-roundover').style.display = 'flex';
-                return;
-            }
-            // If the 5 seconds haven't passed yet, fall through to render the actual HP/Dead state
+            document.getElementById('state-roundover').style.display = 'flex';
+            return;
         }
 
         if (data.phase === 'dealer_loading') {
@@ -224,7 +218,7 @@
         }
 
         // Dead
-        if (data.game_mode === 'solo') {
+        if (data.game_mode === 'solo' || data.game_mode === 'story') {
             // In solo mode, show game over screen if either dies (no dead screen)
             if (!data.my_alive || (data.opponent_alive !== undefined && !data.opponent_alive)) {
                 // If it's not game_over phase yet, it will be soon. Just wait.
@@ -241,7 +235,7 @@
         document.getElementById('state-game').style.display = 'flex';
 
         // Solo Mode adjustments
-        if (data.game_mode === 'solo') {
+        if (data.game_mode === 'solo' || data.game_mode === 'story') {
             document.getElementById('mp-layout').style.display = 'none';
             document.getElementById('solo-layout').style.display = 'flex';
             
@@ -284,8 +278,8 @@
             }
             
             // Bolts
-            renderBolts(data.opponent_hp, data.opponent_max_hp, 'opponent-lightning-container');
-            renderBolts(data.my_hp, data.my_max_hp, 'solo-lightning-container');
+            renderBolts(data.opponent_hp, data.opponent_max_hp, 'opponent-lightning-container', data.game_mode, data.current_round);
+            renderBolts(data.my_hp, data.my_max_hp, 'solo-lightning-container', data.game_mode, data.current_round);
         } else {
             document.getElementById('mp-layout').style.display = 'flex';
             document.getElementById('solo-layout').style.display = 'none';
@@ -306,17 +300,28 @@
                 turnLabel.classList.remove('active');
             }
 
-            renderBolts(data.my_hp, data.my_max_hp, 'lightning-container-mp');
+            renderBolts(data.my_hp, data.my_max_hp, 'lightning-container-mp', data.game_mode, data.current_round);
         }
     }
 
-    function renderBolts(hp, maxHp, containerId) {
+    function renderBolts(hp, maxHp, containerId, gameMode, currentRound) {
         const container = document.getElementById(containerId);
         const isCritical = hp === 1 && maxHp > 1;
+        const isStoryStage3 = gameMode === 'story' && currentRound === 3;
         let html = '';
         for (let i = 0; i < maxHp; i++) {
             const alive = i < hp;
-            const cls = alive ? (isCritical ? 'alive critical' : 'alive') : 'dead';
+            let cls = alive ? (isCritical ? 'alive critical' : 'alive') : 'dead';
+            
+            // In Story Stage 3, the first 2 charges (i.e. index 0 and 1) are faded/damaged/cut-cables charges
+            if (isStoryStage3 && i < 2) {
+                if (alive) {
+                    cls += ' faded-charge';
+                } else {
+                    cls += ' faded-charge-dead';
+                }
+            }
+            
             html += `<div class="lightning-bolt ${cls}">${BOLT_SVG}</div>`;
         }
         container.innerHTML = html;

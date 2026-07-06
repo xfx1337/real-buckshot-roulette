@@ -29,6 +29,7 @@
                     <select id="game-mode-select" class="cfg-input" style="width: 100%; padding: 10px; font-size: 1.1rem; background: var(--bg-dark); color: var(--text-main); border: 2px solid var(--border-color); border-radius: 4px;">
                         <option value="multiplayer">Мультиплеер (2-4 игрока)</option>
                         <option value="solo">Соло / 1 на 1 (1 телефон на двоих)</option>
+                        <option value="story">1vs1 Story Mode (3 стадии с лимитом предметов)</option>
                     </select>
                 </div>
                 <button class="btn btn-dealer" onclick="createGame()">СОЗДАТЬ ИГРУ</button>
@@ -198,7 +199,13 @@ function renderLobby(s) {
     // Show current mode
     const modeBadge = document.getElementById('current-mode-badge');
     if (modeBadge) {
-        modeBadge.textContent = s.game_mode === 'solo' ? '[ РЕЖИМ 1 на 1 ]' : '[ МУЛЬТИПЛЕЕР ]';
+        if (s.game_mode === 'story') {
+            modeBadge.textContent = '[ 1vs1 STORY MODE ]';
+        } else if (s.game_mode === 'solo') {
+            modeBadge.textContent = '[ РЕЖИМ 1 на 1 ]';
+        } else {
+            modeBadge.textContent = '[ МУЛЬТИПЛЕЕР ]';
+        }
     }
 
     const el = document.getElementById('lobby-players');
@@ -210,7 +217,7 @@ function renderLobby(s) {
         </div>
     `).join('') || '<p class="hint">---</p>';
     
-    if (s.game_mode === 'solo') {
+    if (s.game_mode === 'solo' || s.game_mode === 'story') {
         document.getElementById('btn-start').disabled = s.players.length !== 1;
         document.getElementById('lobby-hint').textContent = `Игроков: ${s.players.length}/1 (Только один игрок должен зайти с телефона)`;
     } else {
@@ -223,7 +230,7 @@ function renderLobby(s) {
 function renderConfigEditor(s) {
     const el = document.getElementById('config-editor');
     const isChecked = s && s.show_shells_to_players !== false ? 'checked' : '';
-    const rounds = [
+    const rounds = (s && s.rounds_config) ? s.rounds_config : [
         {hp:0, items_per_player:0, max_shells:4},
         {hp:0, items_per_player:2, max_shells:6},
         {hp:0, items_per_player:4, max_shells:8}
@@ -478,17 +485,18 @@ function hideSpecial() {
 
 function saveConfig() {
     const rounds = [];
-    for (let i = 0; i < 3; i++) {
+    let i = 0;
+    while (true) {
         const hp = document.getElementById(`r${i}_hp`);
         const items = document.getElementById(`r${i}_items`);
         const shells = document.getElementById(`r${i}_shells`);
-        if (hp && items && shells) {
-            rounds.push({
-                hp: parseInt(hp.value),
-                items_per_player: parseInt(items.value),
-                max_shells: parseInt(shells.value)
-            });
-        }
+        if (!hp || !items || !shells) break;
+        rounds.push({
+            hp: parseInt(hp.value),
+            items_per_player: parseInt(items.value),
+            max_shells: parseInt(shells.value)
+        });
+        i++;
     }
     
     const show_shells_checkbox = document.getElementById('cfg_show_shells');

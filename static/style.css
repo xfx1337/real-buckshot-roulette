@@ -356,8 +356,17 @@ body {
     filter: drop-shadow(0 0 3px rgba(122, 166, 104, 0.4));
 }
 
+.lightning-bolt.alive.faded-charge svg path {
+    fill: #8a7c5c;
+    filter: drop-shadow(0 0 2px rgba(138, 124, 92, 0.3));
+}
+
 .lightning-bolt.dead svg path {
     fill: #1a1a1a;
+}
+
+.lightning-bolt.faded-charge-dead svg path {
+    fill: #1b1712;
 }
 
 .lightning-bolt.alive.critical svg path {

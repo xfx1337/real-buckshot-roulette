@@ -19,7 +19,7 @@ from fastapi.templating import Jinja2Templates
 
 from game_engine import (
     GameState, GamePhase, GameConfig, ItemType, ITEM_LABELS, ShellType,
-    SOLO_DEFAULT_ROUNDS, MULTIPLAYER_DEFAULT_ROUNDS
+    SOLO_DEFAULT_ROUNDS, STORY_DEFAULT_ROUNDS, MULTIPLAYER_DEFAULT_ROUNDS
 )
 
 # ── Globals ──
@@ -118,6 +118,8 @@ async def create_game(game_mode: str = Form("multiplayer")):
     game.config.game_mode = game_mode
     if game_mode == "solo":
         game.config.rounds = [dict(r) for r in SOLO_DEFAULT_ROUNDS]
+    elif game_mode == "story":
+        game.config.rounds = [dict(r) for r in STORY_DEFAULT_ROUNDS]
     undo_stack.clear()
     await broadcast_state()
     return {"ok": True, "game_id": game.game_id, "game_mode": game_mode}
@@ -338,6 +340,8 @@ async def update_config(config_json: str = Form(...)):
             game.config.game_mode = data["game_mode"]
             if data["game_mode"] == "solo":
                 game.config.rounds = [dict(r) for r in SOLO_DEFAULT_ROUNDS]
+            elif data["game_mode"] == "story":
+                game.config.rounds = [dict(r) for r in STORY_DEFAULT_ROUNDS]
             else:
                 game.config.rounds = [dict(r) for r in MULTIPLAYER_DEFAULT_ROUNDS]
         if "rounds" in data:
