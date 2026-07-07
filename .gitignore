@@ -4,3 +4,7 @@ __pycache__/
 venv/
 env/
 .pytest_cache/
+
+# Godot source project (large binary/asset tree, not part of the web app)
+/Buckshot Roulette/
+/Buckshot Roulette веб-дизайн/
