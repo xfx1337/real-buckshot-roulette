@@ -48,12 +48,12 @@
 RCSwitch rfTrigger = RCSwitch();
 
 // ── Тайминги ──
-static const unsigned long POLL_INTERVAL_MS = 1000;      // как часто спрашивать сервер о статусе патрона
-static const unsigned long HTTP_TIMEOUT_MS = 400;        // короткий таймаут, чтобы не подвесить loop()
+static const unsigned long POLL_INTERVAL_MS = 5000;      // фоновый опрос для LED-индикатора (компромисс: реже = меньше конфликта с RF)
+static const unsigned long HTTP_TIMEOUT_MS = 1500;       // таймаут HTTP; 400мс было мало для первого TCP-хендшейка
 static const unsigned long SOLENOID_PULSE_MS = 150;      // длительность импульса на соленоид (100-200ms)
 static const unsigned long SOLENOID_MAX_ON_MS = 500;     // аварийный предел — жёстко выключаем после него
 static const unsigned long TRIGGER_DEBOUNCE_MS = 250;    // минимальный интервал между выстрелами
-static const unsigned long WIFI_RETRY_INTERVAL_MS = 5000;
+static const unsigned long WIFI_RETRY_INTERVAL_MS = 10000;  // даём WPA2-хендшейку время завершиться перед повтором
 static const unsigned long LIVE_LED_BLINK_MS = 300;      // период мигания лампочки D2
 
 // ── Состояние ──
@@ -68,6 +68,11 @@ unsigned long solenoidOnSinceMs = 0;
 
 bool liveLedOn = false;
 unsigned long lastLiveLedToggleMs = 0;
+
+// Флаг «нужно сообщить серверу о выстреле». Ставится в fireTrigger() (в
+// обработчике курка), а сам HTTP-запрос уходит в loop() — чтобы не делать
+// блокирующий сетевой вызов внутри обработки RF.
+bool pendingShoot = false;
 
 void updateLiveLed() {
     if (!(cachedReady && cachedLive)) {
@@ -126,9 +131,22 @@ void scanNetworks() {
 }
 
 void ensureWifiConnected() {
+    static bool wasConnected = false;
+
     if (WiFi.status() == WL_CONNECTED) {
+        if (!wasConnected) {
+            wasConnected = true;
+            Serial.print("[WiFi] Подключено! IP: ");
+            Serial.println(WiFi.localIP());
+        }
         return;
     }
+
+    if (wasConnected) {
+        wasConnected = false;
+        Serial.println("[WiFi] Соединение потеряно.");
+    }
+
     unsigned long now = millis();
     if (now - lastWifiAttemptMs < WIFI_RETRY_INTERVAL_MS) {
         return;
@@ -136,15 +154,22 @@ void ensureWifiConnected() {
     lastWifiAttemptMs = now;
     Serial.print("[WiFi] Не подключено (статус: ");
     Serial.print(wifiStatusToStr(WiFi.status()));
-    Serial.println("), пробую (пере)подключиться...");
-    WiFi.disconnect();
+    Serial.println("), пробую переподключиться...");
+    // ВАЖНО: не дёргаем WiFi.disconnect() — он рвёт ещё идущий WPA2-хендшейк
+    // (тот занимает несколько секунд). Просто повторяем begin(); ESP сам
+    // продолжит попытку. disconnect() тут был причиной вечного DISCONNECTED.
     WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
 }
 
-void pollShellStatus() {
+// Запрашивает у сервера статус следующего патрона и обновляет cachedReady/
+// cachedLive. Возвращает true, если сервер ответил (данные свежие). Сбрасывает
+// таймер фонового опроса — синхронный вызов при выстреле считается за опрос.
+bool pollShellStatus() {
+    lastPollMs = millis();
+
     if (WiFi.status() != WL_CONNECTED) {
         cachedReady = false;
-        return;
+        return false;
     }
 
     HTTPClient http;
@@ -152,10 +177,11 @@ void pollShellStatus() {
     String url = String(SERVER_BASE_URL) + "/api/esp/shell_status";
     if (!http.begin(url)) {
         cachedReady = false;
-        return;
+        return false;
     }
 
     int code = http.GET();
+    bool ok = false;
     if (code == HTTP_CODE_OK) {
         String body = http.getString();
         // Крошечный JSON вида {"ready": true, "live": false} — парсим руками,
@@ -164,12 +190,43 @@ void pollShellStatus() {
         bool live = body.indexOf("\"live\": true") >= 0 || body.indexOf("\"live\":true") >= 0;
         cachedReady = ready;
         cachedLive = live;
+        ok = true;
     } else {
         Serial.print("[HTTP] Ошибка опроса статуса патрона, код: ");
         Serial.println(code);
         cachedReady = false;
     }
     http.end();
+    return ok;
+}
+
+// Сообщает серверу о выстреле: POST /api/esp/shoot выталкивает текущий патрон
+// из очереди (патрон "продвигается"). После этого сразу обновляем кэш свежим
+// статусом следующего патрона. Вызывается из loop(), не из обработчика курка.
+void sendShootToServer() {
+    if (WiFi.status() != WL_CONNECTED) {
+        return;
+    }
+
+    HTTPClient http;
+    http.setTimeout(HTTP_TIMEOUT_MS);
+    String url = String(SERVER_BASE_URL) + "/api/esp/shoot";
+    if (!http.begin(url)) {
+        return;
+    }
+    http.addHeader("Content-Type", "application/x-www-form-urlencoded");
+    int code = http.POST("");
+    if (code == HTTP_CODE_OK) {
+        Serial.println("[HTTP] Выстрел зарегистрирован, патрон продвинут.");
+    } else {
+        Serial.print("[HTTP] Ошибка регистрации выстрела, код: ");
+        Serial.println(code);
+    }
+    http.end();
+
+    // Сразу подтягиваем статус следующего патрона, чтобы LED/кэш обновились
+    // не дожидаясь очередного фонового опроса.
+    pollShellStatus();
 }
 
 void fireTrigger() {
@@ -182,6 +239,10 @@ void fireTrigger() {
     }
     lastTriggerMs = now;
 
+    // Решение о соленоиде принимаем МГНОВЕННО по закэшированному статусу
+    // (обновляется фоновым опросом). Синхронный HTTP-запрос здесь делать
+    // НЕЛЬЗЯ: блокирующий вызов вешает loop(), рвёт Wi-Fi и роняет плату по
+    // watchdog. Поэтому уведомление сервера откладываем через pendingShoot.
     if (cachedReady && cachedLive) {
         Serial.println(">>> Курок: боевой патрон — импульс на соленоид!");
         setSolenoid(true);
@@ -189,6 +250,12 @@ void fireTrigger() {
         setSolenoid(false);
     } else {
         Serial.println(">>> Курок: холостой (или сервер недоступен/не фаза стрельбы) — тишина.");
+    }
+
+    // Патрон продвигается в любом случае (курок спущен = патрон ушёл), поэтому
+    // просим сервер вытолкнуть текущий патрон независимо от боевой/холостой.
+    if (cachedReady) {
+        pendingShoot = true;
     }
 }
 
@@ -202,7 +269,7 @@ void handleRfTrigger() {
     unsigned int bitLength = rfTrigger.getReceivedBitlength();
 
     if (KNOWN_TRIGGER_CODE == 0) {
-        // Режим обучения: печатаем всё, что поймали, чтобы узнать код пульта-курка.
+        // Режим обучения: печатаем пойманный код, чтобы вписать его в config.json.
         if (code == 0) {
             Serial.println("[RF] Не удалось декодировать код (нестандартный протокол).");
         } else {
@@ -233,17 +300,28 @@ void setup() {
     pinMode(SOLENOID_PIN, OUTPUT);
     digitalWrite(SOLENOID_PIN, LOW);
 
-    rfTrigger.enableReceive(digitalPinToInterrupt(TRIGGER_PIN));
-
     digitalWrite(LIVE_LED_PIN, LOW);
     pinMode(LIVE_LED_PIN, OUTPUT);
     digitalWrite(LIVE_LED_PIN, LOW);
 
+    // Сначала поднимаем Wi-Fi, и только потом включаем RF-приёмник. Иначе
+    // прерывания от шумящего приёмника на GPIO4 сыплются во время критичного
+    // WPA2-хендшейка и мешают ему завершиться.
     WiFi.mode(WIFI_STA);
-    WiFi.disconnect();
-    delay(100);
-    scanNetworks();
     WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+    Serial.print("[WiFi] Подключаюсь к \"");
+    Serial.print(WIFI_SSID);
+    Serial.println("\"...");
+
+    // Даём хендшейку шанс завершиться до входа в loop (до ~8 секунд).
+    unsigned long startAttempt = millis();
+    while (WiFi.status() != WL_CONNECTED && millis() - startAttempt < 8000) {
+        delay(250);
+        Serial.print(".");
+    }
+    Serial.println();
+
+    rfTrigger.enableReceive(digitalPinToInterrupt(TRIGGER_PIN));
 }
 
 void loop() {
@@ -256,13 +334,20 @@ void loop() {
         setSolenoid(false);
     }
 
-    unsigned long now = millis();
-    if (now - lastPollMs >= POLL_INTERVAL_MS) {
-        lastPollMs = now;
+    // Фоновый опрос для LED-индикатора. lastPollMs обновляется внутри
+    // pollShellStatus(), поэтому выстрел (тоже вызывающий опрос) сдвигает
+    // следующий фоновый опрос, а не дублирует запрос сразу после.
+    if (millis() - lastPollMs >= POLL_INTERVAL_MS) {
         pollShellStatus();
     }
 
     updateLiveLed();
 
     handleRfTrigger();
+
+    // Отложенное уведомление сервера о выстреле (HTTP вне обработчика курка).
+    if (pendingShoot) {
+        pendingShoot = false;
+        sendShootToServer();
+    }
 }
