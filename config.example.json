@@ -1,0 +1,21 @@
+{
+  "server": {
+    "host": "0.0.0.0",
+    "port": 8000
+  },
+  "esp": {
+    "wifi_ssid": "YOUR_WIFI_SSID",
+    "wifi_password": "YOUR_WIFI_PASSWORD",
+    "server_base_url": "http://192.168.1.100:8000",
+    "pins": {
+      "trigger": 4,
+      "solenoid": 5,
+      "live_led": 2
+    },
+    "trigger_remote": {
+      "code": 0,
+      "protocol": 1,
+      "bitlength": 24
+    }
+  }
+}

@@ -369,6 +369,22 @@ class GameState:
         cp = self.players[self.turn_order[self.current_turn_idx]]
         self._log(f">> Ход игрока #{cp.number} [{cp.name}]", "info")
 
+    # ── ESP32 Trigger Integration ──
+
+    def esp_shell_status(self) -> dict:
+        """
+        Read-only status of the shell that WOULD be fired right now, for the
+        physical solenoid trigger. Does not mutate any state (no popping,
+        no shell consumption) — safe to poll repeatedly.
+        """
+        ready = self.phase == GamePhase.PLAYER_TURN and len(self.shells) > 0
+        if not ready:
+            return {"ready": False, "live": False}
+        effective = self.shells[0]
+        if self.inverted:
+            effective = ShellType.BLANK if effective == ShellType.LIVE else ShellType.LIVE
+        return {"ready": True, "live": effective == ShellType.LIVE}
+
     # ── Turn Management ──
 
     def get_current_player(self) -> Optional[Player]:

@@ -5,6 +5,14 @@ venv/
 env/
 .pytest_cache/
 
+# macOS
+.DS_Store
+
+# Локальный конфиг с реальными данными (Wi-Fi пароль и т.п.) — не в git.
+# В репозитории только config.example.json как шаблон.
+config.json
+esp/config.h
+
 # Godot source project (large binary/asset tree, not part of the web app)
 /Buckshot Roulette/
 /Buckshot Roulette веб-дизайн/
