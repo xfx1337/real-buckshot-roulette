@@ -4,12 +4,14 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>DEALER — Buckshot Roulette IRL</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link rel="stylesheet" href="/static/style.css">
 </head>
 <body class="page-dealer">
 <div id="dealer-app">
     <header class="dealer-header">
-        <h1>DEALER</h1>
+        <h1 style="font-family:var(--font-display); letter-spacing:5px;">// IRL ДИЛЛЕР</h1>
         <div class="header-controls">
             <button class="btn btn-secondary btn-small" onclick="undoAction()" id="btn-undo" style="display:none; margin-right: 10px;">ОТКАТИТЬ</button>
             <span id="header-phase" class="phase-badge">---</span>
@@ -25,8 +27,8 @@
             <div id="panel-nogame" class="panel">
                 <h2>НЕТ АКТИВНОЙ ИГРЫ</h2>
                 <div style="margin-bottom: 20px;">
-                    <label for="game-mode-select" style="display: block; margin-bottom: 10px; color: var(--green-muted); font-weight: bold;">РЕЖИМ ИГРЫ:</label>
-                    <select id="game-mode-select" class="cfg-input" style="width: 100%; padding: 10px; font-size: 1.1rem; background: var(--bg-dark); color: var(--text-main); border: 2px solid var(--border-color); border-radius: 4px;">
+                    <label for="game-mode-select" style="display: block; margin-bottom: 10px; color: var(--text-dim); font-weight: bold;">РЕЖИМ ИГРЫ:</label>
+                    <select id="game-mode-select" class="cfg-input" style="width: 100%; padding: 10px; font-size: 1.1rem; background: var(--bg); color: var(--text-bright); border: 2px solid var(--border-light); border-radius: 4px;">
                         <option value="multiplayer">Мультиплеер (2-4 игрока)</option>
                         <option value="solo">Соло / 1 на 1 (1 телефон на двоих)</option>
                     </select>
@@ -248,7 +250,7 @@ function renderConfigEditor(s) {
                 const pers = s && s.item_limits_per_player && s.item_limits_per_player[k] !== undefined ? s.item_limits_per_player[k] : 0;
                 return `
                 <div class="config-weight" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; border-bottom: 1px solid #333; padding-bottom: 5px;">
-                    <label style="width: 120px; font-weight: bold; color: var(--green-muted);">${v}</label>
+                    <label style="width: 120px; font-weight: bold; color: var(--text-dim);">${v}</label>
                     <div style="display: flex; gap: 15px; font-size: 0.9em; align-items: center;">
                         <span style="display: flex; align-items: center; gap: 5px; color: #888;">
                             На столе:
@@ -301,7 +303,8 @@ function updateToggleShellsBtn(s) {
     const btn = document.getElementById('btn-toggle-shells');
     if (!btn) return;
     const showing = s.show_shells_to_players !== false;
-    btn.textContent = showing ? '🔓 ПАТРОНЫ ВИДНЫ' : '🔒 ПАТРОНЫ СКРЫТЫ';
+    const icon = showing ? '/static/icons/check-active.png' : '/static/icons/check-inactive.png';
+    btn.innerHTML = `<img src="${icon}" class="check-icon" alt=""> ПАТРОНЫ ${showing ? 'ВИДНЫ' : 'СКРЫТЫ'}`;
     btn.classList.toggle('shells-hidden', !showing);
     btn.classList.toggle('shells-visible', showing);
 }
@@ -330,7 +333,7 @@ function renderTurn(s) {
     document.getElementById('saw-badge').style.display = s.saw_active ? 'inline-block' : 'none';
     document.getElementById('invert-badge').style.display = s.inverted ? 'inline-block' : 'none';
 
-    const seq = s.shells_sequence.map((x, i) => `<span style="color:${x === 'live' ? 'var(--red)' : 'var(--green-muted)'}">${i+1}-й: ${x === 'live' ? 'Боевой' : 'Холостой'}</span>`).join('<br>');
+    const seq = s.shells_sequence.map((x, i) => `<span style="color:${x === 'live' ? 'var(--red)' : 'var(--text-dim)'}">${i+1}-й: ${x === 'live' ? 'Боевой' : 'Холостой'}</span>`).join('<br>');
     document.getElementById('shell-mini-info').innerHTML =
         `Патронов: ${s.shells_remaining} | Боевых: ${s.live_count} | Холостых: ${s.blank_count}<br><br><span style="opacity:0.6;font-size:0.9em">Порядок ВЫСТРЕЛОВ:</span><br>${seq}`;
 

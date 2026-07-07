@@ -4,9 +4,13 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Player #{{ player.number }}</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link rel="stylesheet" href="/static/style.css">
 </head>
 <body class="page-player">
+    <div class="crt-vignette" style="z-index:5;"></div>
+    <div class="crt-scanlines" style="z-index:6; opacity:.4;"></div>
     <div id="player-app" data-player-id="{{ player.id }}">
 
         <!-- Connecting -->
@@ -82,13 +86,52 @@
         </div>
     </div>
 
-    <div class="leave-btn-container">
-        <button class="btn" onclick="leaveGame()">exit</button>
+    <div id="fullscreen-gate" class="fullscreen-gate">
+        <div class="fullscreen-gate-inner">
+            <div class="player-lobby-msg">tap to start<span class="cursor-blink">_</span></div>
+        </div>
     </div>
 
     <script>
-    const BOLT_SVG = '<svg viewBox="0 0 22 44" xmlns="http://www.w3.org/2000/svg"><path d="M13 0L4 18h6L6 44l14-26h-7L13 0z"/></svg>';
+    // ── Fullscreen + wake lock ──
+    // Browsers require a user gesture to enter fullscreen / grant wake lock,
+    // so the gate overlay captures the first tap on the phone screen.
+    let wakeLock = null;
 
+    async function requestWakeLock() {
+        if (!('wakeLock' in navigator)) return;
+        try {
+            wakeLock = await navigator.wakeLock.request('screen');
+            wakeLock.addEventListener('release', () => { wakeLock = null; });
+        } catch (e) {
+            // ignore — e.g. low battery or unsupported
+        }
+    }
+
+    document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible' && !wakeLock) {
+            requestWakeLock();
+        }
+    });
+
+    function enterImmersiveMode() {
+        const el = document.documentElement;
+        const req = el.requestFullscreen || el.webkitRequestFullscreen;
+        if (req) {
+            req.call(el).catch(() => {});
+        }
+        requestWakeLock();
+        document.getElementById('fullscreen-gate').classList.add('hidden');
+    }
+
+    document.getElementById('fullscreen-gate').addEventListener('click', enterImmersiveMode);
+    document.getElementById('fullscreen-gate').addEventListener('touchend', (e) => {
+        e.preventDefault();
+        enterImmersiveMode();
+    });
+    </script>
+
+    <script>
     const playerId = document.getElementById('player-app').dataset.playerId;
     let ws;
     let reconnectTimer;
@@ -174,12 +217,13 @@
                     const ROMAN = ["I", "II", "III", "IV", "V", "VI", "VII"];
                     let html = '';
                     for (let i = 1; i <= data.total_rounds; i++) {
-                        let icon = i === data.total_rounds ? '<svg class="skull-icon-svg" viewBox="0 0 24 24"><path d="M12 2C8.13 2 5 5.13 5 9c0 2.38 1.19 4.47 3 5.74V17c0 .55.45 1 1 1h6c.55 0 1-.45 1-1v-2.26c1.81-1.27 3-3.36 3-5.74 0-3.87-3.13-7-7-7zm-1.5 8c-.83 0-1.5-.67-1.5-1.5S9.67 7 10.5 7s1.5.67 1.5 1.5-.67 1.5-1.5 1.5zm3 0c-.83 0-1.5-.67-1.5-1.5S12.67 7 13.5 7s1.5.67 1.5 1.5-.67 1.5-1.5 1.5z"/><path d="M8 20v2h8v-2H8z"/></svg>' : ROMAN[i - 1];
+                        const isFinal = i === data.total_rounds;
+                        let icon = isFinal ? '<img class="skull-icon-svg" src="/static/icons/skull.png" alt="">' : ROMAN[i - 1];
                         html += `
                             <div class="round-col">
                                 <div class="round-icon">${icon}</div>
                                 <div class="round-circle ${i === data.current_round ? 'active' : ''}" id="round-circle-${i}">
-                                    <div class="inner-circle"></div>
+                                    <img class="inner-circle" src="/static/icons/round-dot.png" alt="">
                                 </div>
                             </div>
                         `;
@@ -317,21 +361,10 @@
         for (let i = 0; i < maxHp; i++) {
             const alive = i < hp;
             const cls = alive ? (isCritical ? 'alive critical' : 'alive') : 'dead';
-            html += `<div class="lightning-bolt ${cls}">${BOLT_SVG}</div>`;
+            const src = (alive && isCritical) ? '/static/icons/bolt-critical.png' : '/static/icons/bolt-alive.png';
+            html += `<div class="lightning-bolt ${cls}"><img src="${src}" alt=""></div>`;
         }
         container.innerHTML = html;
-    }
-
-    function leaveGame() {
-        if (confirm('leave the game?')) {
-            fetch('/api/remove_player', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/x-www-form-urlencoded'},
-                body: 'player_id=' + playerId
-            }).then(() => {
-                window.location.href = '/';
-            });
-        }
     }
 
     connect();
