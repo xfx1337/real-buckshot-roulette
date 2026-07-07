@@ -748,6 +748,26 @@ async def esp_shell_status():
     return game.esp_shell_status()
 
 
+@app.post(
+    "/api/esp/shoot",
+    tags=["ESP32"],
+    summary="Продвинуть патрон по сигналу физического курка",
+    description=(
+        "Вызывается прошивкой ESP32 в момент физического выстрела (RF-курок). "
+        "Выталкивает текущий патрон из очереди, чтобы статус показал следующий, "
+        "и рассылает обновление состояния дилеру/игрокам. **Не наносит урон и не "
+        "меняет ход** — игровую логику по-прежнему ведёт дилер через веб-интерфейс."
+    ),
+)
+async def esp_shoot():
+    if not game:
+        return {"ok": False, "fired": False}
+    result = game.esp_shoot()
+    if result.get("fired"):
+        await broadcast_state()
+    return result
+
+
 # ── WebSockets ──
 #
 # WebSocket-эндпоинты не отображаются в OpenAPI/Swagger (спецификация OpenAPI 3.0

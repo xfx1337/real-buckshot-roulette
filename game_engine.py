@@ -385,6 +385,35 @@ class GameState:
             effective = ShellType.BLANK if effective == ShellType.LIVE else ShellType.LIVE
         return {"ready": True, "live": effective == ShellType.LIVE}
 
+    def esp_shoot(self) -> dict:
+        """
+        Продвинуть патрон вперёд по сигналу физического курка (ESP32): вытолкнуть
+        текущий патрон из очереди, чтобы shell_status показал следующий. НЕ
+        наносит урон и НЕ меняет ход — игровую логику (кто в кого, урон, ходы)
+        по-прежнему ведёт дилер через веб. Это только физическая синхронизация
+        "патрон в стволе сдвинулся".
+        """
+        if self.phase != GamePhase.PLAYER_TURN or not self.shells:
+            return {"ok": False, "fired": False, "shells_remaining": len(self.shells)}
+
+        shell = self.shells.pop(0)
+        self.physical_loaded_count = max(0, self.physical_loaded_count - 1)
+
+        effective = shell
+        if self.inverted:
+            effective = ShellType.BLANK if shell == ShellType.LIVE else ShellType.LIVE
+            self.inverted = False
+
+        label = "БОЕВОЙ" if effective == ShellType.LIVE else "ХОЛОСТОЙ"
+        self._log(f"[КУРОК] Выстрел (физический): {label}, патрон продвинут", "shot")
+
+        return {
+            "ok": True,
+            "fired": True,
+            "live": effective == ShellType.LIVE,
+            "shells_remaining": len(self.shells),
+        }
+
     # ── Turn Management ──
 
     def get_current_player(self) -> Optional[Player]:
