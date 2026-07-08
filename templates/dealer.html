@@ -1,19 +1,327 @@
 <!DOCTYPE html>
-<html lang="ru">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>DEALER — Buckshot Roulette IRL</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link rel="stylesheet" href="/static/style.css">
+<html lang="ru"><head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DEALER — Buckshot Roulette IRL</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=EB+Garamond:ital,wght@0,400;0,500;0,600;0,700;0,800;1,400;1,600&family=Share+Tech+Mono&family=Special+Elite&display=swap">
+<style>
+:root{
+  --bg:#0a0a0a;
+  --panel:linear-gradient(160deg,#181310,#120e0d);
+  --panel-2:linear-gradient(180deg,#1a1513,#100c0b);
+  --green:#3fef6a;
+  --green-bright:#5fff8f;
+  --red:#a83232;
+  --red-deep:#7a1f1f;
+  --text:#b8a99a;
+  --text-bright:#e8ddce;
+  --text-dim:#8f8073;
+  --text-faint:#6e5f52;
+  --border:#241614;
+  --border-light:#322217;
+  --border-metal:#3a2a22;
+  --font-display:'EB Garamond',Georgia,serif;
+  --font-mono:'Share Tech Mono',monospace;
+  --font-type:'Special Elite',monospace;
+  --glow:6px;
+}
+*{ box-sizing:border-box; }
+html,body{ margin:0; padding:0; min-height:100%; }
+body{
+  background:radial-gradient(120% 90% at 70% 0%, #1a0d0d 0%, #121010 40%, #0a0a0a 100%);
+  background-attachment:fixed;
+  color:var(--text);
+  font-family:var(--font-display);
+  -webkit-font-smoothing:antialiased;
+  cursor:crosshair;
+  overflow-x:hidden;
+}
+a{ color:var(--green); text-decoration:none; }
+a:hover{ color:var(--green-bright); }
+::selection{ background:var(--green); color:#0a0a0a; }
+::-webkit-scrollbar{ width:9px; height:9px; }
+::-webkit-scrollbar-track{ background:#0c0a09; }
+::-webkit-scrollbar-thumb{ background:#2a2018; border:1px solid #0c0a09; }
+::-webkit-scrollbar-thumb:hover{ background:#3a2a22; }
+
+@keyframes grainShift{ 0%{transform:translate(0,0)} 10%{transform:translate(-4%,-4%)} 30%{transform:translate(3%,-2%)} 50%{transform:translate(-2%,4%)} 70%{transform:translate(4%,2%)} 90%{transform:translate(-3%,-3%)} 100%{transform:translate(0,0)} }
+@keyframes redPulse{ 0%,100%{opacity:1} 50%{opacity:.35} }
+@keyframes glitch{ 0%{transform:translate(0,0)} 25%{transform:translate(-2px,1px)} 50%{transform:translate(2px,-1px)} 75%{transform:translate(-1px,-1px)} 100%{transform:translate(0,0)} }
+@keyframes blink{ 50%{opacity:0} }
+@keyframes drift{ 0%,100%{transform:translate(0,0) scale(1);opacity:.5} 50%{transform:translate(20px,-14px) scale(1.15);opacity:.75} }
+@keyframes logIn{ from{opacity:0; transform:translateX(-8px)} to{opacity:1; transform:translateX(0)} }
+
+/* ── ambient overlays ── */
+.amb-smoke,.amb-vignette,.amb-grain,.amb-scan{ position:fixed; pointer-events:none; }
+.amb-smoke{ inset:0; z-index:1; }
+.amb-smoke i{ position:absolute; border-radius:50%; display:block; }
+.amb-smoke i:nth-child(1){ bottom:-80px; left:-60px; width:420px; height:420px; background:radial-gradient(circle, rgba(43,20,20,.55), transparent 65%); filter:blur(30px); animation:drift 14s ease-in-out infinite; }
+.amb-smoke i:nth-child(2){ top:-100px; right:-80px; width:460px; height:460px; background:radial-gradient(circle, rgba(26,13,13,.6), transparent 65%); filter:blur(34px); animation:drift 18s ease-in-out infinite reverse; }
+.amb-vignette{ inset:0; z-index:60; box-shadow:inset 0 0 200px 40px rgba(0,0,0,.9), inset 0 0 60px rgba(0,0,0,.7); }
+.amb-grain{ inset:-20%; z-index:61; opacity:.5; mix-blend-mode:overlay; animation:grainShift 1.2s steps(3) infinite;
+  background-image:url('data:image/svg+xml;utf8,<svg xmlns=%22http://www.w3.org/2000/svg%22 width=%22140%22 height=%22140%22><filter id=%22n%22><feTurbulence type=%22fractalNoise%22 baseFrequency=%220.9%22 numOctaves=%222%22 stitchTiles=%22stitch%22/></filter><rect width=%22100%25%22 height=%22100%25%22 filter=%22url(%23n)%22/></svg>'); }
+.amb-scan{ inset:0; z-index:62; opacity:.3; background:repeating-linear-gradient(to bottom, rgba(0,0,0,0) 0px, rgba(0,0,0,0) 2px, rgba(0,0,0,.35) 3px, rgba(0,0,0,0) 4px); }
+
+#dealer-app{ position:relative; z-index:15; }
+
+/* ── header ── */
+.dealer-header{
+  position:sticky; top:0; z-index:40;
+  display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:12px 16px;
+  padding:14px clamp(14px,3vw,32px);
+  border-bottom:1px solid var(--border);
+  background:linear-gradient(180deg, rgba(20,16,16,.94), rgba(10,10,10,.82));
+  backdrop-filter:blur(4px);
+}
+.dealer-header h1{
+  display:flex; align-items:center; gap:13px;
+  margin:0; font-family:var(--font-mono); font-weight:400;
+  font-size:15px; letter-spacing:5px; color:var(--text-bright);
+}
+.dealer-header h1::before{
+  content:""; width:15px; height:15px; border:2px solid var(--red); border-radius:50%;
+  box-shadow:0 0 var(--glow) var(--red-deep); position:relative; flex:0 0 auto;
+  background:radial-gradient(circle at 50% 50%, var(--red) 0 30%, transparent 42%);
+  animation:redPulse 1.6s infinite;
+}
+.header-controls{ display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+.phase-badge,.round-badge{
+  font-family:var(--font-mono); font-size:12px; letter-spacing:2px; padding:7px 12px;
+  border:1px solid var(--border-metal);
+}
+.phase-badge{ color:#0a0a0a; background:var(--green); border-color:var(--green); box-shadow:0 0 12px rgba(63,239,106,.35); }
+.round-badge{ color:var(--text-dim); background:#141010; }
+
+/* ── layout ── */
+.dealer-layout{
+  display:grid; grid-template-columns:minmax(0,1fr) 340px; gap:20px;
+  max-width:1320px; margin:0 auto; padding:clamp(16px,3vw,30px);
+  align-items:start;
+}
+@media(max-width:920px){ .dealer-layout{ grid-template-columns:1fr; } }
+.dealer-main{ min-width:0; }
+
+/* ── panel ── */
+.panel{
+  position:relative; padding:clamp(22px,3vw,34px); margin-bottom:20px;
+  background:var(--panel); border:1px solid var(--border-light);
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.03), 0 14px 32px rgba(0,0,0,.45);
+}
+.panel::before,.panel::after{
+  content:""; position:absolute; width:7px; height:7px; border-radius:50%;
+  background:radial-gradient(circle at 35% 30%,#6b6259,#1c1814 72%);
+}
+.panel::before{ top:9px; right:9px; }
+.panel::after{ bottom:9px; left:9px; }
+.panel h2{
+  font-family:var(--font-display); font-weight:800; font-size:clamp(24px,3vw,34px);
+  color:var(--text-bright); margin:0 0 22px; letter-spacing:.5px; line-height:1.05;
+  text-shadow:0 2px 0 #000;
+}
+.panel h2::before{
+  content:"// "; font-family:var(--font-mono); font-weight:400; font-size:.55em;
+  letter-spacing:2px; color:var(--green); vertical-align:middle;
+  text-shadow:0 0 var(--glow) var(--green);
+}
+.panel h3{
+  font-family:var(--font-mono); font-weight:400; font-size:12px; letter-spacing:3px;
+  color:var(--green); margin:0 0 12px; text-transform:uppercase;
+  text-shadow:0 0 var(--glow) var(--green);
+}
+.panel h4{
+  font-family:var(--font-type); font-size:11px; letter-spacing:2px; color:var(--text-faint);
+  margin:20px 0 12px; text-transform:uppercase;
+}
+.hint{ font-family:var(--font-mono); font-size:12px; letter-spacing:1px; color:var(--text-faint); margin:14px 0; }
+
+label{ font-family:var(--font-mono); font-size:12px; letter-spacing:1px; color:var(--text-dim); }
+
+/* ── buttons ── */
+.btn{
+  display:inline-flex; align-items:center; justify-content:center; gap:8px;
+  font-family:var(--font-mono); font-size:13px; letter-spacing:2px; text-transform:uppercase;
+  padding:12px 20px; border:1px solid var(--border-metal); background:#161211; color:var(--text);
+  cursor:crosshair; transition:all .14s ease; line-height:1; text-align:center;
+}
+.btn:hover{ border-color:var(--green); color:var(--green); box-shadow:0 0 14px rgba(63,239,106,.2); }
+.btn:disabled{ opacity:.4; cursor:not-allowed; filter:grayscale(.5); }
+.btn:disabled:hover{ border-color:var(--border-metal); color:var(--text); box-shadow:none; }
+.btn-small{ padding:8px 13px; font-size:11px; }
+.btn-tiny{ padding:5px 9px; font-size:11px; letter-spacing:1px; }
+.btn-dealer{
+  width:100%; padding:16px 24px; font-family:var(--font-display); font-weight:700;
+  font-size:19px; letter-spacing:3px; color:#08120b;
+  background:linear-gradient(180deg,var(--green-bright),var(--green));
+  border:1px solid var(--green-bright);
+  box-shadow:0 0 22px rgba(63,239,106,.3), inset 0 1px 0 rgba(255,255,255,.4), inset 0 -3px 8px rgba(0,0,0,.25);
+}
+.btn-dealer:hover{ color:#08120b; box-shadow:0 0 34px rgba(63,239,106,.55), inset 0 1px 0 rgba(255,255,255,.5); filter:brightness(1.08); }
+.btn-dealer:disabled{ background:#1a2018; color:#5a6a5c; border-color:#2a3a2c; box-shadow:none; }
+.btn-secondary{ background:transparent; color:var(--text-dim); }
+.btn-danger{ background:linear-gradient(180deg,#2a1414,#170c0b); border-color:#522020; color:#d99; }
+.btn-danger:hover{ border-color:var(--red); color:#ffb3b3; box-shadow:0 0 16px rgba(122,31,31,.5); }
+.btn-item{ background:linear-gradient(180deg,#201a15,#15100d); color:var(--text-bright); }
+.btn-shoot{
+  background:linear-gradient(180deg,#2a1212,#160a09); border-color:#5a2020; color:#e8c0c0;
+  font-weight:700; font-family:var(--font-display); font-size:16px; letter-spacing:2px;
+}
+.btn-shoot:hover{ border-color:var(--red); color:#fff; animation:glitch .28s steps(2) infinite; box-shadow:0 0 20px rgba(168,50,50,.5), inset 0 0 24px rgba(168,50,50,.18); }
+.btn-self-shot{
+  background:linear-gradient(180deg,#1c1a12,#100e09); border-color:#5a4a20; color:#e0c86a;
+  font-weight:700; font-family:var(--font-display); font-size:16px; letter-spacing:2px;
+}
+.btn-self-shot:hover{ border-color:#e0b23a; color:#ffe89a; box-shadow:0 0 18px rgba(224,178,58,.35); }
+
+/* ── inputs / select ── */
+.cfg-input,select,input[type="number"]{
+  font-family:var(--font-mono); font-size:13px; color:var(--green);
+  background:#100c0b; border:1px solid var(--border-metal); padding:8px 10px; outline:none;
+}
+.cfg-input:focus,select:focus,input:focus{ border-color:var(--green); box-shadow:0 0 var(--glow) rgba(63,239,106,.35); }
+select option{ background:#100c0b; color:var(--green); }
+input[type="checkbox"]{ accent-color:var(--green); cursor:crosshair; }
+
+/* ── no game ── */
+#panel-nogame select{ width:100%; padding:12px !important; font-size:15px !important; color:var(--text-bright); }
+
+/* ── lobby ── */
+.players-grid{ display:grid; grid-template-columns:repeat(auto-fill,minmax(190px,1fr)); gap:12px; margin-bottom:8px; }
+.lobby-player-card{
+  display:flex; align-items:center; gap:10px; padding:13px 14px;
+  background:linear-gradient(160deg,#1a1512,#120e0d); border:1px solid var(--border-light);
+}
+.lp-badge{ font-family:var(--font-mono); font-size:12px; color:var(--green); border:1px solid #2a3a2c; padding:3px 7px; text-shadow:0 0 var(--glow) var(--green); }
+.lp-name{ flex:1; font-family:var(--font-display); font-size:17px; color:var(--text-bright); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+
+/* ── config ── */
+.config-panel{
+  margin-top:22px; border:1px solid var(--border-light); background:#100c0b;
+}
+.config-panel > summary{
+  font-family:var(--font-mono); font-size:12px; letter-spacing:2px; color:var(--text-dim);
+  padding:14px 16px; cursor:crosshair; list-style:none; user-select:none;
+  display:flex; align-items:center;
+}
+.config-panel > summary::-webkit-details-marker{ display:none; }
+.config-panel > summary::before{ content:"▸ "; color:var(--green); margin-right:8px; }
+.config-panel[open] > summary::before{ content:"▾ "; }
+.config-panel[open] > summary{ border-bottom:1px solid var(--border-light); }
+#config-editor{ padding:16px; }
+.config-group h4:first-child{ margin-top:0; }
+.config-round{
+  display:flex; align-items:center; flex-wrap:wrap; gap:8px; margin-bottom:10px;
+  font-family:var(--font-mono); font-size:12px; color:var(--text-dim);
+}
+.config-round label{ width:44px; color:var(--green); }
+.config-round .cfg-input{ width:56px; }
+.config-panel .btn-secondary{ margin:4px 16px 16px; }
+
+/* ── shells ── */
+.shell-sequence{ display:flex; flex-wrap:wrap; gap:10px; margin-bottom:16px; }
+.shell-chip{
+  font-family:var(--font-mono); font-size:11px; letter-spacing:1px; line-height:1.5;
+  text-align:center; padding:12px 14px; border:1px solid; min-width:104px;
+  position:relative;
+}
+.shell-live{ color:#ffb3b3; border-color:#5a2020; background:linear-gradient(180deg,#2a1212,#160a09); box-shadow:inset 0 0 16px rgba(168,50,50,.2), 0 0 10px rgba(122,31,31,.3); text-shadow:0 0 8px var(--red-deep); }
+.shell-blank{ color:var(--green); border-color:#2a3a2c; background:linear-gradient(180deg,#0f1a11,#0a0f0b); box-shadow:inset 0 0 16px rgba(63,239,106,.08); }
+.shell-counts{ display:flex; gap:20px; flex-wrap:wrap; font-family:var(--font-mono); font-size:14px; margin-bottom:18px; }
+.shell-live-count{ color:var(--red); text-shadow:0 0 8px var(--red-deep); }
+.shell-blank-count{ color:var(--green); text-shadow:0 0 var(--glow) var(--green); }
+.loading-actions{ display:flex; flex-wrap:wrap; gap:12px; align-items:center; }
+.loading-actions .btn-dealer{ width:auto; flex:1 1 200px; }
+.btn-toggle-shells{ flex:0 0 auto; }
+.btn-toggle-shells.shells-hidden{ color:var(--red); border-color:#522020; }
+.check-box{ width:12px; height:12px; border:1px solid currentColor; display:inline-block; position:relative; }
+.check-box.on{ background:var(--green); border-color:var(--green); box-shadow:0 0 8px rgba(63,239,106,.5); }
+
+/* ── items distribution ── */
+#items-distribution{ display:grid; grid-template-columns:repeat(auto-fill,minmax(200px,1fr)); gap:12px; margin-bottom:20px; }
+.item-deal-card{ padding:14px; background:linear-gradient(160deg,#1a1512,#120e0d); border:1px solid var(--border-light); }
+.idc-header{ font-family:var(--font-mono); font-size:13px; color:var(--green); margin-bottom:8px; text-shadow:0 0 var(--glow) var(--green); }
+.idc-items{ font-family:var(--font-display); font-size:15px; color:var(--text-bright); line-height:1.4; }
+
+/* ── turn ── */
+.current-turn-header{ display:flex; align-items:center; flex-wrap:wrap; gap:12px; margin-bottom:18px; }
+.current-turn-header h2{ margin:0; }
+.saw-badge,.invert-badge{ font-family:var(--font-mono); font-size:11px; letter-spacing:2px; padding:6px 11px; }
+.saw-badge{ color:#e0c86a; border:1px solid #5a4a20; background:#1c1a12; }
+.invert-badge{ color:#7de9f4; border:1px solid #205a5a; background:#0f1a1c; }
+.shell-mini{
+  font-family:var(--font-mono); font-size:13px; line-height:1.6; color:var(--text);
+  padding:16px; background:#100c0b; border:1px solid var(--border-light); margin-bottom:22px;
+}
+.items-section,.shoot-section{ margin-bottom:22px; }
+.item-btn-row{ display:flex; align-items:center; flex-wrap:wrap; gap:10px; margin-bottom:10px; }
+.item-btn-row .btn-item{ min-width:120px; }
+.item-label{ font-family:var(--font-display); font-size:16px; color:var(--text-bright); min-width:110px; }
+.item-select{ flex:1 1 130px; min-width:120px; }
+#shoot-targets,#pending-shot-targets{ display:flex; flex-wrap:wrap; gap:12px; }
+#shoot-targets .btn,#pending-shot-targets .btn{ flex:1 1 160px; }
+.pending-shot-menu{
+  padding:18px; margin-bottom:22px; border:1px solid #5a2020;
+  background:linear-gradient(180deg,rgba(42,18,18,.6),rgba(16,10,9,.6));
+  box-shadow:0 0 20px rgba(122,31,31,.25);
+}
+.pending-shot-menu h3{ color:var(--red); text-shadow:0 0 10px var(--red-deep); animation:redPulse 1.4s infinite; }
+.special-results{
+  margin-top:18px; padding:18px; border:1px solid #205a5a;
+  background:linear-gradient(180deg,rgba(15,26,28,.7),rgba(10,15,16,.7));
+}
+#special-content{ font-family:var(--font-mono); font-size:14px; line-height:1.7; color:var(--green-bright); margin-bottom:14px; text-shadow:0 0 var(--glow) var(--green); }
+
+/* ── game over ── */
+#panel-gameover{ text-align:center; }
+#gameover-winner{ font-family:var(--font-mono); font-size:22px; letter-spacing:3px; color:var(--green-bright); text-shadow:0 0 16px var(--green); margin-bottom:20px; }
+#panel-gameover .btn-dealer{ max-width:340px; margin:0 auto; }
+
+/* ── sidebar ── */
+.dealer-sidebar{ position:sticky; top:88px; display:flex; flex-direction:column; gap:18px; }
+@media(max-width:920px){ .dealer-sidebar{ position:static; } }
+.sidebar-section{ background:var(--panel); border:1px solid var(--border-light); padding:16px; }
+.sidebar-section h3{
+  font-family:var(--font-mono); font-size:11px; letter-spacing:3px; color:var(--green);
+  margin:0 0 12px; text-transform:uppercase; text-shadow:0 0 var(--glow) var(--green);
+  border-bottom:1px solid var(--border-light); padding-bottom:10px;
+}
+.sidebar-player{ padding:11px 12px; margin-bottom:8px; background:#100c0b; border:1px solid var(--border-light); border-left:3px solid var(--green); }
+.sidebar-player.sp-dead{ border-left-color:#3a2a2a; opacity:.5; filter:grayscale(.6); }
+.sp-top{ display:flex; align-items:center; gap:9px; }
+.sp-badge{ font-family:var(--font-mono); font-size:11px; color:var(--green); }
+.sp-name{ flex:1; font-family:var(--font-display); font-size:15px; color:var(--text-bright); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.sp-hp{ font-family:var(--font-mono); font-size:14px; color:var(--red); font-weight:bold; }
+.sp-dead .sp-hp{ color:#5a4e44; }
+.sp-controls{ display:flex; gap:7px; margin-top:9px; }
+.btn-hp-minus{ flex:1; color:#d99; border-color:#4a2020; }
+.btn-hp-plus{ flex:1; color:var(--green); border-color:#2a4a2c; }
+.sp-cuff{ display:inline-block; margin-top:8px; font-family:var(--font-mono); font-size:10px; letter-spacing:2px; color:#7de9f4; border:1px solid #205a5a; padding:3px 7px; }
+.event-log{ max-height:340px; overflow-y:auto; display:flex; flex-direction:column; gap:5px; }
+.log-entry{
+  font-family:var(--font-mono); font-size:12px; line-height:1.4; color:var(--text-dim);
+  padding:7px 10px; background:#0d0a09; border-left:2px solid #2a2018; animation:logIn .2s ease;
+}
+.log-shot,.log-death,.log-kill{ color:#e0a0a0; border-left-color:var(--red); }
+.log-item,.log-use{ color:var(--green); border-left-color:#2a4a2c; }
+.log-info,.log-system{ color:var(--text-dim); border-left-color:#2a2018; }
+
+
+</style>
 </head>
+
 <body class="page-dealer">
+
+<div class="amb-smoke"><i></i><i></i></div>
+<div class="amb-vignette"></div>
+<div class="amb-grain"></div>
+<div class="amb-scan"></div>
+
 <div id="dealer-app">
     <header class="dealer-header">
-        <h1 style="font-family:var(--font-display); letter-spacing:5px;">// IRL ДИЛЛЕР</h1>
+        <h1>IRL ДИЛЛЕР</h1>
         <div class="header-controls">
-            <button class="btn btn-secondary btn-small" onclick="undoAction()" id="btn-undo" style="display:none; margin-right: 10px;">ОТКАТИТЬ</button>
+            <button class="btn btn-secondary btn-small" onclick="undoAction()" id="btn-undo" style="display:none;">ОТКАТИТЬ</button>
             <span id="header-phase" class="phase-badge">---</span>
             <span id="header-round" class="round-badge">---</span>
             <button class="btn btn-secondary btn-small" id="btn-force-round" onclick="forceRoundOver()" style="display:none">КОНЕЦ РАУНДА</button>
@@ -26,9 +334,9 @@
             <!-- No Game -->
             <div id="panel-nogame" class="panel">
                 <h2>НЕТ АКТИВНОЙ ИГРЫ</h2>
-                <div style="margin-bottom: 20px;">
-                    <label for="game-mode-select" style="display: block; margin-bottom: 10px; color: var(--text-dim); font-weight: bold;">РЕЖИМ ИГРЫ:</label>
-                    <select id="game-mode-select" class="cfg-input" style="width: 100%; padding: 10px; font-size: 1.1rem; background: var(--bg); color: var(--text-bright); border: 2px solid var(--border-light); border-radius: 4px;">
+                <div style="margin-bottom: 22px;">
+                    <label for="game-mode-select" style="display: block; margin-bottom: 10px;">РЕЖИМ ИГРЫ:</label>
+                    <select id="game-mode-select" class="cfg-input">
                         <option value="multiplayer">Мультиплеер (2-4 игрока)</option>
                         <option value="solo">Соло / 1 на 1 (1 телефон на двоих)</option>
                     </select>
@@ -41,9 +349,9 @@
                 <h2>ЛОББИ</h2>
                 <div id="lobby-players" class="players-grid"></div>
                 <p class="hint" id="lobby-hint">Ожидание игроков... (мин. 2, макс. 4)</p>
-                <button class="btn btn-dealer" id="btn-start" onclick="startGame()" disabled>НАЧАТЬ ИГРУ</button>
+                <button class="btn btn-dealer" id="btn-start" onclick="startGame()" disabled="">НАЧАТЬ ИГРУ</button>
                 <details class="config-panel">
-                    <summary>НАСТРОЙКИ ИГРЫ <span id="current-mode-badge" style="font-size: 0.8em; opacity: 0.7; margin-left: 10px; font-weight: normal;"></span></summary>
+                    <summary>НАСТРОЙКИ ИГРЫ <span id="current-mode-badge" style="font-size: 0.85em; opacity: 0.7; margin-left: 10px;"></span></summary>
                     <div id="config-editor"></div>
                     <button class="btn btn-secondary" onclick="saveConfig()">СОХРАНИТЬ</button>
                 </details>
@@ -83,6 +391,13 @@
                     <div id="player-items-list"></div>
                 </div>
 
+                <!-- Меню "в кого попали?" после физического выстрела (ESP32 курок) -->
+                <div id="pending-shot-menu" class="pending-shot-menu" style="display:none">
+                    <h3>⚡ ФИЗИЧЕСКИЙ ВЫСТРЕЛ — В КОГО ПОПАЛИ?</h3>
+                    <p class="hint">Курок спущен. Выберите игрока, в которого стреляли:</p>
+                    <div id="pending-shot-targets"></div>
+                </div>
+
                 <div class="shoot-section">
                     <h3>ВЫСТРЕЛ</h3>
                     <div id="shoot-targets"></div>
@@ -103,7 +418,7 @@
             <!-- Game Over -->
             <div id="panel-gameover" class="panel" style="display:none">
                 <h2 id="gameover-title">ИГРА ОКОНЧЕНА</h2>
-                <p id="gameover-winner" style="color:var(--green-bright);font-size:1.1rem;font-weight:700;margin-bottom:12px"></p>
+                <p id="gameover-winner"></p>
                 <button class="btn btn-dealer" onclick="createGame()">НОВАЯ ИГРА</button>
             </div>
         </div>
@@ -121,7 +436,6 @@
         </div>
     </div>
 </div>
-
 <script>
 let ws;
 let gameState = null;
@@ -196,7 +510,7 @@ function phaseLabel(p) {
 
 function renderLobby(s) {
     document.getElementById('panel-lobby').style.display = 'block';
-    
+
     // Show current mode
     const modeBadge = document.getElementById('current-mode-badge');
     if (modeBadge) {
@@ -211,7 +525,7 @@ function renderLobby(s) {
             <button class="btn btn-danger btn-tiny" onclick="removePlayer('${p.id}')">X</button>
         </div>
     `).join('') || '<p class="hint">---</p>';
-    
+
     if (s.game_mode === 'solo') {
         document.getElementById('btn-start').disabled = s.players.length !== 1;
         document.getElementById('lobby-hint').textContent = `Игроков: ${s.players.length}/1 (Только один игрок должен зайти с телефона)`;
@@ -245,18 +559,18 @@ function renderConfigEditor(s) {
             ${Object.entries(ITEM_LABELS).map(([k,v]) => {
                 // Don't show expired_medicine in multiplayer mode
                 if (k === 'expired_medicine' && s && s.game_mode !== 'solo') return '';
-                
+
                 const glob = s && s.item_limits_global && s.item_limits_global[k] !== undefined ? s.item_limits_global[k] : 0;
                 const pers = s && s.item_limits_per_player && s.item_limits_per_player[k] !== undefined ? s.item_limits_per_player[k] : 0;
                 return `
-                <div class="config-weight" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; border-bottom: 1px solid #333; padding-bottom: 5px;">
-                    <label style="width: 120px; font-weight: bold; color: var(--text-dim);">${v}</label>
+                <div class="config-weight" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; border-bottom: 1px solid #2a2018; padding-bottom: 5px;">
+                    <label style="width: 120px; font-weight: bold;">${v}</label>
                     <div style="display: flex; gap: 15px; font-size: 0.9em; align-items: center;">
-                        <span style="display: flex; align-items: center; gap: 5px; color: #888;">
+                        <span style="display: flex; align-items: center; gap: 5px; color: var(--text-faint);">
                             На столе:
                             <input type="number" class="cfg-input" id="gl_${k}" value="${glob}" min="0" max="32" style="width: 50px;">
                         </span>
-                        <span style="display: flex; align-items: center; gap: 5px; color: #888;">
+                        <span style="display: flex; align-items: center; gap: 5px; color: var(--text-faint);">
                             У игрока:
                             <input type="number" class="cfg-input" id="pl_${k}" value="${pers}" min="0" max="8" style="width: 50px;">
                         </span>
@@ -279,13 +593,13 @@ function renderConfigEditor(s) {
 function renderLoading(s) {
     document.getElementById('panel-loading').style.display = 'block';
     const seq = document.getElementById('shell-sequence');
-    
+
     const reversed = [...(s.shells_sequence || [])].reverse();
-    
+
     seq.innerHTML = reversed.map((sh, i) =>
         `<span class="shell-chip ${sh === 'live' ? 'shell-live' : 'shell-blank'}">${i+1}-й В МАГАЗИН<br>${sh === 'live' ? 'БОЕВОЙ' : 'ХОЛОСТОЙ'}</span>`
     ).join('');
-    
+
     const liveChunk = (s.shells_sequence || []).filter(x => x === 'live').length;
     const blankChunk = (s.shells_sequence || []).filter(x => x === 'blank').length;
 
@@ -303,8 +617,7 @@ function updateToggleShellsBtn(s) {
     const btn = document.getElementById('btn-toggle-shells');
     if (!btn) return;
     const showing = s.show_shells_to_players !== false;
-    const icon = showing ? '/static/icons/check-active.png' : '/static/icons/check-inactive.png';
-    btn.innerHTML = `<img src="${icon}" class="check-icon" alt=""> ПАТРОНЫ ${showing ? 'ВИДНЫ' : 'СКРЫТЫ'}`;
+    btn.innerHTML = `<span class="check-box ${showing ? 'on' : ''}"></span> ПАТРОНЫ ${showing ? 'ВИДНЫ' : 'СКРЫТЫ'}`;
     btn.classList.toggle('shells-hidden', !showing);
     btn.classList.toggle('shells-visible', showing);
 }
@@ -391,6 +704,21 @@ function renderTurn(s) {
             ${isSelf ? 'В СЕБЯ' : `>> #${p.number} ${p.name}`}
         </button>`;
     }).join('');
+
+    // Меню "в кого попали?" — показывается после физического выстрела с курка.
+    const pendingMenu = document.getElementById('pending-shot-menu');
+    if (s.pending_shot) {
+        pendingMenu.style.display = 'block';
+        const pendingEl = document.getElementById('pending-shot-targets');
+        pendingEl.innerHTML = shootTargets.map(p => {
+            const isSelf = p.id === cp.id;
+            return `<button class="btn ${isSelf ? 'btn-self-shot' : 'btn-shoot'}" onclick="shoot('${p.id}')">
+                ${isSelf ? 'В СЕБЯ' : `>> #${p.number} ${p.name}`}
+            </button>`;
+        }).join('');
+    } else {
+        pendingMenu.style.display = 'none';
+    }
 }
 
 function getTargetItems(targetId, s) {
@@ -455,10 +783,10 @@ async function apiPost(url, body = {}) {
     return res;
 }
 
-function createGame() { 
+function createGame() {
     const modeSelect = document.getElementById('game-mode-select');
     const mode = modeSelect ? modeSelect.value : 'multiplayer';
-    apiPost('/api/create_game', { game_mode: mode }); 
+    apiPost('/api/create_game', { game_mode: mode });
 }
 function startGame() { apiPost('/api/start_game'); }
 function confirmShells() { apiPost('/api/confirm_shells'); }
@@ -474,8 +802,8 @@ function useItem(pid, item) { apiPost('/api/use_item', {player_id: pid, item: it
 function useItemTarget(pid, item, tid) { apiPost('/api/use_item', {player_id: pid, item: item, target_id: tid}); }
 function toggleShells() { apiPost('/api/toggle_shells'); }
 function useAdrenaline(pid, tid, stolen) { apiPost('/api/use_item', {player_id: pid, item: 'adrenaline', target_id: tid, stolen_item: stolen}); }
-function hideSpecial() { 
-    document.getElementById('special-results').style.display = 'none'; 
+function hideSpecial() {
+    document.getElementById('special-results').style.display = 'none';
     apiPost('/api/clear_special');
 }
 
@@ -493,13 +821,13 @@ function saveConfig() {
             });
         }
     }
-    
+
     const show_shells_checkbox = document.getElementById('cfg_show_shells');
     const show_shells_to_players = show_shells_checkbox ? show_shells_checkbox.checked : true;
-    
+
     const mag_limit_input = document.getElementById('cfg_mag_limit');
     const physical_magazine_limit = mag_limit_input ? parseInt(mag_limit_input.value) || 0 : 0;
-    
+
     const item_limits_global = {};
     const item_limits_per_player = {};
     Object.keys(ITEM_LABELS).forEach(k => {
@@ -515,5 +843,6 @@ function saveConfig() {
 
 connect();
 </script>
-</body>
-</html>
+
+
+</body></html>

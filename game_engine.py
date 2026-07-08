@@ -139,6 +139,10 @@ class GameState:
         self.last_medicine_result: Optional[str] = None
         # Magnifying glass result
         self.last_magnify_result: Optional[str] = None
+        # ESP32 физический курок нажат — ждём, пока дилер выберет цель ("в кого
+        # попали?"). Пока True, панель дилера показывает интерактивное меню
+        # выбора цели; выбор цели через /api/shoot снимает флаг.
+        self.pending_shot: bool = False
         # Track if we have performed the hardcoded 1st round initialization
         self.first_round_generated: bool = False
         # Whether to show shell counts to players during dealer_loading phase
@@ -220,6 +224,7 @@ class GameState:
 
         self.saw_active = False
         self.inverted = False
+        self.pending_shot = False
         self._generate_shells()
 
     def _generate_shells(self):
@@ -387,25 +392,23 @@ class GameState:
 
     def esp_shoot(self) -> dict:
         """
-        Продвинуть патрон вперёд по сигналу физического курка (ESP32): вытолкнуть
-        текущий патрон из очереди, чтобы shell_status показал следующий. НЕ
-        наносит урон и НЕ меняет ход — игровую логику (кто в кого, урон, ходы)
-        по-прежнему ведёт дилер через веб. Это только физическая синхронизация
-        "патрон в стволе сдвинулся".
+        Сигнал физического курка (ESP32): НЕ трогаем очередь патронов, только
+        ставим флаг pending_shot. Дилер в панели увидит меню "в кого попали?" и
+        выберет цель — тогда обычный shoot() вытолкнет патрон и применит урон/ход.
+        Так патрон уходит из очереди ровно один раз (при выборе цели), без
+        двойного расхода.
         """
         if self.phase != GamePhase.PLAYER_TURN or not self.shells:
             return {"ok": False, "fired": False, "shells_remaining": len(self.shells)}
 
-        shell = self.shells.pop(0)
-        self.physical_loaded_count = max(0, self.physical_loaded_count - 1)
-
-        effective = shell
+        effective = self.shells[0]
         if self.inverted:
-            effective = ShellType.BLANK if shell == ShellType.LIVE else ShellType.LIVE
-            self.inverted = False
+            effective = ShellType.BLANK if effective == ShellType.LIVE else ShellType.LIVE
+
+        self.pending_shot = True
 
         label = "БОЕВОЙ" if effective == ShellType.LIVE else "ХОЛОСТОЙ"
-        self._log(f"[КУРОК] Выстрел (физический): {label}, патрон продвинут", "shot")
+        self._log(f"[КУРОК] Физический выстрел ({label}) — выберите, в кого попали", "shot")
 
         return {
             "ok": True,
@@ -499,6 +502,9 @@ class GameState:
             raise ValueError("Сейчас не фаза стрельбы")
         if not self.shells:
             raise ValueError("Нет патронов в магазине")
+
+        # Дилер выбрал цель — закрываем ожидание после физического выстрела.
+        self.pending_shot = False
 
         shooter = self.get_current_player()
         target = self.players.get(target_id)
@@ -744,6 +750,7 @@ class GameState:
             "shells_remaining": len(self.shells),
             "saw_active": self.saw_active,
             "inverted": self.inverted,
+            "pending_shot": self.pending_shot,
             "current_player": {
                 "id": current.id,
                 "name": current.name,
