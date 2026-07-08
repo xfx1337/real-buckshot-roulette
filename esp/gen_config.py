@@ -37,6 +37,10 @@ def main() -> None:
     pins = esp["pins"]
     remote = esp["trigger_remote"]
 
+    # Прошивка сама добавляет "/api/..." к базовому URL, поэтому завершающий
+    # слэш здесь приведёт к "//api/..." и ответу 404 от сервера. Срезаем его.
+    esp["server_base_url"] = esp["server_base_url"].rstrip("/")
+
     content = f"""// АВТОГЕНЕРАЦИЯ — не редактируй вручную.
 // Сгенерировано из config.json скриптом esp/gen_config.py.
 #pragma once
