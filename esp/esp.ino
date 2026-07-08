@@ -48,7 +48,7 @@
 RCSwitch rfTrigger = RCSwitch();
 
 // ── Тайминги ──
-static const unsigned long POLL_INTERVAL_MS = 5000;      // фоновый опрос для LED-индикатора (компромисс: реже = меньше конфликта с RF)
+static const unsigned long POLL_INTERVAL_MS = 1000;      // фоновый опрос для LED-индикатора
 static const unsigned long HTTP_TIMEOUT_MS = 1500;       // таймаут HTTP; 400мс было мало для первого TCP-хендшейка
 static const unsigned long SOLENOID_PULSE_MS = 250;      // длительность импульса на соленоид (100-200ms)
 static const unsigned long SOLENOID_MAX_ON_MS = 500;     // аварийный предел — жёстко выключаем после него
