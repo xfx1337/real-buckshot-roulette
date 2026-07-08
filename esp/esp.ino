@@ -50,7 +50,7 @@ RCSwitch rfTrigger = RCSwitch();
 // ── Тайминги ──
 static const unsigned long POLL_INTERVAL_MS = 5000;      // фоновый опрос для LED-индикатора (компромисс: реже = меньше конфликта с RF)
 static const unsigned long HTTP_TIMEOUT_MS = 1500;       // таймаут HTTP; 400мс было мало для первого TCP-хендшейка
-static const unsigned long SOLENOID_PULSE_MS = 150;      // длительность импульса на соленоид (100-200ms)
+static const unsigned long SOLENOID_PULSE_MS = 250;      // длительность импульса на соленоид (100-200ms)
 static const unsigned long SOLENOID_MAX_ON_MS = 500;     // аварийный предел — жёстко выключаем после него
 static const unsigned long TRIGGER_DEBOUNCE_MS = 250;    // минимальный интервал между выстрелами
 static const unsigned long WIFI_RETRY_INTERVAL_MS = 10000;  // даём WPA2-хендшейку время завершиться перед повтором
@@ -259,6 +259,19 @@ void fireTrigger() {
     }
 }
 
+// Сливает (отбрасывает) все накопленные в буфере RCSwitch пакеты. Одно нажатие
+// пульта 433МГц физически шлёт код ПАЧКОЙ из нескольких одинаковых пакетов, и
+// все они оседают в буфере приёмника. После того как первый пакет уже признан
+// валидным и запустил выстрел, остальные из той же пачки — мусор: их надо
+// выбросить, иначе они будут разбираться в последующих проходах loop() (и,
+// хотя fireTrigger() дебаунсит по времени, зря нагружать парсинг и держать
+// буфер занятым). Так один физический нажим = ровно один валидный пакет.
+void drainRfBuffer() {
+    while (rfTrigger.available()) {
+        rfTrigger.resetAvailable();
+    }
+}
+
 void handleRfTrigger() {
     if (!rfTrigger.available()) {
         return;
@@ -280,13 +293,17 @@ void handleRfTrigger() {
             Serial.print(" / Протокол: ");
             Serial.println(protocol);
         }
+        rfTrigger.resetAvailable();
     } else if (code == KNOWN_TRIGGER_CODE && protocol == KNOWN_TRIGGER_PROTOCOL
                && bitLength == KNOWN_TRIGGER_BITLENGTH) {
+        // Валидация по ПЕРВОМУ пакету пачки: он один запускает выстрел, а все
+        // остальные повторы этого же нажатия сразу выбрасываем из буфера.
         fireTrigger();
+        drainRfBuffer();
+    } else {
+        // Сигнал с чужого пульта — молча выбрасываем этот пакет.
+        rfTrigger.resetAvailable();
     }
-    // Сигналы с чужих пультов молча игнорируются.
-
-    rfTrigger.resetAvailable();
 }
 
 void setup() {
