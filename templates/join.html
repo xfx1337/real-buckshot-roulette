@@ -24,7 +24,7 @@
             {% endif %}
             <form method="POST" action="/api/join" class="join-form">
                 <label for="name">имя:</label>
-                <input type="text" id="name" name="name" placeholder="ВВЕДИТЕ ИМЯ..." required maxlength="20" autocomplete="off">
+                <input type="text" id="name" name="name" placeholder="ВВЕДИТЕ ИМЯ..." required maxlength="20" autocomplete="off" value="{{ saved_name|default('', true) }}">
                 <button type="submit" class="btn btn-player">▸ СПУСТИТЬ КУРОК</button>
             </form>
             <a href="/" class="btn btn-back">&lt; назад</a>

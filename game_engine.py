@@ -91,15 +91,30 @@ MULTIPLAYER_DEFAULT_ROUNDS = [
     {"hp": 0, "items_per_player": 4, "max_shells": 8},
 ]
 
+# Сюжетный режим: 3 стадии, HP растёт 2→4→6, предметы 0→2→4.
+STORY_DEFAULT_ROUNDS = [
+    {"hp": 2, "items_per_player": 0, "max_shells": 5},
+    {"hp": 4, "items_per_player": 2, "max_shells": 8},
+    {"hp": 6, "items_per_player": 4, "max_shells": 8},
+]
+
+# Ёмкость капсюлей в игрушечном револьвере (физический реквизит). Каждый
+# БОЕВОЙ выстрел тратит один капсюль; когда они кончаются, дилер физически
+# перезаряжает револьвер и жмёт «Я перезарядил».
+REVOLVER_CAPACITY = 8
+
 
 @dataclass
 class GameConfig:
     """Configurable game parameters."""
-    game_mode: str = "multiplayer"  # "solo" or "multiplayer"
+    game_mode: str = "multiplayer"  # "solo", "story" or "multiplayer"
     # Per-round settings: list of dicts with keys: hp, items_per_player, max_shells
     rounds: list = field(default_factory=lambda: list(MULTIPLAYER_DEFAULT_ROUNDS))
     max_items_per_player: int = 8
     physical_magazine_limit: int = 0  # 0 means unlimited
+    # Ёмкость капсюлей игрушечного револьвера (реквизит). Настраивается дилером;
+    # по умолчанию REVOLVER_CAPACITY. Тратится по одному на каждый боевой выстрел.
+    revolver_capacity: int = REVOLVER_CAPACITY
     # Item limits per item type (0 = disabled/unlimited)
     item_limits_global: dict = field(default_factory=dict)
     item_limits_per_player: dict = field(default_factory=dict)
@@ -145,9 +160,14 @@ class GameState:
         self.pending_shot: bool = False
         # Track if we have performed the hardcoded 1st round initialization
         self.first_round_generated: bool = False
+        # Сколько раз перезаряжали дробовик в текущем раунде (для сюжетного режима)
+        self.shells_generated_in_round: int = 0
         # Whether to show shell counts to players during dealer_loading phase
         self.show_shells_to_players: bool = True
         self.physical_loaded_count: int = 0
+        # Капсюли в игрушечном револьвере (физический реквизит). Тратятся при
+        # каждом боевом выстреле; когда 0 — нужно физически перезарядить.
+        self.revolver_ammo: int = self.config.revolver_capacity
 
     def _log(self, msg: str, event_type: str = "info"):
         self.event_log.append(GameEvent(time.time(), msg, event_type))
@@ -417,6 +437,13 @@ class GameState:
             "shells_remaining": len(self.shells),
         }
 
+    def reload_revolver(self) -> dict:
+        """Дилер физически перезарядил игрушечный револьвер — сбрасываем счётчик
+        капсюлей на полную ёмкость."""
+        self.revolver_ammo = self.config.revolver_capacity
+        self._log("[РЕВОЛЬВЕР] Револьвер перезаряжен (капсюли пополнены)", "info")
+        return {"ok": True, "revolver_ammo": self.revolver_ammo}
+
     # ── Turn Management ──
 
     def get_current_player(self) -> Optional[Player]:
@@ -532,6 +559,11 @@ class GameState:
         }
 
         if shell == ShellType.LIVE:
+            # Боевой выстрел тратит один капсюль в игрушечном револьвере.
+            self.revolver_ammo = max(0, self.revolver_ammo - 1)
+            if self.revolver_ammo == 0:
+                self._log("[РЕВОЛЬВЕР] Капсюли кончились — перезарядите револьвер", "shot")
+
             damage = 2 if self.saw_active else 1
             target.hp = max(0, target.hp - damage)
             result["damage"] = damage
@@ -748,6 +780,8 @@ class GameState:
             "current_round": self.current_round + 1,
             "total_rounds": len(self.config.rounds),
             "shells_remaining": len(self.shells),
+            "revolver_ammo": self.revolver_ammo,
+            "revolver_capacity": self.config.revolver_capacity,
             "saw_active": self.saw_active,
             "inverted": self.inverted,
             "pending_shot": self.pending_shot,
@@ -799,6 +833,10 @@ class GameState:
             data["item_limits_global"] = self.config.item_limits_global
             data["item_limits_per_player"] = self.config.item_limits_per_player
             data["game_mode"] = self.config.game_mode
+            # Полная конфигурация раундов и общий потолок предметов — чтобы
+            # редактор настроек дилера показывал СОХРАНЁННЫЕ значения, а не дефолт.
+            data["rounds"] = [dict(r) for r in self.config.rounds]
+            data["max_items_per_player"] = self.config.max_items_per_player
 
         # Recent log (last 20 events)
         data["log"] = [

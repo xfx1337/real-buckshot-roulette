@@ -1,0 +1,25 @@
+# ── Buckshot Roulette IRL — запуск сервера в Docker ──
+# Поднимается через ./start.sh (тот сперва настраивает сеть и прошивает плату),
+# либо напрямую:  docker compose up --build
+services:
+  server:
+    build: .
+    image: buckshot-roulette:latest
+    container_name: buckshot-server
+    # config.json монтируем внутрь read-WRITE: сервер читает актуальные host/port
+    # без пересборки образа, а веб-мастер настройки (/setup) может записать в него
+    # новые значения прямо из браузера. start.sh тоже обновляет его перед up.
+    volumes:
+      - ./config.json:/app/config.json
+    # Порт контейнера наружу на все интерфейсы хоста (0.0.0.0), чтобы плата из
+    # той же Wi-Fi достучалась по LAN-IP хоста. Host-порт берётся из переменной
+    # SERVER_PORT (её выставляет start.sh из config.json → server.port); по
+    # умолчанию 8000. Внутри контейнера сервер всегда слушает 8000 (см. Dockerfile).
+    ports:
+      - "${SERVER_PORT:-8000}:8000"
+    # Реальный LAN-IP хоста (start.sh определяет и пробрасывает сюда). Нужен
+    # мастеру настройки /setup, чтобы подставить адрес, по которому плату/телефоны
+    # достучатся до сервера — изнутри контейнера этот адрес иначе не виден.
+    environment:
+      - HOST_LAN_IP=${HOST_LAN_IP:-}
+    restart: unless-stopped

@@ -231,6 +231,17 @@ bool pollShellStatus() {
         bool live = body.indexOf("\"live\": true") >= 0 || body.indexOf("\"live\":true") >= 0;
         cachedReady = ready;
         cachedLive = live;
+        // Команда дилера «принудительно щёлкнуть соленоидом» (кнопка на пульте
+        // оператора). Сервер выставляет fire=true разово; отрабатываем импульс
+        // сразу, минуя игровую логику боевого/холостого. Вызывается из loop()
+        // (не из прерывания), поэтому delay() тут безопасен.
+        bool fire = body.indexOf("\"fire\": true") >= 0 || body.indexOf("\"fire\":true") >= 0;
+        if (fire) {
+            Serial.println(">>> Дилер: принудительный импульс на соленоид!");
+            setSolenoid(true);
+            delay(SOLENOID_PULSE_MS);
+            setSolenoid(false);
+        }
         ok = true;
     } else {
         Serial.print("[HTTP] Ошибка опроса статуса патрона, код: ");
@@ -444,18 +455,29 @@ void setup() {
     // прерывания от шумящего приёмника на GPIO4 сыплются во время критичного
     // WPA2-хендшейка и мешают ему завершиться.
     WiFi.mode(WIFI_STA);
+    // Разовое сканирование при старте: печатает все видимые сети в Serial.
+    // Если целевого SSID тут нет — плата его физически не видит (вне зоны, 5ГГц,
+    // выключена точка). Если есть, но подключения нет — дело в пароле/защите.
+    scanNetworks();
     WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
     Serial.print("[WiFi] Подключаюсь к \"");
     Serial.print(WIFI_SSID);
     Serial.println("\"...");
 
-    // Даём хендшейку шанс завершиться до входа в loop (до ~8 секунд).
-    unsigned long startAttempt = millis();
-    while (WiFi.status() != WL_CONNECTED && millis() - startAttempt < 8000) {
-        delay(250);
-        Serial.print(".");
-    }
-    Serial.println();
+    // НЕ блокируем setup() ожиданием Wi-Fi. Раньше здесь крутился цикл до 8с,
+    // но он (а) длиннее таймаута watchdog (WDT_TIMEOUT_MS, обычно 5с) и (б) не
+    // кормил сторож — esp_task_wdt_reset() зовётся только в конце loop(), до
+    // которого мы ещё не дошли. Если Wi-Fi не поднимался за 5с (медленная или
+    // недоступная локальная сеть без интернета — типовой случай на автономной
+    // точке доступа), watchdog ребутил плату ПРЯМО в setup(), и она уходила в
+    // вечный цикл перезагрузок, ни разу не дойдя до рабочего loop().
+    //
+    // Теперь подключение целиком фоновое: ensureWifiConnected() в loop() сам
+    // доводит хендшейк до конца и переподключается при обрывах. Плата
+    // немедленно входит в loop() и работает (курок/соленоид/LED) независимо от
+    // того, есть ли уже сеть. Серверные запросы просто молчат, пока Wi-Fi не
+    // поднялся (pollShellStatus/sendShootToServer проверяют WL_CONNECTED сами).
+    Serial.println("[WiFi] Подключение идёт в фоне, вхожу в рабочий цикл.");
 
     rfTrigger.enableReceive(digitalPinToInterrupt(TRIGGER_PIN));
 }
