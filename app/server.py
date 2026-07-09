@@ -20,14 +20,14 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 
-from game_engine import (
+from app.game_engine import (
     GameState, GamePhase, GameConfig, ItemType, ITEM_LABELS, ShellType,
     SOLO_DEFAULT_ROUNDS, MULTIPLAYER_DEFAULT_ROUNDS
 )
 
 import socket
 from urllib.parse import quote, unquote
-import config as app_config
+from app import config as app_config
 
 # ── Идентичность игрока через cookie ──────────────────────────────────────
 # Чтобы игрок не плодил дубли при потере связи / кнопке «назад» / случайном
@@ -962,7 +962,7 @@ async def undo_action():
     if not undo_stack:
         raise HTTPException(400, "Нечего отменять")
     game = undo_stack.pop()
-    from game_engine import GameEvent
+    from app.game_engine import GameEvent
     game.event_log.append(GameEvent(time.time(), ">> ДЕЙСТВИЕ ОТМЕНЕНО ДИЛЕРОМ", "system"))
     await broadcast_state()
     return {"ok": True}
@@ -1198,5 +1198,5 @@ async def ws_player(ws: WebSocket, player_id: str):
 
 if __name__ == "__main__":
     import uvicorn
-    from config import SERVER_HOST, SERVER_PORT
-    uvicorn.run("server:app", host=SERVER_HOST, port=SERVER_PORT, reload=True)
+    from app.config import SERVER_HOST, SERVER_PORT
+    uvicorn.run("app.server:app", host=SERVER_HOST, port=SERVER_PORT, reload=True)

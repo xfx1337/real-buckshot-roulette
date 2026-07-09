@@ -14,15 +14,14 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Затем код. config.json НЕ копируем в образ (в .dockerignore) — он монтируется
-# томом на старте, чтобы правки сети/IP подхватывались без пересборки образа.
-COPY server.py game_engine.py config.py ./
-COPY templates/ ./templates/
-COPY static/ ./static/
+# Затем код (пакет app/ вместе с templates/ и static/ внутри). config.json НЕ
+# копируем в образ (в .dockerignore) — он монтируется томом на старте в
+# /app/config.json, чтобы правки сети/IP подхватывались без пересборки образа.
+COPY app/ ./app/
 
 EXPOSE 8000
 
 # Запуск через uvicorn напрямую (host/port берём из config.json внутри server.py
 # нельзя — CMD статичен; поэтому слушаем 0.0.0.0, порт фиксируем 8000, а наружу
 # его пробрасывает docker-compose). reload выключен — это прод-запуск в контейнере.
-CMD ["python", "-m", "uvicorn", "server:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["python", "-m", "uvicorn", "app.server:app", "--host", "0.0.0.0", "--port", "8000"]

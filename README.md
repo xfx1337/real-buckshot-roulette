@@ -10,6 +10,23 @@ This system provides the digital backend and frontend interfaces needed to manag
 - **Real-time Communication**: WebSocket connections broadcast state changes instantly to all connected clients (Dealer and Players).
 - **Frontend**: Vanilla HTML/JS/CSS styled as a retro CRT terminal. Templates are rendered via Jinja2.
 
+## Project Structure
+
+```
+app/                  # Python server (FastAPI)
+├── server.py         #   HTTP + WebSocket transport
+├── game_engine.py    #   all game logic (state machine, shells, items, HP)
+├── config.py         #   reads config.json from the repo root
+├── templates/        #   Jinja2 pages (dealer, player, join, setup)
+└── static/           #   CSS + icons
+esp/                  # ESP32 firmware + flashing/config-gen scripts
+scripts/              # host network auto-config (net_config.sh / .ps1)
+docs/                 # ARCHITECTURE.md, RULES.md, AGENT_HANDOFF.md
+reference/            # design mockups & decompiled Godot game (gitignored)
+config.json           # single source of settings (copy of config.example.json)
+start.sh              # one-command launcher (net → flash → docker compose up)
+```
+
 ## How to Play (Roles)
 
 ### The Dealer (Game Master)
@@ -99,7 +116,7 @@ apply on the next start without rebuilding the image.
    ```
 3. **Start the server**:
    ```bash
-   python server.py
+   python -m app.server
    ```
 4. **Access the application**:
    - The app will be available on your local network at `http://0.0.0.0:8000`.

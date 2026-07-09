@@ -1,119 +1,297 @@
 /*
   Buckshot Roulette IRL — физический триггер соленоида (ESP32).
 
-  Логика:
-    - Раз в секунду опрашиваем GET /api/esp/shell_status и кэшируем
-      ответ (live: true/false, ready: true/false) в памяти.
-    - При нажатии курка (RF-пульт 433МГц, приёмник на GPIO TRIGGER_PIN)
-      решение — стрелять или нет — принимается МГНОВЕННО по закэшированному
-      значению, без сетевого запроса. Это устраняет задержку сети в момент
-      выстрела.
-    - Соленоид (GPIO SOLENOID_PIN) активируется, только если последний
-      опрос вернул ready=true и live=true. Если патрон холостой, ready=false
-      (не фаза стрельбы/магазин пуст) — соленоид не срабатывает вообще.
-    - Сервер остаётся источником истины для игровой логики: выстрел (урон,
-      ход) по-прежнему делает дилер кнопкой в веб-интерфейсе. Эта прошивка
-      только физически бабахает затвором синхронно с реальным патроном.
-    - Пока закэшированный статус "следующий патрон боевой" (ready && live),
-      лампочка на LIVE_LED_PIN (D2) мигает — визуальная индикация без
-      обращения к серверу, обновляется тем же кэшем, что и соленоид.
+  Архитектура (максимально быстрая реакция на курок):
+    - RF-сигнал 433МГц декодируется ПРЯМО В ПРЕРЫВАНИИ (ISR), по фронтам,
+      «на лету»: каждый бит кадра проверяется в момент приёма его импульсов.
+      На последнем бите кадра код сравнивается с KNOWN_TRIGGER_CODE, и если
+      совпал — соленоид включается ТУТ ЖЕ, в том же прерывании, прямой записью
+      в GPIO-регистр. Между приёмом последнего бита и ударом соленоида —
+      единицы микросекунд. Никакого опроса из loop(), никакого влияния
+      Wi-Fi/HTTP на задержку.
+    - Достаточно ОДНОГО валидного кадра (раньше RCSwitch требовал 2 повтора
+      внутри себя + прошивка ждала ещё 2 подтверждения = 4 кадра ≈ 180мс).
+      Защита от мусора — не количеством пакетов, а качеством проверки:
+      кадр обязан пройти повременную валидацию КАЖДОГО импульса (допуск 60%
+      от юнита протокола) и дать точное совпадение всех 24 бит кода.
+      Вероятность, что эфирный шум случайно соберёт такой кадр, исчезающе
+      мала (< 2^-24 на каждую попытку, и попытка требует ещё и валидных
+      таймингов всех 48 импульсов).
+    - trigger_remote.pulse_us в config.json (печатается в режиме обучения):
+      если задан, декодер знает длительность юнита заранее и может распознать
+      САМЫЙ ПЕРВЫЙ кадр пачки — реакция ≈ длительность одного кадра (~35мс
+      для протокола 1, это физический минимум самого радиопротокола).
+      Если 0 — юнит вычисляется из sync-паузы, срабатывание со 2-го кадра.
+    - Выключение соленоида, лог и уведомление сервера делает отдельная
+      FreeRTOS-задача с высоким приоритетом (просыпается по notify из ISR),
+      поэтому импульс соленоида не зависит от блокирующего HTTP в loop().
+    - «Глухое» окно RF_LOCKOUT_MS после срабатывания поглощает хвост пачки
+      (пульт шлёт один код многократно): одно нажатие = ровно один выстрел.
+    - Сервер остаётся источником истины: решение боевой/холостой принимается
+      по кэшу (cachedReady/cachedLive), который loop() обновляет фоновым
+      опросом GET /api/esp/shell_status раз в POLL_INTERVAL_MS.
+    - Пока кэш говорит «следующий патрон боевой», лампочка LIVE_LED_PIN мигает.
+    - Режим обучения (KNOWN_TRIGGER_CODE == 0): работает классический RCSwitch,
+      печатает код/протокол/битность/длительность юнита пойманного пульта —
+      эти значения вписываются в config.json (включая pulse_us).
 
   Требования ТЗ:
-    - Debounce курка (программный, с блокировкой на время импульса).
-    - Safety timeout: соленоид не может физически зависнуть в HIGH дольше
-      SOLENOID_MAX_ON_MS, даже если в коде где-то зависла логика.
+    - Safety timeout: соленоид не может зависнуть в HIGH дольше
+      SOLENOID_MAX_ON_MS (выключает и задача, и подстраховка в loop()).
     - Wi-Fi: автопереподключение, не блокирующее loop().
-    - Курок физически — RF-пульт 433МГц (не механическая кнопка): приёмник
-      висит на TRIGGER_PIN и декодирует код через RCSwitch. Пока код пульта
-      неизвестен (KNOWN_TRIGGER_CODE == 0), прошивка работает в режиме
-      обучения — печатает в Serial любой пойманный код, чтобы его можно было
-      вписать в константы ниже. Это устраняет ложные срабатывания от шума
-      эфира, из-за которых raw digitalRead() на этом пине забивал loop()
-      и мешал Wi-Fi стеку подключиться.
+    - Watchdog: если loop() завис — чип перезагружается сам.
 */
 
 #include <WiFi.h>
 #include <HTTPClient.h>
 #include <RCSwitch.h>
 #include <esp_task_wdt.h>
+#include <soc/gpio_struct.h>
 
 // Все настройки (Wi-Fi, адрес сервера, пины, код пульта-курка) берутся из
 // config.h, который генерируется из корневого config.json скриптом
 // esp/gen_config.py. Перед прошивкой выполни:  python esp/gen_config.py
 //
-// Чтобы узнать код нового пульта: поставь "code": 0 в config.json, перегенерируй
-// config.h, прошей — прошивка в режиме обучения печатает пойманный код в Serial.
-// Затем впиши код в config.json, снова перегенерируй и перепрошей.
+// Чтобы узнать параметры нового пульта: поставь "code": 0 в config.json,
+// перегенерируй config.h, прошей — режим обучения напечатает код, протокол,
+// битность и длительность юнита (pulse_us). Впиши их и перепрошей.
 #include "config.h"
 
-RCSwitch rfTrigger = RCSwitch();
+// Старый config.h мог быть сгенерирован без этого поля — не падаем на сборке.
+#ifndef CFG_TRIGGER_PULSE_US
+#define CFG_TRIGGER_PULSE_US 0UL
+#endif
+
+RCSwitch rfTrigger = RCSwitch();  // используется ТОЛЬКО в режиме обучения
 
 // ── Тайминги и пороги ──
-// Все значения приходят из config.json (блок esp.timings) через config.h.
-// Меняй их ТАМ и перегенерируй config.h (python esp/gen_config.py) — здесь
-// только псевдонимы, чтобы не менять код в десятке мест.
-static const unsigned long POLL_INTERVAL_MS = CFG_POLL_INTERVAL_MS;      // фоновый опрос для LED-индикатора
-static const unsigned long HTTP_TIMEOUT_MS = CFG_HTTP_TIMEOUT_MS;        // таймаут HTTP; 400мс было мало для первого TCP-хендшейка
-static const unsigned long SOLENOID_PULSE_MS = CFG_SOLENOID_PULSE_MS;    // длительность импульса на соленоид (100-200ms)
-static const unsigned long SOLENOID_MAX_ON_MS = CFG_SOLENOID_MAX_ON_MS;  // аварийный предел — жёстко выключаем после него
-static const unsigned long TRIGGER_DEBOUNCE_MS = CFG_TRIGGER_DEBOUNCE_MS;// минимальный интервал между выстрелами
-
-// Подтверждение курка по ДВУМ валидным пакетам подряд. Один нажим пульта
-// физически шлёт пачку одинаковых пакетов с интервалом в единицы-десятки мс.
-// Требуем 2 таких пакета в пределах окна — это отсекает ложные ОДИНОЧНЫЕ
-// срабатывания от эфирного шума. Всё, что приходит после подтверждения (третий
-// и далее пакеты той же пачки) — игнорируем до конца пачки.
-static const unsigned int RF_CONFIRM_COUNT = CFG_RF_CONFIRM_COUNT;          // сколько валидных пакетов подряд нужно для выстрела
-static const unsigned long RF_CONFIRM_WINDOW_MS = CFG_RF_CONFIRM_WINDOW_MS; // макс. интервал между пакетами одной пачки
-// «Глухой» период после подтверждённого выстрела: любые валидные RF-пакеты в
-// это окно поглощаются и НЕ считаются — это хвост той же пачки от одного
-// нажатия. Гарантирует «одно нажатие = один выстрел». Должен быть длиннее всей
-// пачки пульта (обычно 100-500мс) + импульса соленоида.
+// Значения приходят из config.json (блок esp.timings) через config.h.
+static const unsigned long POLL_INTERVAL_MS = CFG_POLL_INTERVAL_MS;      // фоновый опрос статуса патрона
+static const unsigned long HTTP_TIMEOUT_MS = CFG_HTTP_TIMEOUT_MS;        // таймаут HTTP-запросов
+static const unsigned long SOLENOID_PULSE_MS = CFG_SOLENOID_PULSE_MS;    // длительность импульса на соленоид
+static const unsigned long SOLENOID_MAX_ON_MS = CFG_SOLENOID_MAX_ON_MS;  // аварийный предел удержания
+// «Глухой» период после срабатывания: пульт шлёт код пачкой одинаковых кадров,
+// всё что декодировалось в это окно — хвост того же нажатия, игнорируем.
 static const unsigned long RF_LOCKOUT_MS = CFG_RF_LOCKOUT_MS;
-static const unsigned long WIFI_RETRY_INTERVAL_MS = CFG_WIFI_RETRY_INTERVAL_MS;  // даём WPA2-хендшейку время завершиться перед повтором
-static const unsigned long LIVE_LED_BLINK_MS = CFG_LIVE_LED_BLINK_MS;      // период мигания лампочки D2
-
-// Аппаратный сторож (Task Watchdog Timer). Если loop() завис дольше этого
-// таймаута (например, плату подвесила помеха от соленоида на боевом патроне
-// или зависший HTTP/Wi-Fi стек) — чип сам делает reboot. Порог с запасом над
-// самым долгим ЛЕГАЛЬНЫМ блоком в loop: HTTP таймаут 1.5с + импульс соленоида
-// 0.25с. 5с — значит нормальная работа watchdog не заденет, а реальное
-// зависание поймает за секунды.
+static const unsigned long WIFI_RETRY_INTERVAL_MS = CFG_WIFI_RETRY_INTERVAL_MS;
+static const unsigned long LIVE_LED_BLINK_MS = CFG_LIVE_LED_BLINK_MS;
 static const uint32_t WDT_TIMEOUT_MS = CFG_WDT_TIMEOUT_MS;
+// Длительность юнита пульта в мкс (0 = вычислять из sync-паузы, см. шапку).
+static const uint32_t RF_PULSE_US = CFG_TRIGGER_PULSE_US;
 
-// ── Состояние ──
-bool cachedReady = false;
-bool cachedLive = false;
+// ── Таблица протоколов 433МГц (тайминги из библиотеки RCSwitch) ──
+// Все длительности — в юнитах pulseUs. Кадр: [биты][sync], sync задаёт паузу
+// между кадрами, по которой (при pulse_us == 0) вычисляется юнит.
+struct RfProto {
+    uint16_t pulseUs;                 // номинальный юнит (справочно)
+    uint8_t syncHi, syncLo;           // sync: HIGH/LOW в юнитах
+    uint8_t zeroHi, zeroLo;           // бит «0»
+    uint8_t oneHi, oneLo;             // бит «1»
+    bool inverted;
+};
+static const RfProto RF_PROTOS[] = {
+    {350, 1, 31, 1, 3, 3, 1, false},     // 1
+    {650, 1, 10, 1, 2, 2, 1, false},     // 2
+    {100, 30, 71, 4, 11, 9, 6, false},   // 3
+    {380, 1, 6, 1, 3, 3, 1, false},      // 4
+    {500, 6, 14, 1, 2, 2, 1, false},     // 5
+    {450, 23, 1, 1, 2, 2, 1, true},      // 6  (HT6P20B)
+    {150, 2, 62, 1, 6, 6, 1, false},     // 7  (HS2303-PT)
+    {200, 3, 130, 7, 16, 3, 16, false},  // 8  (Conrad RS-200 RX)
+    {200, 130, 7, 16, 7, 16, 3, true},   // 9  (Conrad RS-200 TX)
+    {365, 18, 1, 3, 1, 1, 3, true},      // 10 (1ByOne Doorbell)
+    {270, 36, 1, 1, 2, 2, 1, true},      // 11 (HT12E)
+    {320, 36, 1, 1, 2, 2, 1, true},      // 12 (SM5212)
+};
+static const int RF_PROTO_COUNT = sizeof(RF_PROTOS) / sizeof(RF_PROTOS[0]);
+
+// Пауза длиннее этого — граница кадра/пачки (та же константа, что в RCSwitch).
+static const uint32_t RF_SEPARATION_US = 4300;
+
+// Соленоидом из ISR управляем прямой записью в регистры GPIO.out_w1ts/w1tc —
+// это атомарно, ISR-безопасно и занимает наносекунды. Регистры покрывают
+// только GPIO 0-31.
+static_assert(SOLENOID_PIN < 32, "SOLENOID_PIN должен быть GPIO 0-31");
+static const uint32_t SOLENOID_BIT = (1UL << SOLENOID_PIN);
+
+// ── Состояние (loop-контекст) ──
+volatile bool cachedReady = false;  // volatile: читается из ISR при выстреле
+volatile bool cachedLive = false;
 unsigned long lastPollMs = 0;
-unsigned long lastTriggerMs = 0;
 unsigned long lastWifiAttemptMs = 0;
 
-bool solenoidOn = false;
-unsigned long solenoidOnSinceMs = 0;
+volatile bool solenoidOn = false;
+volatile uint32_t solenoidOnSinceUs = 0;
 
 bool liveLedOn = false;
 unsigned long lastLiveLedToggleMs = 0;
 
-// Счётчик валидных RF-пакетов подряд для подтверждения курка (см.
-// RF_CONFIRM_COUNT). rfValidStreak растёт, пока пакеты идут в пределах окна;
-// lastRfValidMs — время последнего валидного пакета для проверки окна.
-unsigned int rfValidStreak = 0;
-unsigned long lastRfValidMs = 0;
-// Момент последнего подтверждённого выстрела. Пока с него не прошло
-// RF_LOCKOUT_MS, весь хвост пачки от того же нажатия поглощается.
-unsigned long lastFireMs = 0;
-bool rfLockoutActive = false;
+// Флаг «нужно сообщить серверу о выстреле». Ставится задачей триггера,
+// HTTP-запрос уходит из loop() — сетевые вызовы не трогают горячий путь.
+volatile bool pendingShoot = false;
 
-// ── Замер задержки «приём курка → соленоид» ──
-// firstPacketMicros — момент приёма ПЕРВОГО валидного пакета серии (нажатие
-// принято). Используется, чтобы напечатать задержку до момента срабатывания
-// соленоида в fireTrigger(). 0 = нет активного замера.
-unsigned long firstPacketMicros = 0;
+bool fastRfActive = false;  // true = быстрый ISR-декодер, false = обучение
 
-// Флаг «нужно сообщить серверу о выстреле». Ставится в fireTrigger() (в
-// обработчике курка), а сам HTTP-запрос уходит в loop() — чтобы не делать
-// блокирующий сетевой вызов внутри обработки RF.
-bool pendingShoot = false;
+// ── Параметры выбранного протокола (заполняются в setup до attachInterrupt) ──
+static uint8_t rfZeroHi, rfZeroLo, rfOneHi, rfOneLo;
+static uint8_t rfSyncDiv;   // делитель sync-паузы для вычисления юнита
+static uint8_t rfSkipInit;  // у инвертированных протоколов данные на 1 фронт позже
+
+// ── Состояние декодера (только из ISR) ──
+static const uint8_t RF_IDLE = 0xFF;        // «кадр не идёт, ждём sync-паузу»
+static uint32_t rfLastEdgeUs = 0;
+static uint8_t rfBitCount = RF_IDLE;
+static uint8_t rfSkip = 0;
+static bool rfHaveFirst = false;
+static uint32_t rfFirstDur = 0;
+static uint32_t rfCode = 0;
+static uint32_t rfZeroHiUs, rfZeroLoUs, rfOneHiUs, rfOneLoUs, rfTolUs;
+static uint32_t rfFrameStartUs = 0;
+// Инициализация «в прошлом», чтобы lockout не глушил первое нажатие после старта.
+static volatile uint32_t lastFireUs = (uint32_t)(0UL - CFG_RF_LOCKOUT_MS * 1000UL);
+
+// ── Событие выстрела: ISR → задача триггера ──
+static TaskHandle_t triggerTaskHandle = NULL;
+static volatile bool fireIsLive = false;      // боевой (соленоид уже включён в ISR)
+static volatile bool fireAdvance = false;     // просить сервер продвинуть патрон
+static volatile uint32_t fireDecodedUs = 0;   // момент декодирования последнего бита
+static volatile uint32_t fireFrameStartUs = 0;
+
+static inline uint32_t IRAM_ATTR udiff(uint32_t a, uint32_t b) {
+    return a > b ? a - b : b - a;
+}
+
+// Решение по декодированному валидному коду. Вызывается из ISR на последнем
+// бите кадра — здесь каждая инструкция на счету, никакого Serial/HTTP.
+static void IRAM_ATTR rfFire(uint32_t nowUs) {
+    // Хвост пачки от того же нажатия — молча поглощаем.
+    if (nowUs - lastFireUs < RF_LOCKOUT_MS * 1000UL) {
+        return;
+    }
+    lastFireUs = nowUs;
+
+    fireIsLive = cachedReady && cachedLive;
+    fireAdvance = cachedReady;  // курок спущен = патрон уходит (и боевой, и холостой)
+    fireDecodedUs = nowUs;
+    fireFrameStartUs = rfFrameStartUs;
+
+    if (fireIsLive) {
+        // Самый горячий путь: соленоид — НЕМЕДЛЕННО, прямой записью в регистр.
+        GPIO.out_w1ts = SOLENOID_BIT;
+        solenoidOn = true;
+        solenoidOnSinceUs = nowUs;
+    }
+
+    // Будим задачу триггера: она выдержит импульс, выключит соленоид,
+    // напечатает лог и поставит pendingShoot.
+    BaseType_t woken = pdFALSE;
+    vTaskNotifyGiveFromISR(triggerTaskHandle, &woken);
+    if (woken == pdTRUE) {
+        portYIELD_FROM_ISR();
+    }
+}
+
+// Потоковый декодер: вызывается на КАЖДОМ фронте сигнала с приёмника.
+// Валидирует кадр импульс за импульсом; на последнем бите — сравнение кода и
+// (при совпадении) немедленный выстрел. Любое несовпадение таймингов сразу
+// сбрасывает декодер в ожидание следующей sync-паузы — шум отсеивается дёшево.
+static void IRAM_ATTR rfIsr() {
+    uint32_t nowUs = micros();
+    uint32_t dur = nowUs - rfLastEdgeUs;
+    rfLastEdgeUs = nowUs;
+
+    if (dur > RF_SEPARATION_US) {
+        // Длинная пауза — граница кадра. Начинаем приём нового кадра.
+        uint32_t unit = RF_PULSE_US;
+        if (unit == 0) {
+            // Юнит не задан в конфиге — вычисляем из sync-паузы (как RCSwitch).
+            // Паузы «не того» масштаба (тишина эфира, шум) отбрасываем.
+            unit = dur / rfSyncDiv;
+            if (unit < 50 || unit > 2000) {
+                rfBitCount = RF_IDLE;
+                return;
+            }
+        }
+        rfZeroHiUs = unit * rfZeroHi;
+        rfZeroLoUs = unit * rfZeroLo;
+        rfOneHiUs = unit * rfOneHi;
+        rfOneLoUs = unit * rfOneLo;
+        rfTolUs = unit * 60 / 100;  // допуск 60% юнита — как в RCSwitch
+        rfCode = 0;
+        rfBitCount = 0;
+        rfHaveFirst = false;
+        rfSkip = rfSkipInit;
+        rfFrameStartUs = nowUs;
+        return;
+    }
+
+    if (rfBitCount == RF_IDLE) {
+        return;  // кадр не идёт — ждём sync-паузу
+    }
+    if (rfSkip) {
+        rfSkip--;
+        return;
+    }
+
+    // Биты приходят парами длительностей (HIGH, LOW).
+    if (!rfHaveFirst) {
+        rfFirstDur = dur;
+        rfHaveFirst = true;
+        return;
+    }
+    rfHaveFirst = false;
+
+    if (udiff(rfFirstDur, rfZeroHiUs) < rfTolUs && udiff(dur, rfZeroLoUs) < rfTolUs) {
+        rfCode <<= 1;  // бит «0»
+    } else if (udiff(rfFirstDur, rfOneHiUs) < rfTolUs && udiff(dur, rfOneLoUs) < rfTolUs) {
+        rfCode = (rfCode << 1) | 1;  // бит «1»
+    } else {
+        rfBitCount = RF_IDLE;  // тайминги не сошлись — это шум, ждём новый кадр
+        return;
+    }
+
+    if (++rfBitCount >= KNOWN_TRIGGER_BITLENGTH) {
+        rfBitCount = RF_IDLE;
+        if (rfCode == KNOWN_TRIGGER_CODE) {
+            rfFire(nowUs);
+        }
+    }
+}
+
+// Задача триггера: спит на notify из ISR. Соленоид к её пробуждению УЖЕ
+// включён — задача только выдерживает импульс, выключает, логирует и просит
+// loop() уведомить сервер. Высокий приоритет + отдельное от loop() ядро:
+// блокирующий HTTP-опрос никак не влияет ни на импульс, ни на его длительность.
+void triggerTask(void *) {
+    for (;;) {
+        ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+        uint32_t wakeUs = micros();
+        bool live = fireIsLive;
+        bool advance = fireAdvance;
+        uint32_t decodedUs = fireDecodedUs;
+        uint32_t frameStartUs = fireFrameStartUs;
+
+        if (live) {
+            // Печатаем, пока идёт удержание импульса — Serial ничего не задерживает.
+            Serial.println(">>> Курок: боевой патрон — соленоид включён из ISR!");
+            Serial.printf("[ЗАМЕР] Задержка курок→соленоид: %.1f мс (приём кадра), ISR→задача: %lu мкс\n",
+                          (decodedUs - frameStartUs) / 1000.0,
+                          (unsigned long)(wakeUs - decodedUs));
+            uint32_t elapsedMs = (micros() - decodedUs) / 1000;
+            if (elapsedMs < SOLENOID_PULSE_MS) {
+                vTaskDelay(pdMS_TO_TICKS(SOLENOID_PULSE_MS - elapsedMs));
+            }
+            GPIO.out_w1tc = SOLENOID_BIT;
+            solenoidOn = false;
+        } else {
+            Serial.println(">>> Курок: холостой (или сервер недоступен/не фаза стрельбы) — тишина.");
+        }
+
+        if (advance) {
+            pendingShoot = true;  // HTTP уйдёт из loop()
+        }
+    }
+}
 
 void updateLiveLed() {
     if (!(cachedReady && cachedLive)) {
@@ -132,11 +310,13 @@ void updateLiveLed() {
     }
 }
 
+// Управление соленоидом из loop-контекста (принудительный импульс дилера,
+// аварийное выключение). Горячий путь выстрела идёт мимо — прямо в ISR.
 void setSolenoid(bool on) {
     solenoidOn = on;
     digitalWrite(SOLENOID_PIN, on ? HIGH : LOW);
     if (on) {
-        solenoidOnSinceMs = millis();
+        solenoidOnSinceUs = micros();
     }
 }
 
@@ -229,12 +409,14 @@ bool pollShellStatus() {
         // чтобы не тащить в проект библиотеку ради двух булевых полей.
         bool ready = body.indexOf("\"ready\": true") >= 0 || body.indexOf("\"ready\":true") >= 0;
         bool live = body.indexOf("\"live\": true") >= 0 || body.indexOf("\"live\":true") >= 0;
-        cachedReady = ready;
+        // Порядок записи важен: ISR читает пару без блокировки. Сначала гасим
+        // ready (ISR перестаёт стрелять), потом обновляем live, потом ready.
+        cachedReady = false;
         cachedLive = live;
+        cachedReady = ready;
         // Команда дилера «принудительно щёлкнуть соленоидом» (кнопка на пульте
         // оператора). Сервер выставляет fire=true разово; отрабатываем импульс
-        // сразу, минуя игровую логику боевого/холостого. Вызывается из loop()
-        // (не из прерывания), поэтому delay() тут безопасен.
+        // сразу, минуя игровую логику боевого/холостого.
         bool fire = body.indexOf("\"fire\": true") >= 0 || body.indexOf("\"fire\":true") >= 0;
         if (fire) {
             Serial.println(">>> Дилер: принудительный импульс на соленоид!");
@@ -254,7 +436,7 @@ bool pollShellStatus() {
 
 // Сообщает серверу о выстреле: POST /api/esp/shoot выталкивает текущий патрон
 // из очереди (патрон "продвигается"). После этого сразу обновляем кэш свежим
-// статусом следующего патрона. Вызывается из loop(), не из обработчика курка.
+// статусом следующего патрона. Вызывается из loop(), не из горячего пути.
 void sendShootToServer() {
     if (WiFi.status() != WL_CONNECTED) {
         return;
@@ -281,133 +463,27 @@ void sendShootToServer() {
     pollShellStatus();
 }
 
-void fireTrigger() {
-    unsigned long now = millis();
-
-    // Программный дебаунс: игнорируем повторные срабатывания в течение
-    // TRIGGER_DEBOUNCE_MS после последнего выстрела/попытки.
-    if (now - lastTriggerMs < TRIGGER_DEBOUNCE_MS) {
-        return;
-    }
-    lastTriggerMs = now;
-
-    // Решение о соленоиде принимаем МГНОВЕННО по закэшированному статусу
-    // (обновляется фоновым опросом). Синхронный HTTP-запрос здесь делать
-    // НЕЛЬЗЯ: блокирующий вызов вешает loop(), рвёт Wi-Fi и роняет плату по
-    // watchdog. Поэтому уведомление сервера откладываем через pendingShoot.
-    if (cachedReady && cachedLive) {
-        // СНАЧАЛА дёргаем соленоид — это самый горячий путь, никакого Serial
-        // перед ним быть не должно (печать строки на 115200 = ~5-10мс задержки).
-        setSolenoid(true);
-        // Замер снимаем сразу после включения — момент физического удара.
-        unsigned long latencyUs = (firstPacketMicros != 0) ? micros() - firstPacketMicros : 0;
-        // Держим импульс. Serial-логи печатаем ВНУТРИ паузы: удержание всё равно
-        // ждёт delay(), так что вывод не добавляет задержки к самому спуску.
-        Serial.println(">>> Курок: боевой патрон — импульс на соленоид!");
-        if (latencyUs) {
-            Serial.print("[ЗАМЕР] Задержка курок→соленоид: ");
-            Serial.print(latencyUs / 1000.0, 1);
-            Serial.println(" мс");
-        }
-        delay(SOLENOID_PULSE_MS);
-        setSolenoid(false);
-    } else {
-        Serial.println(">>> Курок: холостой (или сервер недоступен/не фаза стрельбы) — тишина.");
-        if (firstPacketMicros != 0) {
-            unsigned long latencyUs = micros() - firstPacketMicros;
-            Serial.print("[ЗАМЕР] Задержка курок→решение (холостой): ");
-            Serial.print(latencyUs / 1000.0, 1);
-            Serial.println(" мс");
-        }
-    }
-    firstPacketMicros = 0;  // замер завершён
-
-    // Патрон продвигается в любом случае (курок спущен = патрон ушёл), поэтому
-    // просим сервер вытолкнуть текущий патрон независимо от боевой/холостой.
-    if (cachedReady) {
-        pendingShoot = true;
-    }
-}
-
-// Сливает (отбрасывает) все накопленные в буфере RCSwitch пакеты. Одно нажатие
-// пульта 433МГц физически шлёт код ПАЧКОЙ из нескольких одинаковых пакетов, и
-// все они оседают в буфере приёмника. После того как первый пакет уже признан
-// валидным и запустил выстрел, остальные из той же пачки — мусор: их надо
-// выбросить, иначе они будут разбираться в последующих проходах loop() (и,
-// хотя fireTrigger() дебаунсит по времени, зря нагружать парсинг и держать
-// буфер занятым). Так один физический нажим = ровно один валидный пакет.
-void drainRfBuffer() {
-    while (rfTrigger.available()) {
-        rfTrigger.resetAvailable();
-    }
-}
-
-void handleRfTrigger() {
+// Режим обучения: печатает параметры пойманного пульта, чтобы вписать их в
+// config.json (code, protocol, bitlength и pulse_us — длительность юнита).
+void handleRfLearning() {
     if (!rfTrigger.available()) {
         return;
     }
-
     unsigned long code = rfTrigger.getReceivedValue();
-    unsigned int protocol = rfTrigger.getReceivedProtocol();
-    unsigned int bitLength = rfTrigger.getReceivedBitlength();
-
-    if (KNOWN_TRIGGER_CODE == 0) {
-        // Режим обучения: печатаем пойманный код, чтобы вписать его в config.json.
-        if (code == 0) {
-            Serial.println("[RF] Не удалось декодировать код (нестандартный протокол).");
-        } else {
-            Serial.print("[RF] Код: ");
-            Serial.print(code);
-            Serial.print(" / Бит: ");
-            Serial.print(bitLength);
-            Serial.print(" / Протокол: ");
-            Serial.println(protocol);
-        }
-        rfTrigger.resetAvailable();
-    } else if (code == KNOWN_TRIGGER_CODE && protocol == KNOWN_TRIGGER_PROTOCOL
-               && bitLength == KNOWN_TRIGGER_BITLENGTH) {
-        unsigned long now = millis();
-
-        // «Глухой» период после выстрела: пока не прошло RF_LOCKOUT_MS с
-        // последнего выстрела — это ещё хвост той же пачки от одного нажатия.
-        // Молча поглощаем пакет, держим streak на нуле и продлеваем окно, чтобы
-        // хвост не набрал новую пару. Так одно нажатие = ровно один выстрел.
-        if (rfLockoutActive && now - lastFireMs < RF_LOCKOUT_MS) {
-            rfValidStreak = 0;
-            lastRfValidMs = now;
-            drainRfBuffer();     // разом выкидываем весь накопленный хвост
-            return;
-        }
-        rfLockoutActive = false;
-
-        // Подтверждение по ДВУМ валидным пакетам подряд. Считаем пакеты, пока
-        // они идут в пределах окна RF_CONFIRM_WINDOW_MS (одна пачка от одного
-        // нажатия). Если пауза больше окна — это новое нажатие, отсчёт с нуля.
-        if (now - lastRfValidMs > RF_CONFIRM_WINDOW_MS) {
-            rfValidStreak = 0;   // окно истекло — начинаем новую серию
-        }
-        lastRfValidMs = now;
-        rfValidStreak++;
-        // Метка времени первого пакета серии — точка отсчёта задержки до соленоида.
-        if (rfValidStreak == 1) {
-            firstPacketMicros = micros();
-        }
-        rfTrigger.resetAvailable();
-
-        if (rfValidStreak >= RF_CONFIRM_COUNT) {
-            // Набрали нужное число пакетов подряд — стреляем. Включаем lockout,
-            // сбрасываем счётчик и выкидываем остаток пачки. Дальнейший хвост
-            // поглотит проверка lockout выше.
-            rfValidStreak = 0;
-            lastFireMs = now;
-            rfLockoutActive = true;
-            fireTrigger();
-            drainRfBuffer();
-        }
+    if (code == 0) {
+        Serial.println("[RF] Не удалось декодировать код (нестандартный протокол).");
     } else {
-        // Сигнал с чужого пульта — молча выбрасываем этот пакет.
-        rfTrigger.resetAvailable();
+        Serial.print("[RF] Код: ");
+        Serial.print(code);
+        Serial.print(" / Бит: ");
+        Serial.print(rfTrigger.getReceivedBitlength());
+        Serial.print(" / Протокол: ");
+        Serial.print(rfTrigger.getReceivedProtocol());
+        Serial.print(" / Юнит (pulse_us): ");
+        Serial.print(rfTrigger.getReceivedDelay());
+        Serial.println(" мкс");
     }
+    rfTrigger.resetAvailable();
 }
 
 void setup() {
@@ -451,65 +527,86 @@ void setup() {
     pinMode(LIVE_LED_PIN, OUTPUT);
     digitalWrite(LIVE_LED_PIN, LOW);
 
-    // Сначала поднимаем Wi-Fi, и только потом включаем RF-приёмник. Иначе
-    // прерывания от шумящего приёмника на GPIO4 сыплются во время критичного
+    // Сначала поднимаем Wi-Fi, и только потом включаем RF-приём. Иначе
+    // прерывания от шумящего приёмника сыплются во время критичного
     // WPA2-хендшейка и мешают ему завершиться.
     WiFi.mode(WIFI_STA);
     // Разовое сканирование при старте: печатает все видимые сети в Serial.
-    // Если целевого SSID тут нет — плата его физически не видит (вне зоны, 5ГГц,
-    // выключена точка). Если есть, но подключения нет — дело в пароле/защите.
     scanNetworks();
     WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
     Serial.print("[WiFi] Подключаюсь к \"");
     Serial.print(WIFI_SSID);
     Serial.println("\"...");
-
-    // НЕ блокируем setup() ожиданием Wi-Fi. Раньше здесь крутился цикл до 8с,
-    // но он (а) длиннее таймаута watchdog (WDT_TIMEOUT_MS, обычно 5с) и (б) не
-    // кормил сторож — esp_task_wdt_reset() зовётся только в конце loop(), до
-    // которого мы ещё не дошли. Если Wi-Fi не поднимался за 5с (медленная или
-    // недоступная локальная сеть без интернета — типовой случай на автономной
-    // точке доступа), watchdog ребутил плату ПРЯМО в setup(), и она уходила в
-    // вечный цикл перезагрузок, ни разу не дойдя до рабочего loop().
-    //
-    // Теперь подключение целиком фоновое: ensureWifiConnected() в loop() сам
-    // доводит хендшейк до конца и переподключается при обрывах. Плата
-    // немедленно входит в loop() и работает (курок/соленоид/LED) независимо от
-    // того, есть ли уже сеть. Серверные запросы просто молчат, пока Wi-Fi не
-    // поднялся (pollShellStatus/sendShootToServer проверяют WL_CONNECTED сами).
+    // Подключение целиком фоновое (см. ensureWifiConnected) — не блокируем
+    // setup(), иначе watchdog ребутнёт плату раньше, чем поднимется сеть.
     Serial.println("[WiFi] Подключение идёт в фоне, вхожу в рабочий цикл.");
 
-    rfTrigger.enableReceive(digitalPinToInterrupt(TRIGGER_PIN));
+    // ── RF: быстрый ISR-декодер или режим обучения ──
+    if (KNOWN_TRIGGER_CODE == 0UL) {
+        rfTrigger.enableReceive(digitalPinToInterrupt(TRIGGER_PIN));
+        Serial.println("[RF] Код пульта не задан — РЕЖИМ ОБУЧЕНИЯ. Жми кнопку пульта,");
+        Serial.println("[RF] значения впиши в config.json (trigger_remote), перегенерируй config.h.");
+    } else if (KNOWN_TRIGGER_PROTOCOL < 1 || KNOWN_TRIGGER_PROTOCOL > RF_PROTO_COUNT) {
+        rfTrigger.enableReceive(digitalPinToInterrupt(TRIGGER_PIN));
+        Serial.print("[RF] ОШИБКА: протокол ");
+        Serial.print(KNOWN_TRIGGER_PROTOCOL);
+        Serial.println(" не поддерживается быстрым декодером — работаю в режиме обучения.");
+    } else {
+        const RfProto &p = RF_PROTOS[KNOWN_TRIGGER_PROTOCOL - 1];
+        rfZeroHi = p.zeroHi;
+        rfZeroLo = p.zeroLo;
+        rfOneHi = p.oneHi;
+        rfOneLo = p.oneLo;
+        rfSyncDiv = (p.syncLo > p.syncHi) ? p.syncLo : p.syncHi;  // длинная часть sync
+        rfSkipInit = p.inverted ? 1 : 0;
+        fastRfActive = true;
+
+        // Задача триггера — ДО attachInterrupt (ISR будит её по handle).
+        // Приоритет 10 (loop() имеет 1), ядро 0 — отдельно от loop(): даже если
+        // тот повис в блокирующем HTTP, импульс выключится вовремя.
+        xTaskCreatePinnedToCore(triggerTask, "rf_trigger", 4096, NULL, 10, &triggerTaskHandle, 0);
+
+        pinMode(TRIGGER_PIN, INPUT);
+        attachInterrupt(digitalPinToInterrupt(TRIGGER_PIN), rfIsr, CHANGE);
+
+        Serial.printf("[RF] Быстрый ISR-декодер: код %lu, протокол %d, %d бит.\n",
+                      (unsigned long)KNOWN_TRIGGER_CODE,
+                      (int)KNOWN_TRIGGER_PROTOCOL,
+                      (int)KNOWN_TRIGGER_BITLENGTH);
+        if (RF_PULSE_US) {
+            Serial.printf("[RF] Юнит задан: %lu мкс — срабатывание с ПЕРВОГО кадра пачки.\n",
+                          (unsigned long)RF_PULSE_US);
+        } else {
+            Serial.println("[RF] Юнит не задан (pulse_us=0) — вычисляю из sync, срабатывание со 2-го кадра.");
+            Serial.println("[RF] Подсказка: впиши pulse_us из режима обучения — станет ещё быстрее.");
+        }
+    }
 }
 
 void loop() {
-    // Курок проверяем ПЕРВЫМ в проходе — раньше всего остального, чтобы между
-    // приёмом RF-пакета и импульсом соленоида было минимум задержки. Всё
-    // тяжёлое (Wi-Fi, блокирующий HTTP-опрос) идёт ПОСЛЕ.
-    handleRfTrigger();
+    // Горячий путь курка живёт в ISR/задаче триггера — loop() занимается только
+    // фоном: Wi-Fi, опрос сервера, LED, отложенное уведомление о выстреле.
+    if (!fastRfActive) {
+        handleRfLearning();
+    }
 
     ensureWifiConnected();
 
-    // Аварийная защита: соленоид физически не может провисеть в HIGH
-    // дольше SOLENOID_MAX_ON_MS, даже если что-то в коде застряло.
-    if (solenoidOn && millis() - solenoidOnSinceMs > SOLENOID_MAX_ON_MS) {
+    // Подстраховка к задаче триггера: соленоид физически не может провисеть
+    // в HIGH дольше SOLENOID_MAX_ON_MS, даже если что-то в коде застряло.
+    if (solenoidOn && (uint32_t)(micros() - solenoidOnSinceUs) > SOLENOID_MAX_ON_MS * 1000UL) {
         Serial.println("[SAFETY] Превышен лимит удержания соленоида — принудительно выключаю.");
         setSolenoid(false);
     }
 
-    // Фоновый опрос для LED-индикатора. lastPollMs обновляется внутри
-    // pollShellStatus(), поэтому выстрел (тоже вызывающий опрос) сдвигает
-    // следующий фоновый опрос, а не дублирует запрос сразу после.
+    // Фоновый опрос статуса патрона для кэша ISR и LED-индикатора.
     if (millis() - lastPollMs >= POLL_INTERVAL_MS) {
         pollShellStatus();
-        // Опрос — блокирующий (до http_timeout). Пакет курка мог прилететь
-        // ПРЯМО во время него: обрабатываем сразу, не дожидаясь нового прохода.
-        handleRfTrigger();
     }
 
     updateLiveLed();
 
-    // Отложенное уведомление сервера о выстреле (HTTP вне обработчика курка).
+    // Отложенное уведомление сервера о выстреле (HTTP вне горячего пути).
     if (pendingShoot) {
         pendingShoot = false;
         sendShootToServer();
