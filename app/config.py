@@ -12,8 +12,11 @@ import json
 import re
 from pathlib import Path
 
-_CONFIG_PATH = Path(__file__).resolve().parent / "config.json"
-_EXAMPLE_PATH = Path(__file__).resolve().parent / "config.example.json"
+# config.json живёт в КОРНЕ проекта (на уровень выше app/) — его же читают
+# start.sh и esp/gen_config.py, а docker-compose монтирует туда же.
+_ROOT_DIR = Path(__file__).resolve().parent.parent
+_CONFIG_PATH = _ROOT_DIR / "config.json"
+_EXAMPLE_PATH = _ROOT_DIR / "config.example.json"
 
 
 def strip_jsonc(text: str) -> str:

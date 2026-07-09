@@ -18,10 +18,10 @@ ROOT = Path(__file__).resolve().parent.parent
 CONFIG_PATH = ROOT / "config.json"
 OUTPUT_PATH = ROOT / "esp" / "config.h"
 
-# Тот же стриппер JSONC-комментариев, что использует сервер (config.py) —
+# Тот же стриппер JSONC-комментариев, что использует сервер (app/config.py) —
 # один источник истины, чтобы config.json с //-подписями читался одинаково.
 sys.path.insert(0, str(ROOT))
-from config import strip_jsonc  # noqa: E402
+from app.config import strip_jsonc  # noqa: E402
 
 
 def esc(s: str) -> str:
@@ -81,6 +81,10 @@ def main() -> None:
 #define KNOWN_TRIGGER_CODE {remote['code']}UL
 #define KNOWN_TRIGGER_PROTOCOL {remote['protocol']}
 #define KNOWN_TRIGGER_BITLENGTH {remote['bitlength']}
+// Длительность юнита пульта в мкс (печатается в режиме обучения).
+// 0 = автоопределение из sync-паузы (срабатывание со 2-го кадра пачки);
+// точное значение = срабатывание с ПЕРВОГО кадра.
+#define CFG_TRIGGER_PULSE_US {remote.get('pulse_us', 0)}UL
 
 // ── Тайминги и пороги (из config.json → esp.timings) ──
 #define CFG_POLL_INTERVAL_MS {tv['poll_interval_ms']}UL

@@ -13,6 +13,6 @@ env/
 config.json
 esp/config.h
 
-# Godot source project (large binary/asset tree, not part of the web app)
-/Buckshot Roulette/
-/Buckshot Roulette веб-дизайн/
+# Референсы: декомпилированный Godot-проект игры и дизайн-макеты
+# (большие бинарные ассеты, не часть веб-приложения)
+/reference/

@@ -9,7 +9,7 @@
 ## 1. Разделение ответственности (компоненты)
 
 Каждый слой отвечает строго за своё. Игровая логика полностью изолирована в
-`game_engine.py` и ничего не знает про HTTP/WebSocket/железо.
+`app/game_engine.py` и ничего не знает про HTTP/WebSocket/железо.
 
 ```mermaid
 flowchart TB
@@ -26,17 +26,17 @@ flowchart TB
 
     subgraph SRV["🖥️ Сервер (FastAPI)"]
         direction TB
-        API["server.py<br/>HTTP + WebSocket транспорт"]
-        ENGINE["game_engine.py<br/>GameState — вся игровая логика"]
-        CFG["config.py / config.json<br/>единый конфиг"]
+        API["app/server.py<br/>HTTP + WebSocket транспорт"]
+        ENGINE["app/game_engine.py<br/>GameState — вся игровая логика"]
+        CFG["app/config.py / config.json<br/>единый конфиг"]
         API -->|"вызывает методы"| ENGINE
         API -.->|"host/port"| CFG
     end
 
     subgraph WEB["🌐 Браузерные клиенты"]
         direction TB
-        DEALER["templates/dealer.html<br/>панель дилера"]
-        PLAYER["templates/player.html<br/>экран игрока"]
+        DEALER["app/templates/dealer.html<br/>панель дилера"]
+        PLAYER["app/templates/player.html<br/>экран игрока"]
     end
 
     ESP -->|"GET /api/esp/shell_status<br/>POST /api/esp/shoot"| API
@@ -56,11 +56,11 @@ flowchart TB
 | Слой | Файл | Ответственность | Чего НЕ делает |
 |------|------|-----------------|----------------|
 | **Железо** | `esp/esp.ino` | Ловит RF-сигнал курка, бьёт соленоидом на боевом патроне, опрашивает сервер | Не хранит игровое состояние, не считает урон |
-| **Транспорт** | `server.py` | HTTP-эндпоинты, WebSocket-рассылка, undo-стек, сериализация | Не содержит игровых правил — делегирует движку |
-| **Логика** | `game_engine.py` | State machine, патроны, предметы, HP, ходы, победа | Не знает про сеть, HTTP, железо |
-| **Конфиг** | `config.py`, `config.json` | Единый источник настроек (Wi-Fi, адрес, пины) | — |
-| **UI дилера** | `templates/dealer.html` | Управление партией, меню «в кого попали?» | Не считает логику — только шлёт команды |
-| **UI игрока** | `templates/player.html` | Показ HP/предметов игроку | Read-only, без секретов (порядок патронов скрыт) |
+| **Транспорт** | `app/server.py` | HTTP-эндпоинты, WebSocket-рассылка, undo-стек, сериализация | Не содержит игровых правил — делегирует движку |
+| **Логика** | `app/game_engine.py` | State machine, патроны, предметы, HP, ходы, победа | Не знает про сеть, HTTP, железо |
+| **Конфиг** | `app/config.py`, `config.json` | Единый источник настроек (Wi-Fi, адрес, пины) | — |
+| **UI дилера** | `app/templates/dealer.html` | Управление партией, меню «в кого попали?» | Не считает логику — только шлёт команды |
+| **UI игрока** | `app/templates/player.html` | Показ HP/предметов игроку | Read-only, без секретов (порядок патронов скрыт) |
 
 ---
 
@@ -208,7 +208,7 @@ sequenceDiagram
     autonumber
     participant P as 🔫 Игрок (курок)
     participant E as ESP32 (esp.ino)
-    participant S as server.py
+    participant S as app/server.py
     participant G as game_engine (GameState)
     participant D as Панель дилера
 
@@ -252,7 +252,7 @@ sequenceDiagram
 ```mermaid
 flowchart LR
     JSON["config.json<br/>(единый источник,<br/>gitignored)"]
-    JSON -->|"config.py читает"| PY["server.py<br/>host/port"]
+    JSON -->|"app/config.py читает"| PY["app/server.py<br/>host/port"]
     JSON -->|"esp/gen_config.py<br/>генерирует"| H["esp/config.h<br/>(gitignored)"]
     H -->|"#include"| INO["esp.ino<br/>Wi-Fi, пины, код пульта"]
     EX["config.example.json<br/>(шаблон в git)"] -.->|"cp"| JSON
@@ -264,7 +264,7 @@ flowchart LR
 **Запуск сервера:**
 ```bash
 pip install -r requirements.txt
-python server.py            # слушает config.json → server.host:server.port (0.0.0.0:8000)
+python -m app.server            # слушает config.json → server.host:server.port (0.0.0.0:8000)
 ```
 
 **Прошивка ESP32:**
@@ -278,7 +278,7 @@ arduino-cli upload -p /dev/cu.usbserial-XX --fqbn esp32:esp32:esp32 esp/
 
 ## Ключевые архитектурные решения
 
-1. **Игровая логика изолирована** — `game_engine.py` не импортирует ничего сетевого; тестируется отдельно от сервера.
+1. **Игровая логика изолирована** — `app/game_engine.py` не импортирует ничего сетевого; тестируется отдельно от сервера.
 2. **In-memory состояние** — один глобальный `GameState`, без БД (теряется при рестарте сервера).
 3. **ESP не блокируется на сети** — соленоид срабатывает по кэшу, HTTP-запросы уходят из `loop()`, а не из обработчика курка (иначе watchdog ронял плату).
 4. **Патрон списывается один раз** — ESP-выстрел только выставляет `pending_shot`; фактический `shells.pop(0)` и урон — при выборе цели дилером.
