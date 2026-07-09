@@ -25,6 +25,51 @@ from game_engine import (
     SOLO_DEFAULT_ROUNDS, MULTIPLAYER_DEFAULT_ROUNDS
 )
 
+import socket
+from urllib.parse import quote, unquote
+import config as app_config
+
+# ── Идентичность игрока через cookie ──────────────────────────────────────
+# Чтобы игрок не плодил дубли при потере связи / кнопке «назад» / случайном
+# уходе на главную, его личность (id + имя) хранится в долгоживущих cookie.
+# id привязан к КОНКРЕТНОЙ игре (при новой игре старый id перестаёт совпадать
+# с game.players), а имя переживает смену игры — чтобы предзаполнить форму join.
+COOKIE_PLAYER_ID = "bsr_player_id"
+COOKIE_PLAYER_NAME = "bsr_player_name"
+COOKIE_MAX_AGE = 60 * 60 * 12  # 12 часов — с запасом на одну игровую сессию
+
+
+def _set_player_cookies(resp, player_id: str, name: str) -> None:
+    """Проставляет cookie идентичности на ответе (redirect/HTML). SameSite=Lax,
+    http-доступ (не Secure) — игра крутится по локальному http, не https.
+
+    Имя URL-кодируем: HTTP-заголовки (а cookie — это Set-Cookie header) должны
+    быть latin-1, а имена бывают кириллическими/эмодзи. quote() превращает их в
+    ASCII-безопасный %-escape; при чтении разворачиваем через _get_cookie_name."""
+    resp.set_cookie(COOKIE_PLAYER_ID, player_id, max_age=COOKIE_MAX_AGE,
+                    samesite="lax", httponly=False)
+    resp.set_cookie(COOKIE_PLAYER_NAME, quote(name), max_age=COOKIE_MAX_AGE,
+                    samesite="lax", httponly=False)
+
+
+def _get_cookie_name(request: Request) -> str:
+    """Читает и раскодирует имя игрока из cookie (обратное к quote() в
+    _set_player_cookies). Пустая строка, если куки нет."""
+    raw = request.cookies.get(COOKIE_PLAYER_NAME, "")
+    return unquote(raw) if raw else ""
+
+
+def _known_player_from_cookie(request: Request):
+    """Возвращает Player из текущей игры, если cookie указывает на существующего
+    в ней игрока; иначе None. Используется, чтобы вернуть потерявшегося игрока на
+    его же экран без повторного ввода имени."""
+    if not game:
+        return None
+    pid = request.cookies.get(COOKIE_PLAYER_ID)
+    if pid and pid in game.players:
+        return game.players[pid]
+    return None
+
 
 # ── OpenAPI response models ──
 # These describe response *shapes* for Swagger UI (/docs). The engine builds
@@ -70,6 +115,7 @@ class ToggleShellsResponse(BaseModel):
 class EspShellStatusResponse(BaseModel):
     ready: bool
     live: bool
+    fire: bool = False  # одноразовая команда дилера «щёлкни соленоидом»
 
 
 class CurrentPlayerSummary(BaseModel):
@@ -156,6 +202,12 @@ undo_stack: list[GameState] = []
 connected_clients: dict[str, list[WebSocket]] = {}  # "dealer" or player_id -> [ws]
 dealer_ws_list: list[WebSocket] = []
 
+# Команда «принудительно щёлкнуть соленоидом» от дилера к плате. Связь с ESP32
+# односторонняя (плата опрашивает сервер), поэтому команду кладём сюда, а плата
+# забирает её флагом fire=true в ближайшем ответе /api/esp/shell_status и
+# сбрасывает. Одноразовый импульс: выставили → плата один раз выстрелила.
+esp_force_fire: bool = False
+
 def push_undo(state: GameState):
     global undo_stack
     undo_stack.append(state)
@@ -237,25 +289,269 @@ async def broadcast_state():
 
 @app.get("/", response_class=HTMLResponse, tags=["Pages"], summary="Стартовая страница", include_in_schema=False)
 async def index(request: Request):
-    return templates.TemplateResponse("index.html", {"request": request})
+    # Если игрок уже в текущей игре (cookie указывает на живого) — не показываем
+    # форму заново, а возвращаем его на свой экран. Так «назад» на главную или
+    # потеря вкладки не превращаются в повторную регистрацию.
+    known = _known_player_from_cookie(request)
+    if known:
+        return RedirectResponse(f"/player/{known.id}", status_code=303)
+    # Иначе показываем форму, предзаполняя имя из cookie (если игрок уже играл —
+    # например, дилер начал новую игру, и старый id уже невалиден).
+    saved_name = _get_cookie_name(request)
+    return templates.TemplateResponse("index.html", {"request": request, "saved_name": saved_name})
 
 
 @app.get("/dealer", response_class=HTMLResponse, tags=["Pages"], summary="Панель дилера", include_in_schema=False)
 async def dealer_page(request: Request):
+    # Первичный онбординг: пока развёртывание не настроено (config.json содержит
+    # значения-заглушки из примера), уводим дилера на мастер настройки /setup.
+    # После сохранения config через мастер этот редирект больше не срабатывает.
+    if not _safe_is_configured():
+        return RedirectResponse(url="/setup", status_code=303)
     return templates.TemplateResponse("dealer.html", {"request": request, "game": game})
+
+
+@app.get("/setup", response_class=HTMLResponse, tags=["Pages"], summary="Мастер первичной настройки", include_in_schema=False)
+async def setup_page(request: Request):
+    return templates.TemplateResponse("setup.html", {"request": request})
+
+
+# ── API: Setup wizard (первичный онбординг развёртывания) ──
+
+def _safe_is_configured() -> bool:
+    """Обёртка над config.is_configured, которая не роняет страницу, если
+    config.json временно нечитаем/битый — тогда считаем «не настроено» и ведём
+    в мастер, где пользователь всё заполнит заново."""
+    try:
+        return app_config.is_configured(app_config.load_config())
+    except Exception:
+        return False
+
+
+def _detect_lan_ip() -> str:
+    """LAN-IP этого хоста — тот адрес, по которому плата и телефоны игроков
+    достучатся до сервера.
+
+    В Docker сокет-определение вернуло бы внутренний IP контейнера (172.x),
+    бесполезный для платы. Поэтому start.sh пробрасывает реальный LAN-IP хоста
+    в переменную HOST_LAN_IP — если она есть, берём её. Вне контейнера (bare
+    Python) переменной нет, и мы определяем адрес через UDP-сокет к внешнему
+    адресу (пакет никуда не шлётся — нужен лишь выбор исходящего интерфейса)."""
+    env_ip = os.environ.get("HOST_LAN_IP", "").strip()
+    if env_ip:
+        return env_ip
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        s.connect(("8.8.8.8", 80))
+        return s.getsockname()[0]
+    except Exception:
+        return "127.0.0.1"
+    finally:
+        s.close()
+
+
+class SetupPayload(BaseModel):
+    wifi_ssid: str
+    wifi_password: str
+    server_ip: str            # только IP хоста; URL собираем сами с портом
+    server_port: int = 8000
+    trigger_code: int = 0     # код RF-пульта-курка (0 = режим обучения)
+
+
+@app.get("/api/setup/status", tags=["Game Management"], summary="Статус первичной настройки", include_in_schema=False)
+async def setup_status():
+    """Настроено ли развёртывание + автоопределённый LAN-IP и текущие значения
+    из config.json — чтобы мастер подставил их как значения по умолчанию."""
+    try:
+        cfg = app_config.load_config()
+    except Exception:
+        cfg = {}
+    esp = cfg.get("esp", {}) if isinstance(cfg, dict) else {}
+    return {
+        "configured": _safe_is_configured(),
+        "detected_ip": _detect_lan_ip(),
+        "current": {
+            "wifi_ssid": esp.get("wifi_ssid", ""),
+            "wifi_password": esp.get("wifi_password", ""),
+            "server_base_url": esp.get("server_base_url", ""),
+            "server_port": cfg.get("server", {}).get("port", 8000) if isinstance(cfg, dict) else 8000,
+            "trigger_code": esp.get("trigger_remote", {}).get("code", 0),
+        },
+    }
+
+
+@app.post("/api/setup/save", tags=["Game Management"], summary="Сохранить настройки развёртывания", include_in_schema=False)
+async def setup_save(payload: SetupPayload):
+    """Записывает config.json из данных мастера. Требует, чтобы config.json был
+    примонтирован read-write (см. docker-compose.yml). Сохраняет существующие
+    пины/протокол пульта, меняет только сеть, адрес сервера и код курка."""
+    # Стартуем от текущего config (сохранить пины и прочее), падать нельзя —
+    # если файла нет, берём пример как базу.
+    try:
+        cfg = app_config.load_config()
+    except Exception:
+        try:
+            with open(app_config._EXAMPLE_PATH, encoding="utf-8") as f:
+                cfg = json.loads(app_config.strip_jsonc(f.read()))
+        except Exception:
+            cfg = {}
+
+    cfg.setdefault("server", {})
+    cfg["server"]["host"] = cfg["server"].get("host", "0.0.0.0")
+    cfg["server"]["port"] = int(payload.server_port)
+
+    esp = cfg.setdefault("esp", {})
+    esp["wifi_ssid"] = payload.wifi_ssid
+    esp["wifi_password"] = payload.wifi_password
+    esp["server_base_url"] = f"http://{payload.server_ip}:{payload.server_port}"
+    esp.setdefault("pins", {"trigger": 4, "solenoid": 5, "live_led": 2})
+    remote = esp.setdefault("trigger_remote", {"code": 0, "protocol": 1, "bitlength": 24})
+    remote["code"] = int(payload.trigger_code)
+
+    try:
+        app_config.save_config(cfg)
+    except OSError as e:
+        # Частый случай: config.json смонтирован read-only. Даём понятную
+        # инструкцию, а не голый 500.
+        raise HTTPException(
+            status_code=500,
+            detail=(
+                "Не удалось записать config.json: "
+                f"{e}. Убедись, что файл смонтирован для записи "
+                "(docker-compose.yml монтирует его read-write)."
+            ),
+        )
+    return {"ok": True, "server_base_url": esp["server_base_url"]}
+
+
+# ── Полный серверный/железный конфиг для дилер-пульта (вкладка «Сервер/Железо») ──
+# В отличие от мастера /setup (базовые поля), это отдаёт и принимает ВЕСЬ блок
+# esp — пины, протокол пульта, тайминги — чтобы оператор менял любые параметры
+# развёртывания прямо из панели дилера.
+
+@app.get("/api/server_config", tags=["Game Management"], summary="Полный конфиг сервера/ESP", include_in_schema=False)
+async def get_server_config():
+    """Отдаёт server + esp секции config.json целиком (для вкладки «Сервер/Железо»
+    в панели дилера) плюс автоопределённый LAN-IP."""
+    try:
+        cfg = app_config.load_config()
+    except Exception:
+        cfg = {}
+    if not isinstance(cfg, dict):
+        cfg = {}
+    return {
+        "detected_ip": _detect_lan_ip(),
+        "server": cfg.get("server", {"host": "0.0.0.0", "port": 8000}),
+        "esp": cfg.get("esp", {}),
+    }
+
+
+class ServerConfigPayload(BaseModel):
+    # Любое подмножество полей; отсутствующие сохраняют текущее значение.
+    server_port: Optional[int] = None
+    wifi_ssid: Optional[str] = None
+    wifi_password: Optional[str] = None
+    server_ip: Optional[str] = None          # IP хоста; из него + порт строим server_base_url
+    trigger_code: Optional[int] = None
+    trigger_protocol: Optional[int] = None
+    trigger_bitlength: Optional[int] = None
+    pins: Optional[dict] = None              # {trigger, solenoid, live_led}
+    timings: Optional[dict] = None           # весь блок esp.timings (мс/шт)
+
+
+@app.post("/api/server_config/save", tags=["Game Management"], summary="Сохранить конфиг сервера/ESP", include_in_schema=False)
+async def save_server_config(payload: ServerConfigPayload):
+    """Записывает произвольное подмножество полей server/esp в config.json,
+    сохраняя остальные. Требует read-write монтирования config.json."""
+    try:
+        cfg = app_config.load_config()
+    except Exception:
+        try:
+            with open(app_config._EXAMPLE_PATH, encoding="utf-8") as f:
+                cfg = json.loads(app_config.strip_jsonc(f.read()))
+        except Exception:
+            cfg = {}
+    if not isinstance(cfg, dict):
+        cfg = {}
+
+    server = cfg.setdefault("server", {"host": "0.0.0.0", "port": 8000})
+    esp = cfg.setdefault("esp", {})
+
+    if payload.server_port is not None:
+        server["port"] = int(payload.server_port)
+    if payload.wifi_ssid is not None:
+        esp["wifi_ssid"] = payload.wifi_ssid
+    if payload.wifi_password is not None:
+        esp["wifi_password"] = payload.wifi_password
+    # server_base_url пересобираем, если задан IP (порт — из server.port).
+    if payload.server_ip is not None:
+        port = server.get("port", 8000)
+        esp["server_base_url"] = f"http://{payload.server_ip}:{port}"
+
+    remote = esp.setdefault("trigger_remote", {"code": 0, "protocol": 1, "bitlength": 24})
+    if payload.trigger_code is not None:
+        remote["code"] = int(payload.trigger_code)
+    if payload.trigger_protocol is not None:
+        remote["protocol"] = int(payload.trigger_protocol)
+    if payload.trigger_bitlength is not None:
+        remote["bitlength"] = int(payload.trigger_bitlength)
+
+    if payload.pins is not None:
+        pins = esp.setdefault("pins", {})
+        for k in ("trigger", "solenoid", "live_led"):
+            if k in payload.pins:
+                pins[k] = int(payload.pins[k])
+    if payload.timings is not None:
+        timings = esp.setdefault("timings", {})
+        for k, v in payload.timings.items():
+            timings[k] = int(v)
+
+    try:
+        app_config.save_config(cfg)
+    except OSError as e:
+        raise HTTPException(
+            status_code=500,
+            detail=(
+                f"Не удалось записать config.json: {e}. Проверь, что файл "
+                "смонтирован для записи (docker-compose.yml монтирует его read-write)."
+            ),
+        )
+    return {"ok": True, "esp": esp, "server": server}
 
 
 @app.get("/player/{player_id}", response_class=HTMLResponse, tags=["Pages"], summary="Экран игрока", include_in_schema=False)
 async def player_page(request: Request, player_id: str):
-    if not game or player_id not in game.players:
-        return templates.TemplateResponse("join.html", {"request": request, "error": "Игра не найдена или вы не зарегистрированы"})
-    p = game.players[player_id]
-    return templates.TemplateResponse("player.html", {"request": request, "player": p})
+    if game and player_id in game.players:
+        p = game.players[player_id]
+        # Освежаем cookie на каждом заходе на свой экран — чтобы личность
+        # переживала долгую сессию (max-age отсчитывается заново).
+        resp = templates.TemplateResponse("player.html", {"request": request, "player": p})
+        _set_player_cookies(resp, p.id, p.name)
+        return resp
+
+    # Запрошенного id в игре нет (устаревшая ссылка/новая игра). Если cookie
+    # указывает на живого игрока текущей игры — уводим на его актуальный экран.
+    known = _known_player_from_cookie(request)
+    if known:
+        return RedirectResponse(f"/player/{known.id}", status_code=303)
+
+    # Совсем незнакомец — на форму входа, с предзаполнением имени из cookie.
+    saved_name = _get_cookie_name(request)
+    return templates.TemplateResponse("join.html", {
+        "request": request,
+        "error": "Игра не найдена или вы не зарегистрированы",
+        "saved_name": saved_name,
+    })
 
 
 @app.get("/join", response_class=HTMLResponse, tags=["Pages"], summary="Форма присоединения к игре", include_in_schema=False)
 async def join_page(request: Request):
-    return templates.TemplateResponse("join.html", {"request": request, "error": None})
+    # Уже в игре по cookie — сразу на свой экран, без повторного ввода имени.
+    known = _known_player_from_cookie(request)
+    if known:
+        return RedirectResponse(f"/player/{known.id}", status_code=303)
+    saved_name = _get_cookie_name(request)
+    return templates.TemplateResponse("join.html", {"request": request, "error": None, "saved_name": saved_name})
 
 
 # ── API: Game Management ──
@@ -302,15 +598,34 @@ async def join_game(request: Request, name: str = Form(..., description="Ото�
         return templates.TemplateResponse("join.html", {
             "request": request,
             "error": "Игра не создана. Подождите, пока дилер создаст игру.",
+            "saved_name": name,
         })
+
+    # Реконнект: если cookie указывает на игрока, УЖЕ существующего в этой игре —
+    # это тот же человек вернулся (переподключение/«назад»/новая вкладка). Не
+    # создаём дубль, просто возвращаем его на свой экран. Работает и после старта
+    # игры, когда add_player() уже запрещён.
+    known = _known_player_from_cookie(request)
+    if known:
+        known.connected = True
+        await broadcast_state()
+        resp = RedirectResponse(f"/player/{known.id}", status_code=303)
+        _set_player_cookies(resp, known.id, known.name)
+        return resp
+
+    # Новый игрок. add_player сам бросит ValueError, если фаза уже не lobby или
+    # набралось 4 игрока — показываем это на форме.
     try:
         player = game.add_player(name)
         await broadcast_state()
-        return RedirectResponse(f"/player/{player.id}", status_code=303)
+        resp = RedirectResponse(f"/player/{player.id}", status_code=303)
+        _set_player_cookies(resp, player.id, player.name)
+        return resp
     except ValueError as e:
         return templates.TemplateResponse("join.html", {
             "request": request,
             "error": str(e),
+            "saved_name": name,
         })
 
 
@@ -375,6 +690,27 @@ async def confirm_items():
         raise HTTPException(400, "Игра не создана")
     prev = copy.deepcopy(game)
     game.confirm_items_dealt()
+    push_undo(prev)
+    await broadcast_state()
+    return {"ok": True}
+
+
+@app.post(
+    "/api/reload_revolver",
+    tags=["Dealer Actions"],
+    summary="Перезарядить игрушечный револьвер",
+    description=(
+        "Дилер физически перезарядил игрушечный револьвер (капсюли/пистоны). "
+        "Сбрасывает счётчик капсюлей на полную ёмкость."
+    ),
+    response_model=OkResponse,
+    responses={400: {"model": ErrorResponse, "description": "Игра не создана"}},
+)
+async def reload_revolver():
+    if not game:
+        raise HTTPException(400, "Игра не создана")
+    prev = copy.deepcopy(game)
+    game.reload_revolver()
     push_undo(prev)
     await broadcast_state()
     return {"ok": True}
@@ -646,6 +982,8 @@ async def undo_action():
 - `item_limits_per_player`: `{item_type: max_count}` — лимит копий предмета у одного игрока
 - `show_shells_to_players`: bool — показывать ли игрокам число патронов при зарядке
 - `physical_magazine_limit`: int — сколько патронов физически помещается в дробовик за раз (0 = без лимита)
+- `max_items_per_player`: int — общий потолок предметов на руках у одного игрока
+- `revolver_capacity`: int — ёмкость капсюлей игрушечного револьвера (≥1)
 """,
     response_model=OkResponse,
     responses={400: {"model": ErrorResponse, "description": "Игра не создана, не фаза lobby, либо некорректный JSON"}},
@@ -673,7 +1011,15 @@ async def update_config(config_json: str = Form(..., description="JSON-объе�
         if "show_shells_to_players" in data:
             game.show_shells_to_players = data["show_shells_to_players"]
         if "physical_magazine_limit" in data:
-            game.config.physical_magazine_limit = data["physical_magazine_limit"]
+            game.config.physical_magazine_limit = int(data["physical_magazine_limit"])
+        if "max_items_per_player" in data:
+            game.config.max_items_per_player = int(data["max_items_per_player"])
+        if "revolver_capacity" in data:
+            cap = max(1, int(data["revolver_capacity"]))
+            game.config.revolver_capacity = cap
+            # В лобби (единственная фаза, где правим конфиг) револьвер ещё не
+            # расходован — сразу подтягиваем текущий запас к новой ёмкости.
+            game.revolver_ammo = cap
         await broadcast_state()
         return {"ok": True}
     except Exception as e:
@@ -743,9 +1089,36 @@ async def esp_shell_status():
     Does not consume a shell or affect game state — the dealer's own
     "Shoot" action in the web UI remains the only thing that fires a shot.
     """
+    global esp_force_fire
+    # fire=true — одноразовая команда «щёлкни соленоидом сейчас» от дилера.
+    # Потребляем флаг при первой же выдаче, чтобы плата выстрелила ровно раз.
+    fire = esp_force_fire
+    esp_force_fire = False
+
     if not game:
-        return {"ready": False, "live": False}
-    return game.esp_shell_status()
+        return {"ready": False, "live": False, "fire": fire}
+    status = game.esp_shell_status()
+    status["fire"] = fire
+    return status
+
+
+@app.post(
+    "/api/esp/force_fire",
+    tags=["ESP32"],
+    summary="Принудительно щёлкнуть соленоидом (команда дилера)",
+    description=(
+        "Дилер вручную инициирует физический удар соленоида, минуя игровую логику "
+        "(боевой патрон/курок). Сервер выставляет одноразовый флаг `fire=true`, "
+        "который плата ESP32 заберёт в ближайшем опросе `/api/esp/shell_status` "
+        "(задержка ≤ интервала опроса, обычно до 1 c) и щёлкнет соленоидом один раз. "
+        "Работает только с прошивкой, читающей поле `fire`."
+    ),
+    response_model=OkResponse,
+)
+async def esp_force_fire_cmd():
+    global esp_force_fire
+    esp_force_fire = True
+    return {"ok": True}
 
 
 @app.post(

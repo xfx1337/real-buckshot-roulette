@@ -218,6 +218,37 @@ input[type="checkbox"]{ accent-color:var(--green); cursor:crosshair; }
 .config-round .cfg-input{ width:56px; }
 .config-panel .btn-secondary{ margin:4px 16px 16px; }
 
+/* ── server/hardware modal ── */
+.scfg-overlay{
+  position:fixed; inset:0; z-index:50; display:flex; align-items:center; justify-content:center;
+  background:rgba(0,0,0,.72); backdrop-filter:blur(2px); padding:20px;
+}
+.scfg-box{
+  width:100%; max-width:560px; max-height:88vh; display:flex; flex-direction:column;
+  background:var(--panel,linear-gradient(160deg,#181310,#120e0d));
+  border:1px solid var(--border-metal,#3a2a22); box-shadow:0 20px 60px rgba(0,0,0,.6);
+}
+.scfg-head{ display:flex; align-items:center; justify-content:space-between;
+  padding:14px 18px; border-bottom:1px solid var(--border-light,#322217); }
+.scfg-head h2{ margin:0; font-size:18px; color:var(--text-bright,#e8ddce);
+  font-family:var(--font-type,monospace); letter-spacing:.05em; }
+.scfg-body{ padding:16px 18px; overflow-y:auto; font-family:var(--font-mono,monospace); font-size:12px; }
+.scfg-body h4{ color:var(--green,#3fef6a); margin:16px 0 8px; font-size:12px; letter-spacing:.06em; }
+.scfg-body h4:first-child{ margin-top:0; }
+.scfg-row{ display:flex; align-items:center; gap:10px; margin-bottom:9px; }
+.scfg-row label{ flex:0 0 190px; color:var(--text-dim,#8f8073); }
+.scfg-row input, .scfg-row select{
+  flex:1; padding:7px 9px; font-family:var(--font-mono,monospace); font-size:13px;
+  color:var(--text-bright,#e8ddce); background:#0d0a09;
+  border:1px solid var(--border-metal,#3a2a22); outline:none; min-width:0;
+}
+.scfg-row input:focus{ border-color:var(--green-bright,#5fff8f); }
+.scfg-foot{ display:flex; align-items:center; gap:12px; padding:14px 18px;
+  border-top:1px solid var(--border-light,#322217); }
+.scfg-msg{ flex:1; font-family:var(--font-mono,monospace); font-size:12px; min-height:16px; }
+.scfg-msg.ok{ color:var(--green,#3fef6a); } .scfg-msg.err{ color:var(--red,#a83232); }
+.scfg-note{ color:var(--text-faint,#6e5f52); font-size:11px; line-height:1.5; margin:6px 0 2px; }
+
 /* ── shells ── */
 .shell-sequence{ display:flex; flex-wrap:wrap; gap:10px; margin-bottom:16px; }
 .shell-chip{
@@ -253,6 +284,29 @@ input[type="checkbox"]{ accent-color:var(--green); cursor:crosshair; }
   font-family:var(--font-mono); font-size:13px; line-height:1.6; color:var(--text);
   padding:16px; background:#100c0b; border:1px solid var(--border-light); margin-bottom:22px;
 }
+/* ── игрушечный револьвер (капсюли) ── */
+.revolver-box{
+  font-family:var(--font-mono); font-size:13px; color:var(--text);
+  padding:16px; background:#100c0b; border:1px solid var(--border-light); margin-bottom:22px;
+}
+.revolver-box.revolver-empty{
+  border-color:#5a2020;
+  background:linear-gradient(180deg,rgba(42,18,18,.6),rgba(16,10,9,.6));
+  box-shadow:0 0 20px rgba(122,31,31,.25);
+}
+.revolver-header{ margin-bottom:12px; letter-spacing:.5px; }
+.revolver-box.revolver-empty .revolver-header{ color:var(--red); text-shadow:0 0 10px var(--red-deep); }
+.chamber-row{ display:flex; flex-wrap:wrap; gap:8px; margin-bottom:12px; }
+.chamber{
+  width:22px; height:22px; border-radius:50%;
+  border:2px solid #3a2c2c; box-sizing:border-box;
+}
+.chamber.loaded{
+  background:radial-gradient(circle at 35% 30%, #ffd27a, #c9962e 70%);
+  border-color:#6a4e1c; box-shadow:0 0 8px rgba(224,178,58,.5);
+}
+.chamber.spent{ background:#1a1413; border-color:#2e2422; opacity:.7; }
+.btn-reload-revolver{ width:100%; margin-top:4px; animation:redPulse 1.4s infinite; }
 .items-section,.shoot-section{ margin-bottom:22px; }
 .item-btn-row{ display:flex; align-items:center; flex-wrap:wrap; gap:10px; margin-bottom:10px; }
 .item-btn-row .btn-item{ min-width:120px; }
@@ -325,9 +379,30 @@ input[type="checkbox"]{ accent-color:var(--green); cursor:crosshair; }
             <span id="header-phase" class="phase-badge">---</span>
             <span id="header-round" class="round-badge">---</span>
             <button class="btn btn-secondary btn-small" id="btn-force-round" onclick="forceRoundOver()" style="display:none">КОНЕЦ РАУНДА</button>
+            <!-- Ручное управление железом — доступно всегда (пульт оператора). -->
+            <button class="btn btn-secondary btn-small" onclick="forceFireSolenoid(this)" title="Принудительно щёлкнуть соленоидом на плате">⚡ СОЛЕНОИД</button>
+            <button class="btn btn-secondary btn-small" onclick="openServerConfig()" title="Настройки сервера и ESP32">⚙ СЕРВЕР</button>
             <button class="btn btn-danger btn-small" onclick="forceEnd()">ЗАВЕРШИТЬ ИГРУ</button>
         </div>
     </header>
+
+    <!-- Модалка «Сервер/Железо»: редактирует config.json (Wi-Fi, IP, код курка,
+         пины, тайминги ESP). Скрыта по умолчанию, открывается кнопкой ⚙ СЕРВЕР. -->
+    <div id="server-config-modal" class="scfg-overlay" style="display:none;">
+        <div class="scfg-box">
+            <div class="scfg-head">
+                <h2>СЕРВЕР / ЖЕЛЕЗО</h2>
+                <button class="btn btn-small" onclick="closeServerConfig()">✕</button>
+            </div>
+            <div class="scfg-body" id="server-config-body">
+                <p class="hint">Загрузка…</p>
+            </div>
+            <div class="scfg-foot">
+                <div id="server-config-msg" class="scfg-msg"></div>
+                <button class="btn btn-dealer" onclick="saveServerConfig(this)">СОХРАНИТЬ В CONFIG.JSON</button>
+            </div>
+        </div>
+    </div>
 
     <div class="dealer-layout">
         <div class="dealer-main">
@@ -385,6 +460,8 @@ input[type="checkbox"]{ accent-color:var(--green); cursor:crosshair; }
                 </div>
 
                 <div class="shell-mini" id="shell-mini-info"></div>
+
+                <div class="revolver-box" id="revolver-box"></div>
 
                 <div class="items-section">
                     <h3>ПРЕДМЕТЫ ИГРОКА</h3>
@@ -536,29 +613,63 @@ function renderLobby(s) {
     renderConfigEditor(s);
 }
 
+// Локальная рабочая копия раундов — чтобы кнопки +/- меняли число раундов без
+// перерисовки всего state. Инициализируется из сохранённого конфига при рендере.
+let cfgRounds = null;
+
+function defaultRoundsFor(mode) {
+    return mode === 'solo'
+        ? [{hp:2,items_per_player:0,max_shells:3},{hp:4,items_per_player:2,max_shells:6},{hp:6,items_per_player:4,max_shells:8}]
+        : [{hp:0,items_per_player:0,max_shells:4},{hp:0,items_per_player:2,max_shells:6},{hp:0,items_per_player:4,max_shells:8}];
+}
+
 function renderConfigEditor(s) {
     const el = document.getElementById('config-editor');
+    const mode = (s && s.game_mode) || 'multiplayer';
     const isChecked = s && s.show_shells_to_players !== false ? 'checked' : '';
-    const rounds = [
-        {hp:0, items_per_player:0, max_shells:4},
-        {hp:0, items_per_player:2, max_shells:6},
-        {hp:0, items_per_player:4, max_shells:8}
-    ];
+
+    // Читаем СОХРАНЁННЫЕ раунды из состояния (а не хардкод). cfgRounds
+    // сохраняется между рендерами, пока дилер редактирует, чтобы +/- не сбрасывались.
+    if (cfgRounds === null) {
+        cfgRounds = (s && Array.isArray(s.rounds) && s.rounds.length)
+            ? s.rounds.map(r => ({hp:r.hp||0, items_per_player:r.items_per_player||0, max_shells:r.max_shells||2}))
+            : defaultRoundsFor(mode);
+    }
+
+    const magLimit = s && s.physical_magazine_limit !== undefined ? s.physical_magazine_limit : 0;
+    const maxItems = s && s.max_items_per_player !== undefined ? s.max_items_per_player : 8;
+    const revCap = s && s.revolver_capacity !== undefined ? s.revolver_capacity : 8;
+
     el.innerHTML = `
         <div class="config-group">
             <h4>ОБЩИЕ</h4>
+            <div class="config-round" style="margin-bottom: 12px;">
+                <label style="width:auto; margin-right: 8px;">Режим:</label>
+                <select id="cfg_game_mode" class="cfg-input" style="width:auto;" onchange="onModeChange(this.value)">
+                    <option value="multiplayer" ${mode!=='solo'?'selected':''}>Мультиплеер</option>
+                    <option value="solo" ${mode==='solo'?'selected':''}>Соло (1 на 1)</option>
+                </select>
+            </div>
             <div class="config-round" style="margin-bottom: 12px;">
                 <label style="width:auto; margin-right: 8px;">Показывать патроны игрокам при зарядке:</label>
                 <input type="checkbox" id="cfg_show_shells" ${isChecked} style="transform: scale(1.2);">
             </div>
             <div class="config-round" style="margin-bottom: 12px;">
                 <label style="width:auto; margin-right: 8px;">Лимит патронов в магазине (0=нет):</label>
-                <input type="number" class="cfg-input" id="cfg_mag_limit" value="${s && s.physical_magazine_limit !== undefined ? s.physical_magazine_limit : 0}" min="0" max="20">
+                <input type="number" class="cfg-input" id="cfg_mag_limit" value="${magLimit}" min="0" max="20">
+            </div>
+            <div class="config-round" style="margin-bottom: 12px;">
+                <label style="width:auto; margin-right: 8px;">Макс. предметов у игрока:</label>
+                <input type="number" class="cfg-input" id="cfg_max_items" value="${maxItems}" min="1" max="16">
+            </div>
+            <div class="config-round" style="margin-bottom: 12px;">
+                <label style="width:auto; margin-right: 8px;">Ёмкость револьвера (капсюли):</label>
+                <input type="number" class="cfg-input" id="cfg_rev_cap" value="${revCap}" min="1" max="24">
             </div>
             <h4>ЛИМИТЫ ПРЕДМЕТОВ (0 = нет лимита)</h4>
             ${Object.entries(ITEM_LABELS).map(([k,v]) => {
                 // Don't show expired_medicine in multiplayer mode
-                if (k === 'expired_medicine' && s && s.game_mode !== 'solo') return '';
+                if (k === 'expired_medicine' && mode !== 'solo') return '';
 
                 const glob = s && s.item_limits_global && s.item_limits_global[k] !== undefined ? s.item_limits_global[k] : 0;
                 const pers = s && s.item_limits_per_player && s.item_limits_per_player[k] !== undefined ? s.item_limits_per_player[k] : 0;
@@ -578,16 +689,54 @@ function renderConfigEditor(s) {
                 </div>`;
             }).join('')}
             <h4>РАУНДЫ (Начальное HP 0 = СЛУЧАЙНО ПО ПРАВИЛАМ)</h4>
-            ${rounds.map((r,i) => `
+            <div id="cfg-rounds-list">
+            ${cfgRounds.map((r,i) => `
                 <div class="config-round">
                     <label>Р${i+1}:</label>
                     HP: <input type="number" class="cfg-input" id="r${i}_hp" value="${r.hp}" min="0" max="20">
                     Предм.: <input type="number" class="cfg-input" id="r${i}_items" value="${r.items_per_player}" min="0" max="8">
                     Макс.патр.: <input type="number" class="cfg-input" id="r${i}_shells" value="${r.max_shells}" min="2" max="8">
+                    <button class="btn btn-small" onclick="removeRound(${i})" title="Удалить раунд" style="margin-left:6px;">✕</button>
                 </div>
             `).join('')}
+            </div>
+            <button class="btn btn-secondary btn-small" onclick="addRound()" style="margin-top:6px;">+ ДОБАВИТЬ РАУНД</button>
         </div>
     `;
+}
+
+// Перед изменением числа раундов забираем текущие введённые значения из полей,
+// чтобы не потерять несохранённые правки при перерисовке.
+function syncRoundsFromInputs() {
+    if (!cfgRounds) return;
+    cfgRounds = cfgRounds.map((r,i) => {
+        const hp = document.getElementById(`r${i}_hp`);
+        const it = document.getElementById(`r${i}_items`);
+        const sh = document.getElementById(`r${i}_shells`);
+        return {
+            hp: hp ? parseInt(hp.value)||0 : r.hp,
+            items_per_player: it ? parseInt(it.value)||0 : r.items_per_player,
+            max_shells: sh ? parseInt(sh.value)||2 : r.max_shells,
+        };
+    });
+}
+function addRound() {
+    syncRoundsFromInputs();
+    cfgRounds.push({hp:0, items_per_player:0, max_shells:4});
+    renderConfigEditor(gameState);
+}
+function removeRound(i) {
+    syncRoundsFromInputs();
+    if (cfgRounds.length <= 1) return;  // хотя бы один раунд
+    cfgRounds.splice(i, 1);
+    renderConfigEditor(gameState);
+}
+// Смена режима подставляет дефолтные раунды этого режима и перерисовывает
+// редактор (в т.ч. показ/скрытие «Просроченного лекарства» — только в solo).
+function onModeChange(mode) {
+    cfgRounds = defaultRoundsFor(mode);
+    const st = Object.assign({}, gameState || {}, {game_mode: mode});
+    renderConfigEditor(st);
 }
 
 function renderLoading(s) {
@@ -637,6 +786,26 @@ function renderItems(s) {
     }).join('');
 }
 
+function renderRevolver(s) {
+    const box = document.getElementById('revolver-box');
+    if (!box) return;
+    const cap = s.revolver_capacity || 8;
+    const ammo = (typeof s.revolver_ammo === 'number') ? s.revolver_ammo : cap;
+    const empty = ammo <= 0;
+
+    const chambers = Array.from({length: cap}, (_, i) =>
+        `<span class="chamber ${i < ammo ? 'loaded' : 'spent'}"></span>`
+    ).join('');
+
+    box.classList.toggle('revolver-empty', empty);
+    box.innerHTML =
+        `<div class="revolver-header">🔫 РЕВОЛЬВЕР (капсюли): <b>${ammo} / ${cap}</b></div>` +
+        `<div class="chamber-row">${chambers}</div>` +
+        (empty
+            ? `<button class="btn btn-dealer btn-reload-revolver" onclick="reloadRevolver()">Я ПЕРЕЗАРЯДИЛ</button>`
+            : '');
+}
+
 function renderTurn(s) {
     document.getElementById('panel-turn').style.display = 'block';
     const cp = s.current_player;
@@ -649,6 +818,8 @@ function renderTurn(s) {
     const seq = s.shells_sequence.map((x, i) => `<span style="color:${x === 'live' ? 'var(--red)' : 'var(--text-dim)'}">${i+1}-й: ${x === 'live' ? 'Боевой' : 'Холостой'}</span>`).join('<br>');
     document.getElementById('shell-mini-info').innerHTML =
         `Патронов: ${s.shells_remaining} | Боевых: ${s.live_count} | Холостых: ${s.blank_count}<br><br><span style="opacity:0.6;font-size:0.9em">Порядок ВЫСТРЕЛОВ:</span><br>${seq}`;
+
+    renderRevolver(s);
 
     if (s.last_magnify_result || s.last_burner_result || s.last_medicine_result) {
         const parts = [];
@@ -790,6 +961,7 @@ function createGame() {
 }
 function startGame() { apiPost('/api/start_game'); }
 function confirmShells() { apiPost('/api/confirm_shells'); }
+function reloadRevolver() { apiPost('/api/reload_revolver'); }
 function confirmItems() { apiPost('/api/confirm_items'); }
 function nextRound() { apiPost('/api/next_round'); }
 function forceRoundOver() { if(confirm('Завершить раунд досрочно?')) apiPost('/api/force_round_over'); }
@@ -808,25 +980,27 @@ function hideSpecial() {
 }
 
 function saveConfig() {
-    const rounds = [];
-    for (let i = 0; i < 3; i++) {
-        const hp = document.getElementById(`r${i}_hp`);
-        const items = document.getElementById(`r${i}_items`);
-        const shells = document.getElementById(`r${i}_shells`);
-        if (hp && items && shells) {
-            rounds.push({
-                hp: parseInt(hp.value),
-                items_per_player: parseInt(items.value),
-                max_shells: parseInt(shells.value)
-            });
-        }
-    }
+    // Забираем актуальные значения раундов из полей в рабочую копию (учитывает
+    // любое число раундов, добавленных/удалённых кнопками).
+    syncRoundsFromInputs();
+    const rounds = (cfgRounds || []).map(r => ({
+        hp: r.hp, items_per_player: r.items_per_player, max_shells: r.max_shells
+    }));
+
+    const modeSel = document.getElementById('cfg_game_mode');
+    const game_mode = modeSel ? modeSel.value : undefined;
 
     const show_shells_checkbox = document.getElementById('cfg_show_shells');
     const show_shells_to_players = show_shells_checkbox ? show_shells_checkbox.checked : true;
 
     const mag_limit_input = document.getElementById('cfg_mag_limit');
     const physical_magazine_limit = mag_limit_input ? parseInt(mag_limit_input.value) || 0 : 0;
+
+    const max_items_input = document.getElementById('cfg_max_items');
+    const max_items_per_player = max_items_input ? parseInt(max_items_input.value) || 8 : 8;
+
+    const rev_cap_input = document.getElementById('cfg_rev_cap');
+    const revolver_capacity = rev_cap_input ? parseInt(rev_cap_input.value) || 8 : 8;
 
     const item_limits_global = {};
     const item_limits_per_player = {};
@@ -837,8 +1011,147 @@ function saveConfig() {
         if (plEl) item_limits_per_player[k] = parseInt(plEl.value) || 0;
     });
 
-    const config = JSON.stringify({rounds, show_shells_to_players, physical_magazine_limit, item_limits_global, item_limits_per_player});
-    apiPost('/api/update_config', {config_json: config});
+    const payload = {
+        rounds, show_shells_to_players, physical_magazine_limit,
+        max_items_per_player, revolver_capacity,
+        item_limits_global, item_limits_per_player
+    };
+    if (game_mode) payload.game_mode = game_mode;
+
+    // Сбрасываем локальный кэш раундов — после сохранения перечитаем свежий
+    // конфиг с сервера (в т.ч. если сменили режим и подставились дефолты).
+    cfgRounds = null;
+    apiPost('/api/update_config', {config_json: JSON.stringify(payload)});
+}
+
+// ── Ручное управление соленоидом ──
+async function forceFireSolenoid(btn) {
+    const orig = btn.textContent;
+    btn.disabled = true; btn.textContent = '⚡ ...';
+    try {
+        await fetch('/api/esp/force_fire', {method:'POST'});
+        btn.textContent = '⚡ ОТПРАВЛЕНО';
+    } catch (e) {
+        btn.textContent = '⚡ ОШИБКА';
+    }
+    setTimeout(() => { btn.disabled = false; btn.textContent = orig; }, 1200);
+}
+
+// ── Модалка «Сервер/Железо» (config.json) ──
+function openServerConfig() {
+    document.getElementById('server-config-modal').style.display = 'flex';
+    loadServerConfig();
+}
+function closeServerConfig() {
+    document.getElementById('server-config-modal').style.display = 'none';
+}
+
+async function loadServerConfig() {
+    const body = document.getElementById('server-config-body');
+    body.innerHTML = '<p class="hint">Загрузка…</p>';
+    try {
+        const r = await fetch('/api/server_config');
+        const d = await r.json();
+        renderServerConfig(d);
+    } catch (e) {
+        body.innerHTML = '<p class="scfg-msg err">Не удалось загрузить конфиг: ' + e.message + '</p>';
+    }
+}
+
+function esc(v){ return String(v==null?'':v).replace(/"/g,'&quot;'); }
+
+function renderServerConfig(d) {
+    const esp = d.esp || {};
+    const server = d.server || {};
+    const remote = esp.trigger_remote || {};
+    const pins = esp.pins || {};
+    const t = esp.timings || {};
+    // IP сервера вытаскиваем из server_base_url, иначе — автоопределённый.
+    let ip = '';
+    const m = /https?:\/\/([^:/]+)/.exec(esp.server_base_url || '');
+    if (m) ip = m[1];
+    if (!ip) ip = d.detected_ip || '';
+
+    const num = (label, id, val, min, max) =>
+        `<div class="scfg-row"><label>${label}</label><input type="number" id="${id}" value="${esc(val)}" ${min!=null?`min="${min}"`:''} ${max!=null?`max="${max}"`:''}></div>`;
+    const txt = (label, id, val) =>
+        `<div class="scfg-row"><label>${label}</label><input type="text" id="${id}" value="${esc(val)}" autocomplete="off"></div>`;
+
+    document.getElementById('server-config-body').innerHTML = `
+        <h4>СЕТЬ</h4>
+        ${txt('Wi-Fi SSID', 'scfg_ssid', esp.wifi_ssid)}
+        ${txt('Wi-Fi пароль', 'scfg_pass', esp.wifi_password)}
+        ${txt('IP сервера', 'scfg_ip', ip)}
+        ${num('Порт сервера', 'scfg_port', server.port != null ? server.port : 8000, 1, 65535)}
+        <p class="scfg-note">Автоопределённый IP хоста: ${esc(d.detected_ip || '—')}</p>
+
+        <h4>ПУЛЬТ-КУРОК (RF 433 МГц)</h4>
+        ${num('Код пульта (0=обучение)', 'scfg_code', remote.code != null ? remote.code : 0, 0)}
+        ${num('Протокол', 'scfg_proto', remote.protocol != null ? remote.protocol : 1, 0)}
+        ${num('Бит', 'scfg_bits', remote.bitlength != null ? remote.bitlength : 24, 1)}
+
+        <h4>ПИНЫ (GPIO)</h4>
+        ${num('Курок (trigger)', 'scfg_pin_trigger', pins.trigger != null ? pins.trigger : 4, 0)}
+        ${num('Соленоид', 'scfg_pin_solenoid', pins.solenoid != null ? pins.solenoid : 5, 0)}
+        ${num('Лампа (live_led)', 'scfg_pin_led', pins.live_led != null ? pins.live_led : 2, 0)}
+
+        <h4>ТАЙМИНГИ ESP (мс / шт)</h4>
+        ${num('Интервал опроса', 'scfg_t_poll', t.poll_interval_ms != null ? t.poll_interval_ms : 1000, 100)}
+        ${num('HTTP таймаут', 'scfg_t_http', t.http_timeout_ms != null ? t.http_timeout_ms : 1500, 100)}
+        ${num('Импульс соленоида', 'scfg_t_pulse', t.solenoid_pulse_ms != null ? t.solenoid_pulse_ms : 250, 10)}
+        ${num('Макс. удержание соленоида', 'scfg_t_maxon', t.solenoid_max_on_ms != null ? t.solenoid_max_on_ms : 500, 10)}
+        ${num('Дебаунс курка', 'scfg_t_deb', t.trigger_debounce_ms != null ? t.trigger_debounce_ms : 250, 0)}
+        ${num('RF подтверждений', 'scfg_t_rfc', t.rf_confirm_count != null ? t.rf_confirm_count : 1, 1)}
+        ${num('RF окно', 'scfg_t_rfw', t.rf_confirm_window_ms != null ? t.rf_confirm_window_ms : 300, 0)}
+        ${num('RF lockout', 'scfg_t_rfl', t.rf_lockout_ms != null ? t.rf_lockout_ms : 800, 0)}
+        ${num('Повтор Wi-Fi', 'scfg_t_wifi', t.wifi_retry_interval_ms != null ? t.wifi_retry_interval_ms : 10000, 0)}
+        ${num('Мигание лампы', 'scfg_t_led', t.live_led_blink_ms != null ? t.live_led_blink_ms : 300, 0)}
+        ${num('Watchdog таймаут', 'scfg_t_wdt', t.wdt_timeout_ms != null ? t.wdt_timeout_ms : 5000, 1000)}
+
+        <p class="scfg-note">⚠ После сохранения плату нужно перепрошить новыми значениями:
+        на хосте выполни <b>./esp/flash.sh</b> (или ./start.sh).</p>
+    `;
+}
+
+async function saveServerConfig(btn) {
+    const msg = document.getElementById('server-config-msg');
+    const gv = id => { const el = document.getElementById(id); return el ? el.value : undefined; };
+    const gi = id => { const v = gv(id); return v === undefined || v === '' ? undefined : parseInt(v); };
+
+    const payload = {
+        wifi_ssid: gv('scfg_ssid'),
+        wifi_password: gv('scfg_pass'),
+        server_ip: gv('scfg_ip'),
+        server_port: gi('scfg_port'),
+        trigger_code: gi('scfg_code'),
+        trigger_protocol: gi('scfg_proto'),
+        trigger_bitlength: gi('scfg_bits'),
+        pins: { trigger: gi('scfg_pin_trigger'), solenoid: gi('scfg_pin_solenoid'), live_led: gi('scfg_pin_led') },
+        timings: {
+            poll_interval_ms: gi('scfg_t_poll'), http_timeout_ms: gi('scfg_t_http'),
+            solenoid_pulse_ms: gi('scfg_t_pulse'), solenoid_max_on_ms: gi('scfg_t_maxon'),
+            trigger_debounce_ms: gi('scfg_t_deb'), rf_confirm_count: gi('scfg_t_rfc'),
+            rf_confirm_window_ms: gi('scfg_t_rfw'), rf_lockout_ms: gi('scfg_t_rfl'),
+            wifi_retry_interval_ms: gi('scfg_t_wifi'), live_led_blink_ms: gi('scfg_t_led'),
+            wdt_timeout_ms: gi('scfg_t_wdt'),
+        },
+    };
+
+    btn.disabled = true; msg.className = 'scfg-msg'; msg.textContent = 'Сохраняю…';
+    try {
+        const r = await fetch('/api/server_config/save', {
+            method:'POST', headers:{'Content-Type':'application/json'},
+            body: JSON.stringify(payload)
+        });
+        if (!r.ok) {
+            const e = await r.json().catch(()=>({detail:'ошибка'}));
+            throw new Error(e.detail || ('HTTP '+r.status));
+        }
+        msg.className = 'scfg-msg ok'; msg.textContent = '✓ Сохранено в config.json. Перепрошей плату (./esp/flash.sh).';
+    } catch (e) {
+        msg.className = 'scfg-msg err'; msg.textContent = '✗ ' + e.message;
+    }
+    btn.disabled = false;
 }
 
 connect();

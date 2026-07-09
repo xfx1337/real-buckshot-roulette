@@ -1,0 +1,288 @@
+<!DOCTYPE html>
+<html lang="ru"><head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SETUP — Buckshot Roulette IRL</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=EB+Garamond:ital,wght@0,400;0,600;0,700&family=Share+Tech+Mono&family=Special+Elite&display=swap">
+<style>
+:root{
+  --bg:#0a0a0a;
+  --panel:linear-gradient(160deg,#181310,#120e0d);
+  --green:#3fef6a; --green-bright:#5fff8f;
+  --red:#a83232; --red-deep:#7a1f1f;
+  --text:#b8a99a; --text-bright:#e8ddce; --text-dim:#8f8073; --text-faint:#6e5f52;
+  --border:#241614; --border-light:#322217; --border-metal:#3a2a22;
+  --font-display:'EB Garamond',Georgia,serif;
+  --font-mono:'Share Tech Mono',monospace;
+  --font-type:'Special Elite',monospace;
+}
+*{ box-sizing:border-box; }
+html,body{ margin:0; padding:0; min-height:100%; }
+body{
+  background:radial-gradient(120% 90% at 70% 0%, #1a0d0d 0%, #121010 40%, #0a0a0a 100%);
+  background-attachment:fixed;
+  color:var(--text); font-family:var(--font-display);
+  -webkit-font-smoothing:antialiased; cursor:crosshair;
+  min-height:100vh; display:flex; align-items:flex-start; justify-content:center;
+  padding:40px 16px;
+}
+::selection{ background:var(--green); color:#0a0a0a; }
+@keyframes blink{ 50%{opacity:0} }
+@keyframes scan{ 0%{background-position:0 0} 100%{background-position:0 100vh} }
+
+.scanlines{ position:fixed; inset:0; pointer-events:none; z-index:5;
+  background:repeating-linear-gradient(0deg, rgba(0,0,0,.14) 0, rgba(0,0,0,.14) 1px, transparent 2px, transparent 3px);
+  mix-blend-mode:multiply; }
+
+.wizard{ width:100%; max-width:640px; position:relative; z-index:2; }
+
+.brand{ font-family:var(--font-type); letter-spacing:.14em; color:var(--red);
+  font-size:14px; text-transform:uppercase; margin-bottom:6px; }
+.brand b{ color:var(--green); }
+h1{ font-family:var(--font-type); color:var(--text-bright); font-weight:400;
+  font-size:26px; margin:0 0 4px; letter-spacing:.04em; }
+.sub{ color:var(--text-dim); font-size:15px; margin-bottom:26px; line-height:1.5; }
+.cursor::after{ content:'_'; color:var(--green); animation:blink 1s step-end infinite; }
+
+.steps{ display:flex; gap:8px; margin-bottom:22px; font-family:var(--font-mono);
+  font-size:12px; text-transform:uppercase; letter-spacing:.08em; }
+.steps .st{ flex:1; padding:8px 10px; border:1px solid var(--border-light);
+  background:linear-gradient(180deg,#141010,#0e0b0a); color:var(--text-faint);
+  text-align:center; }
+.steps .st.active{ color:var(--green); border-color:var(--green-bright);
+  box-shadow:inset 0 0 12px rgba(63,239,106,.12); }
+.steps .st.done{ color:var(--text-dim); border-color:var(--border-metal); }
+
+.panel{ border:1px solid var(--border-metal);
+  background:var(--panel); padding:26px 24px; position:relative;
+  box-shadow:0 0 0 1px #0c0a09, 0 20px 60px rgba(0,0,0,.6); }
+.panel::before{ content:''; position:absolute; inset:0; pointer-events:none;
+  box-shadow:inset 0 0 40px rgba(168,50,50,.06); }
+
+.field{ margin-bottom:18px; }
+label{ display:block; font-family:var(--font-mono); font-size:12px;
+  text-transform:uppercase; letter-spacing:.09em; color:var(--green);
+  margin-bottom:7px; }
+label .hint{ color:var(--text-faint); text-transform:none; letter-spacing:0;
+  font-size:12px; display:block; margin-top:3px; }
+input[type=text],input[type=password],input[type=number]{
+  width:100%; padding:11px 13px; font-family:var(--font-mono); font-size:15px;
+  color:var(--text-bright); background:#0d0a09; border:1px solid var(--border-metal);
+  outline:none; }
+input:focus{ border-color:var(--green-bright); box-shadow:0 0 0 1px var(--green-bright),0 0 14px rgba(63,239,106,.15); }
+.row{ display:flex; gap:12px; }
+.row .field{ flex:1; }
+.pw-wrap{ position:relative; }
+.pw-wrap button{ position:absolute; right:8px; top:50%; transform:translateY(-50%);
+  background:none; border:none; color:var(--text-dim); font-family:var(--font-mono);
+  font-size:11px; cursor:pointer; text-transform:uppercase; }
+.pw-wrap button:hover{ color:var(--green); }
+
+.note{ font-family:var(--font-mono); font-size:12px; color:var(--text-dim);
+  border-left:2px solid var(--border-metal); padding:8px 12px; margin:16px 0;
+  background:rgba(0,0,0,.25); line-height:1.6; }
+.note b{ color:var(--text-bright); }
+.detected{ color:var(--green); }
+
+.actions{ display:flex; gap:12px; margin-top:24px; }
+button.btn{ font-family:var(--font-type); font-size:15px; letter-spacing:.05em;
+  padding:12px 22px; cursor:crosshair; text-transform:uppercase;
+  border:1px solid var(--green-bright); color:var(--green-bright);
+  background:linear-gradient(180deg,#132015,#0d160f); transition:.15s; }
+button.btn:hover{ background:linear-gradient(180deg,#1c3020,#122015);
+  box-shadow:0 0 16px rgba(63,239,106,.25); }
+button.btn.ghost{ border-color:var(--border-metal); color:var(--text-dim);
+  background:linear-gradient(180deg,#141010,#0e0b0a); }
+button.btn.ghost:hover{ color:var(--text-bright); box-shadow:none; }
+button.btn:disabled{ opacity:.4; cursor:not-allowed; box-shadow:none; }
+.spacer{ flex:1; }
+
+.msg{ font-family:var(--font-mono); font-size:13px; margin-top:16px; min-height:18px;
+  line-height:1.5; }
+.msg.err{ color:var(--red); } .msg.ok{ color:var(--green); }
+
+.step{ display:none; } .step.active{ display:block; }
+
+.summary{ font-family:var(--font-mono); font-size:13px; line-height:2; color:var(--text); }
+.summary .k{ color:var(--text-faint); display:inline-block; width:150px; }
+.summary .v{ color:var(--text-bright); }
+
+.foot{ text-align:center; margin-top:22px; font-family:var(--font-mono);
+  font-size:11px; color:var(--text-faint); letter-spacing:.06em; }
+</style>
+</head>
+<body>
+<div class="scanlines"></div>
+<div class="wizard">
+  <div class="brand"><b>BUCKSHOT</b> ROULETTE · IRL</div>
+  <h1>Настройка развёртывания<span class="cursor"></span></h1>
+  <div class="sub">Первый запуск на этой машине. Заполни параметры сети и оборудования —
+    сервер сохранит их в <b>config.json</b>, после чего откроется панель дилера
+    и можно будет создать игру.</div>
+
+  <div class="steps">
+    <div class="st active" data-s="1">1 · Сеть &amp; ESP</div>
+    <div class="st" data-s="2">2 · Проверка</div>
+  </div>
+
+  <div class="panel">
+    <!-- ── Шаг 1 ── -->
+    <div class="step active" data-step="1">
+      <div class="field">
+        <label>Wi-Fi SSID
+          <span class="hint">Имя Wi-Fi сети (2.4 ГГц — ESP32 не видит 5 ГГц). Регистр важен.</span></label>
+        <input type="text" id="ssid" autocomplete="off" placeholder="MyNetwork">
+      </div>
+      <div class="field">
+        <label>Wi-Fi пароль
+          <span class="hint">Пароль этой сети. Хранится в config.json на этой машине.</span></label>
+        <div class="pw-wrap">
+          <input type="password" id="pass" autocomplete="off" placeholder="········">
+          <button type="button" id="togglePw">показать</button>
+        </div>
+      </div>
+      <div class="row">
+        <div class="field">
+          <label>IP этого сервера
+            <span class="hint detected" id="ipHint">определяю…</span></label>
+          <input type="text" id="ip" autocomplete="off" placeholder="192.168.0.7">
+        </div>
+        <div class="field" style="max-width:130px">
+          <label>Порт</label>
+          <input type="number" id="port" value="8000" min="1" max="65535">
+        </div>
+      </div>
+      <div class="field">
+        <label>Код RF-пульта (курка)
+          <span class="hint">Код кнопки пульта 433 МГц. Не знаешь — оставь 0: плата войдёт
+            в режим обучения и напечатает пойманный код в Serial.</span></label>
+        <input type="number" id="code" value="0" min="0">
+      </div>
+
+      <div class="note">
+        <b>IP сервера</b> — это адрес, по которому плата и телефоны игроков находят сервер.
+        Автоопределён из активного сетевого интерфейса. Если у машины несколько сетей —
+        укажи адрес той Wi-Fi, где будут плата и игроки.
+      </div>
+
+      <div class="actions">
+        <div class="spacer"></div>
+        <button class="btn" id="toReview">Далее →</button>
+      </div>
+      <div class="msg" id="msg1"></div>
+    </div>
+
+    <!-- ── Шаг 2 ── -->
+    <div class="step" data-step="2">
+      <div class="summary" id="summary"></div>
+      <div class="note">
+        После сохранения плату нужно <b>перепрошить</b> новыми настройками, чтобы она
+        подключилась к этой сети и серверу. На хосте с подключённой по USB платой это
+        делает <b>./esp/flash.sh</b> (или запусти проект через <b>./start.sh</b>, который
+        прошивает автоматически).
+      </div>
+      <div class="actions">
+        <button class="btn ghost" id="back">← Назад</button>
+        <div class="spacer"></div>
+        <button class="btn" id="save">Сохранить и открыть дилера</button>
+      </div>
+      <div class="msg" id="msg2"></div>
+    </div>
+  </div>
+
+  <div class="foot">config.json · этот мастер можно открыть снова по адресу /setup</div>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+const state = { detectedIp: "" };
+
+// Подтягиваем текущие/автоопределённые значения.
+async function loadStatus(){
+  try{
+    const r = await fetch('/api/setup/status');
+    const d = await r.json();
+    state.detectedIp = d.detected_ip || "";
+    $('ipHint').textContent = d.detected_ip ? ("определён: " + d.detected_ip) : "не определён — впиши вручную";
+    const c = d.current || {};
+    // Подставляем существующие значения, если они не заглушки.
+    if(c.wifi_ssid && c.wifi_ssid !== 'YOUR_WIFI_SSID') $('ssid').value = c.wifi_ssid;
+    if(c.wifi_password && c.wifi_password !== 'YOUR_WIFI_PASSWORD') $('pass').value = c.wifi_password;
+    if(c.server_port) $('port').value = c.server_port;
+    if(c.trigger_code) $('code').value = c.trigger_code;
+    // IP: из server_base_url, иначе автоопределённый.
+    let ip = "";
+    const m = /https?:\/\/([^:/]+)/.exec(c.server_base_url || "");
+    if(m && m[1] && m[1] !== '192.168.1.100') ip = m[1];
+    $('ip').value = ip || d.detected_ip || "";
+  }catch(e){
+    $('ipHint').textContent = "не удалось определить";
+  }
+}
+loadStatus();
+
+$('togglePw').onclick = () => {
+  const p = $('pass');
+  const show = p.type === 'password';
+  p.type = show ? 'text' : 'password';
+  $('togglePw').textContent = show ? 'скрыть' : 'показать';
+};
+
+function collect(){
+  return {
+    wifi_ssid: $('ssid').value.trim(),
+    wifi_password: $('pass').value,
+    server_ip: $('ip').value.trim(),
+    server_port: parseInt($('port').value, 10) || 8000,
+    trigger_code: parseInt($('code').value, 10) || 0,
+  };
+}
+
+function showStep(n){
+  document.querySelectorAll('.step').forEach(s => s.classList.toggle('active', s.dataset.step == n));
+  document.querySelectorAll('.steps .st').forEach(s => {
+    s.classList.toggle('active', s.dataset.s == n);
+    s.classList.toggle('done', s.dataset.s < n);
+  });
+}
+
+$('toReview').onclick = () => {
+  const v = collect();
+  const m = $('msg1'); m.className = 'msg err';
+  if(!v.wifi_ssid){ m.textContent = '⚠ Укажи SSID сети.'; return; }
+  if(!v.server_ip){ m.textContent = '⚠ Укажи IP сервера.'; return; }
+  m.textContent = '';
+  $('summary').innerHTML =
+    `<div><span class="k">Wi-Fi SSID</span><span class="v">${esc(v.wifi_ssid)}</span></div>`+
+    `<div><span class="k">Wi-Fi пароль</span><span class="v">${v.wifi_password ? '•'.repeat(Math.min(v.wifi_password.length,12)) : '<не задан>'}</span></div>`+
+    `<div><span class="k">Адрес сервера</span><span class="v">http://${esc(v.server_ip)}:${v.server_port}</span></div>`+
+    `<div><span class="k">Код курка</span><span class="v">${v.trigger_code || '0 (режим обучения)'}</span></div>`;
+  showStep(2);
+};
+$('back').onclick = () => showStep(1);
+
+function esc(s){ return String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+
+$('save').onclick = async () => {
+  const btn = $('save'); const m = $('msg2');
+  btn.disabled = true; m.className = 'msg'; m.textContent = 'Сохраняю config.json…';
+  try{
+    const r = await fetch('/api/setup/save', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify(collect())
+    });
+    if(!r.ok){
+      const e = await r.json().catch(()=>({detail:'ошибка'}));
+      throw new Error(e.detail || ('HTTP '+r.status));
+    }
+    m.className = 'msg ok'; m.textContent = '✓ Сохранено. Открываю панель дилера…';
+    setTimeout(()=>{ location.href = '/dealer'; }, 900);
+  }catch(e){
+    btn.disabled = false;
+    m.className = 'msg err'; m.textContent = '✗ ' + e.message;
+  }
+};
+</script>
+</body></html>

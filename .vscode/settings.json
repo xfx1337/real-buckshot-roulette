@@ -1,0 +1,9 @@
+{
+  // config.json намеренно в формате JSONC (с //-комментариями). Сервер и
+  // генератор прошивки стрипают комментарии перед разбором. Говорим редактору
+  // подсвечивать его как JSONC, чтобы он не ругался «Comments are not permitted».
+  "files.associations": {
+    "config.json": "jsonc",
+    "config.example.json": "jsonc"
+  }
+}

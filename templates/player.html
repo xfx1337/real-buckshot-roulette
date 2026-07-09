@@ -92,25 +92,81 @@
         </div>
     </div>
 
+    <!-- Видео-фолбэк для удержания экрана на http (см. keepAwake ниже). Скрытое,
+         зациклённое, без звука; источник — крошечный data-URI, внешних файлов нет. -->
+    <video id="nosleep-video" muted playsinline loop
+           style="position:fixed;width:1px;height:1px;opacity:0;pointer-events:none;left:-10px;top:-10px;"></video>
+
     <script>
-    // ── Fullscreen + wake lock ──
-    // Browsers require a user gesture to enter fullscreen / grant wake lock,
-    // so the gate overlay captures the first tap on the phone screen.
+    // ── Fullscreen + удержание экрана (не даём телефону погасить дисплей) ──
+    // Браузеры требуют жест пользователя для fullscreen / wake lock, поэтому
+    // оверлей fullscreen-gate ловит первый тап по экрану.
+    //
+    // Два механизма, потому что основной работает не везде:
+    //  1) Screen Wake Lock API — правильный путь, НО браузеры дают его только на
+    //     HTTPS/localhost. Игра идёт по локальному http://<ip> → там он молча
+    //     отклоняется, и экран гаснет по системному таймауту.
+    //  2) Фолбэк: зацикленное скрытое видео (техника NoSleep.js). Пока играет
+    //     видео, ОС не тушит экран — и это РАБОТАЕТ на http. Держим оба сразу:
+    //     где доступен wake lock — он основной, видео его дублирует безвредно.
     let wakeLock = null;
+    let wakeLockRefreshTimer = null;
+
+    // Крошечный немой MP4 (несколько кадров), зашитый data-URI — без внешних
+    // файлов и сетевых запросов. Достаточно, чтобы браузер считал экран «занят».
+    const NOSLEEP_MP4 = "data:video/mp4;base64,AAAAIGZ0eXBpc29tAAACAGlzb21pc28yYXZjMW1wNDEAAAMQbW9vdgAAAGxtdmhkAAAAAAAAAAAAAAAAAAAD6AAAA+gAAQAAAQAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAgAAAjp0cmFrAAAAXHRraGQAAAADAAAAAAAAAAAAAAABAAAAAAAAA+gAAAAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAABAAAAAAEAAAABAAAAAAAAkZWR0cwAAABxlbHN0AAAAAAAAAAEAAAPoAAAAAAABAAAAAAGybWRpYQAAACBtZGhkAAAAAAAAAAAAAAAAAABAAAAAQABVxAAAAAAALWhkbHIAAAAAAAAAAHZpZGUAAAAAAAAAAAAAAABWaWRlb0hhbmRsZXIAAAABXW1pbmYAAAAUdm1oZAAAAAEAAAAAAAAAAAAAACRkaW5mAAAAHGRyZWYAAAAAAAAAAQAAAAx1cmwgAAAAAQAAAR1zdGJsAAAAuXN0c2QAAAAAAAAAAQAAAKlhdmMxAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAAAAEAAQABIAAAASAAAAAAAAAABFUxhdmM2Mi4yOC4xMDEgbGlieDI2NAAAAAAAAAAAAAAAGP//AAAAL2F2Y0MBQsAe/+EAF2dCwB7ZBCbARAAAAwAEAAADAAg8WLkgAQAFaMuDyyAAAAAQcGFzcAAAAAEAAAABAAAAFGJ0cnQAAAAAAAAUkAAAAAAAAAAYc3R0cwAAAAAAAAABAAAAAQAAQAAAAAAcc3RzYwAAAAAAAAABAAAAAQAAAAEAAAABAAAAFHN0c3oAAAAAAAACkgAAAAEAAAAUc3RjbwAAAAAAAAABAAADQAAAAGJ1ZHRhAAAAWm1ldGEAAAAAAAAAIWhkbHIAAAAAAAAAAG1kaXJhcHBsAAAAAAAAAAAAAAAALWlsc3QAAAAlqXRvbwAAAB1kYXRhAAAAAQAAAABMYXZmNjIuMTIuMTAxAAAACGZyZWUAAAKabWRhdAAAAnAGBf//bNxF6b3m2Ui3lizYINkj7u94MjY0IC0gY29yZSAxNjUgcjMyMjIgYjM1NjA1YSAtIEguMjY0L01QRUctNCBBVkMgY29kZWMgLSBDb3B5bGVmdCAyMDAzLTIwMjUgLSBodHRwOi8vd3d3LnZpZGVvbGFuLm9yZy94MjY0Lmh0bWwgLSBvcHRpb25zOiBjYWJhYz0wIHJlZj0zIGRlYmxvY2s9MTowOjAgYW5hbHlzZT0weDE6MHgxMTEgbWU9aGV4IHN1Ym1lPTcgcHN5PTEgcHN5X3JkPTEuMDA6MC4wMCBtaXhlZF9yZWY9MSBtZV9yYW5nZT0xNiBjaHJvbWFfbWU9MSB0cmVsbGlzPTEgOHg4ZGN0PTAgY3FtPTAgZGVhZHpvbmU9MjEsMTEgZmFzdF9wc2tpcD0xIGNocm9tYV9xcF9vZmZzZXQ9LTIgdGhyZWFkcz0yIGxvb2thaGVhZF90aHJlYWRzPTEgc2xpY2VkX3RocmVhZHM9MCBucj0wIGRlY2ltYXRlPTEgaW50ZXJsYWNlZD0wIGJsdXJheV9jb21wYXQ9MCBjb25zdHJhaW5lZF9pbnRyYT0wIGJmcmFtZXM9MCB3ZWlnaHRwPTAga2V5aW50PTI1MCBrZXlpbnRfbWluPTEgc2NlbmVjdXQ9NDAgaW50cmFfcmVmcmVzaD0wIHJjX2xvb2thaGVhZD00MCByYz1jcmYgbWJ0cmVlPTEgY3JmPTIzLjAgcWNvbXA9MC42MCBxcG1pbj0wIHFwbWF4PTY5IHFwc3RlcD00IGlwX3JhdGlvPTEuNDAgYXE9MToxLjAwAIAAAAAaZYiEBX///w9FAAFC3ycnJ1111111111114A=";
+
+    const nosleepVideo = document.getElementById('nosleep-video');
+    function startNoSleepVideo() {
+        try {
+            if (!nosleepVideo.src) nosleepVideo.src = NOSLEEP_MP4;
+            const p = nosleepVideo.play();
+            if (p && p.catch) p.catch(() => {});
+        } catch (e) { /* ignore */ }
+    }
 
     async function requestWakeLock() {
         if (!('wakeLock' in navigator)) return;
         try {
+            // Освобождаем старый wake lock, если есть
+            if (wakeLock) {
+                try {
+                    await wakeLock.release();
+                } catch (e) { /* ignore */ }
+                wakeLock = null;
+            }
+            // Запрашиваем новый wake lock
             wakeLock = await navigator.wakeLock.request('screen');
-            wakeLock.addEventListener('release', () => { wakeLock = null; });
+            wakeLock.addEventListener('release', () => { 
+                wakeLock = null;
+            });
         } catch (e) {
-            // ignore — e.g. low battery or unsupported
+            // Отклонён (например, http без wake lock) — молчим, работает видео.
         }
     }
 
+    function keepAwake() {
+        requestWakeLock();      // основной путь (HTTPS/localhost)
+        startNoSleepVideo();    // фолбэк, держит экран на http
+        
+        // Обновляем wake lock каждые 2 минуты (120000 мс), чтобы гарантировать
+        // что экран останется включённым на протяжении всей игры
+        if (wakeLockRefreshTimer) {
+            clearInterval(wakeLockRefreshTimer);
+        }
+        wakeLockRefreshTimer = setInterval(() => {
+            if (document.visibilityState === 'visible') {
+                requestWakeLock();
+                if (nosleepVideo.paused) startNoSleepVideo();
+            }
+        }, 120000); // 2 минуты
+    }
+
+    // Вернулись во вкладку — ОС могла отобрать оба механизма, поднимаем заново.
     document.addEventListener('visibilitychange', () => {
-        if (document.visibilityState === 'visible' && !wakeLock) {
-            requestWakeLock();
+        if (document.visibilityState === 'visible') {
+            if (!wakeLock) requestWakeLock();
+            if (nosleepVideo.paused) startNoSleepVideo();
         }
     });
 
@@ -120,9 +176,19 @@
         if (req) {
             req.call(el).catch(() => {});
         }
-        requestWakeLock();
+        keepAwake();
         document.getElementById('fullscreen-gate').classList.add('hidden');
     }
+
+    // Очищаем таймер при закрытии/перезагрузке страницы
+    window.addEventListener('beforeunload', () => {
+        if (wakeLockRefreshTimer) {
+            clearInterval(wakeLockRefreshTimer);
+        }
+        if (wakeLock) {
+            wakeLock.release().catch(() => {});
+        }
+    });
 
     document.getElementById('fullscreen-gate').addEventListener('click', enterImmersiveMode);
     document.getElementById('fullscreen-gate').addEventListener('touchend', (e) => {
