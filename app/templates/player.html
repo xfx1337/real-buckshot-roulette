@@ -334,7 +334,7 @@
         }
 
         // Dead
-        if (data.game_mode === 'solo') {
+        if (data.game_mode === 'solo' || data.game_mode === 'story') {
             // In solo mode, show game over screen if either dies (no dead screen)
             if (!data.my_alive || (data.opponent_alive !== undefined && !data.opponent_alive)) {
                 // If it's not game_over phase yet, it will be soon. Just wait.
@@ -351,7 +351,7 @@
         document.getElementById('state-game').style.display = 'flex';
 
         // Solo Mode adjustments
-        if (data.game_mode === 'solo') {
+        if (data.game_mode === 'solo' || data.game_mode === 'story') {
             document.getElementById('mp-layout').style.display = 'none';
             document.getElementById('solo-layout').style.display = 'flex';
             
@@ -394,8 +394,8 @@
             }
             
             // Bolts
-            renderBolts(data.opponent_hp, data.opponent_max_hp, 'opponent-lightning-container');
-            renderBolts(data.my_hp, data.my_max_hp, 'solo-lightning-container');
+            renderBolts(data.opponent_hp, data.opponent_max_hp, 'opponent-lightning-container', data.game_mode, data.current_round);
+            renderBolts(data.my_hp, data.my_max_hp, 'solo-lightning-container', data.game_mode, data.current_round);
         } else {
             document.getElementById('mp-layout').style.display = 'flex';
             document.getElementById('solo-layout').style.display = 'none';
@@ -416,17 +416,23 @@
                 turnLabel.classList.remove('active');
             }
 
-            renderBolts(data.my_hp, data.my_max_hp, 'lightning-container-mp');
+            renderBolts(data.my_hp, data.my_max_hp, 'lightning-container-mp', data.game_mode, data.current_round);
         }
     }
 
-    function renderBolts(hp, maxHp, containerId) {
+    function renderBolts(hp, maxHp, containerId, gameMode, currentRound) {
         const container = document.getElementById(containerId);
         const isCritical = hp === 1 && maxHp > 1;
+        // Стори мод, стадия 3: первые 2 заряда «с перерезанными кабелями» —
+        // не восстанавливаются лечением, показываем их приглушёнными
+        const isStoryStage3 = gameMode === 'story' && currentRound === 3;
         let html = '';
         for (let i = 0; i < maxHp; i++) {
             const alive = i < hp;
-            const cls = alive ? (isCritical ? 'alive critical' : 'alive') : 'dead';
+            let cls = alive ? (isCritical ? 'alive critical' : 'alive') : 'dead';
+            if (isStoryStage3 && i < 2) {
+                cls += alive ? ' faded-charge' : ' faded-charge-dead';
+            }
             const src = (alive && isCritical) ? '/static/icons/bolt-critical.png' : '/static/icons/bolt-alive.png';
             html += `<div class="lightning-bolt ${cls}"><img src="${src}" alt=""></div>`;
         }
