@@ -922,6 +922,7 @@ input[type="checkbox"]{ accent-color:var(--green); cursor:crosshair; }
                     <select id="game-mode-select" class="cfg-input">
                         <option value="multiplayer">Мультиплеер (2-4 игрока)</option>
                         <option value="solo">Соло / 1 на 1 (1 телефон на двоих)</option>
+                        <option value="story">Стори мод / 1vs1 (3 стадии как в оригинале)</option>
                     </select>
                 </div>
                 <button class="btn btn-dealer" onclick="createGame()">СОЗДАТЬ ИГРУ</button>
@@ -1115,7 +1116,13 @@ function renderLobby(s) {
     // Show current mode
     const modeBadge = document.getElementById('current-mode-badge');
     if (modeBadge) {
-        modeBadge.textContent = s.game_mode === 'solo' ? '[ РЕЖИМ 1 на 1 ]' : '[ МУЛЬТИПЛЕЕР ]';
+        if (s.game_mode === 'story') {
+            modeBadge.textContent = '[ СТОРИ МОД 1vs1 ]';
+        } else if (s.game_mode === 'solo') {
+            modeBadge.textContent = '[ РЕЖИМ 1 на 1 ]';
+        } else {
+            modeBadge.textContent = '[ МУЛЬТИПЛЕЕР ]';
+        }
     }
 
     const el = document.getElementById('lobby-players');
@@ -1127,7 +1134,7 @@ function renderLobby(s) {
         </div>
     `).join('') || '<p class="hint">---</p>';
 
-    if (s.game_mode === 'solo') {
+    if (s.game_mode === 'solo' || s.game_mode === 'story') {
         document.getElementById('btn-start').disabled = s.players.length !== 1;
         document.getElementById('lobby-hint').textContent = `Игроков: ${s.players.length}/1 (Только один игрок должен зайти с телефона)`;
     } else {
@@ -1142,9 +1149,11 @@ function renderLobby(s) {
 let cfgRounds = null;
 
 function defaultRoundsFor(mode) {
-    return mode === 'solo'
-        ? [{hp:2,items_per_player:0,max_shells:3},{hp:4,items_per_player:2,max_shells:6},{hp:6,items_per_player:4,max_shells:8}]
-        : [{hp:0,items_per_player:0,max_shells:4},{hp:0,items_per_player:2,max_shells:6},{hp:0,items_per_player:4,max_shells:8}];
+    if (mode === 'solo')
+        return [{hp:2,items_per_player:0,max_shells:3},{hp:4,items_per_player:2,max_shells:6},{hp:6,items_per_player:4,max_shells:8}];
+    if (mode === 'story')
+        return [{hp:2,items_per_player:0,max_shells:5},{hp:4,items_per_player:2,max_shells:8},{hp:6,items_per_player:4,max_shells:8}];
+    return [{hp:0,items_per_player:0,max_shells:4},{hp:0,items_per_player:2,max_shells:6},{hp:0,items_per_player:4,max_shells:8}];
 }
 
 function renderConfigEditor(s) {
@@ -1170,8 +1179,9 @@ function renderConfigEditor(s) {
             <div class="config-round" style="margin-bottom: 12px;">
                 <label style="width:auto; margin-right: 8px;">Режим:</label>
                 <select id="cfg_game_mode" class="cfg-input" style="width:auto;" onchange="onModeChange(this.value)">
-                    <option value="multiplayer" ${mode!=='solo'?'selected':''}>Мультиплеер</option>
+                    <option value="multiplayer" ${mode!=='solo'&&mode!=='story'?'selected':''}>Мультиплеер</option>
                     <option value="solo" ${mode==='solo'?'selected':''}>Соло (1 на 1)</option>
+                    <option value="story" ${mode==='story'?'selected':''}>Стори мод (1vs1, 3 стадии)</option>
                 </select>
             </div>
             <div class="config-round" style="margin-bottom: 12px;">

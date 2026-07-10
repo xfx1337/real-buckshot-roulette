@@ -22,7 +22,7 @@ from pydantic import BaseModel
 
 from app.game_engine import (
     GameState, GamePhase, GameConfig, ItemType, ITEM_LABELS, ShellType,
-    SOLO_DEFAULT_ROUNDS, MULTIPLAYER_DEFAULT_ROUNDS
+    SOLO_DEFAULT_ROUNDS, STORY_DEFAULT_ROUNDS, MULTIPLAYER_DEFAULT_ROUNDS
 )
 
 import socket
@@ -567,13 +567,15 @@ async def join_page(request: Request):
     response_model=CreateGameResponse,
 )
 async def create_game(
-    game_mode: str = Form("multiplayer", description="Режим игры: `multiplayer` (2-4 игрока) или `solo` (1 на 1 с виртуальным DEALER)"),
+    game_mode: str = Form("multiplayer", description="Режим игры: `multiplayer` (2-4 игрока), `solo` (1 на 1 с виртуальным DEALER) или `story` (сюжетный режим, 3 стадии)"),
 ):
     global game, undo_stack
     game = GameState()
     game.config.game_mode = game_mode
     if game_mode == "solo":
         game.config.rounds = [dict(r) for r in SOLO_DEFAULT_ROUNDS]
+    elif game_mode == "story":
+        game.config.rounds = [dict(r) for r in STORY_DEFAULT_ROUNDS]
     undo_stack.clear()
     await broadcast_state()
     return {"ok": True, "game_id": game.game_id, "game_mode": game_mode}
@@ -635,7 +637,7 @@ async def join_game(request: Request, name: str = Form(..., description="Ото�
     summary="Начать игру",
     description=(
         "Переводит игру из `lobby` в первый раунд (генерирует патроны, назначает порядок ходов). "
-        "Для `multiplayer` нужно минимум 2 игрока; для `solo` — 1 игрок (тогда автоматически "
+        "Для `multiplayer` нужно минимум 2 игрока; для `solo`/`story` — 1 игрок (тогда автоматически "
         "добавляется виртуальный оппонент `DEALER`) либо ровно 2."
     ),
     response_model=OkResponse,
@@ -976,7 +978,7 @@ async def undo_action():
 Обновляет настройки игры из меню дилера. Разрешено только в фазе `lobby`.
 Тело — JSON-строка (form-поле `config_json`) с любым подмножеством ключей:
 
-- `game_mode`: `"solo"` \\| `"multiplayer"` — при смене режима подставляет дефолтные раунды для этого режима
+- `game_mode`: `"solo"` \\| `"story"` \\| `"multiplayer"` — при смене режима подставляет дефолтные раунды для этого режима
 - `rounds`: список `{hp, items_per_player, max_shells}` по раундам (переопределяет дефолты)
 - `item_limits_global`: `{item_type: max_count}` — лимит копий предмета одновременно на столе
 - `item_limits_per_player`: `{item_type: max_count}` — лимит копий предмета у одного игрока
@@ -1000,6 +1002,8 @@ async def update_config(config_json: str = Form(..., description="JSON-объе�
             game.config.game_mode = data["game_mode"]
             if data["game_mode"] == "solo":
                 game.config.rounds = [dict(r) for r in SOLO_DEFAULT_ROUNDS]
+            elif data["game_mode"] == "story":
+                game.config.rounds = [dict(r) for r in STORY_DEFAULT_ROUNDS]
             else:
                 game.config.rounds = [dict(r) for r in MULTIPLAYER_DEFAULT_ROUNDS]
         if "rounds" in data:

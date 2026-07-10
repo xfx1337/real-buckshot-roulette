@@ -485,6 +485,16 @@ body {
     animation: boltFlicker 0.8s step-end infinite;
 }
 
+/* Стори мод, стадия 3: заряды с перерезанными кабелями (не лечатся) */
+.lightning-bolt.alive.faded-charge img {
+    filter: sepia(0.8) brightness(0.65) drop-shadow(0 0 2px rgba(138, 124, 92, 0.3));
+}
+
+.lightning-bolt.faded-charge-dead img {
+    filter: brightness(0) saturate(100%) invert(7%) sepia(0.5);
+    opacity: 0.4;
+}
+
 /* Solo Mode Layout */
 .solo-layout {
     display: flex;

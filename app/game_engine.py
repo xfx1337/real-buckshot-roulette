@@ -200,8 +200,8 @@ class GameState:
     # ── Game Flow ──
 
     def start_game(self):
-        # Solo mode: if only 1 player joined, auto-create DEALER as opponent
-        if self.config.game_mode == "solo":
+        # Solo mode or Story mode: if only 1 player joined, auto-create DEALER as opponent
+        if self.config.game_mode in ("solo", "story"):
             if len(self.players) < 1:
                 raise ValueError("Нужен хотя бы 1 игрок")
             if len(self.players) == 1:
@@ -210,8 +210,11 @@ class GameState:
                 self._log(">> Режим 1 на 1: DEALER добавлен автоматически", "system")
             if len(self.players) != 2:
                 raise ValueError("В режиме 1 на 1 должно быть ровно 2 игрока")
-            # Apply solo round config
-            self.config.rounds = [dict(r) for r in SOLO_DEFAULT_ROUNDS]
+            # Apply round config
+            if self.config.game_mode == "solo":
+                self.config.rounds = [dict(r) for r in SOLO_DEFAULT_ROUNDS]
+            else:
+                self.config.rounds = [dict(r) for r in STORY_DEFAULT_ROUNDS]
         else:
             if len(self.players) < 2:
                 raise ValueError("Нужно минимум 2 игрока")
@@ -245,13 +248,59 @@ class GameState:
         self.saw_active = False
         self.inverted = False
         self.pending_shot = False
+        self.shells_generated_in_round = 0
+
+        # В solo/story игрок (номер 1) всегда ходит первым в начале раунда
+        if self.config.game_mode in ("solo", "story"):
+            for idx, pid in enumerate(self.turn_order):
+                if self.players[pid].number == 1:
+                    self.current_turn_idx = idx
+                    break
+            else:
+                self.current_turn_idx = 0
+
         self._generate_shells()
 
     def _generate_shells(self):
-        if self.config.game_mode == "solo":
+        if self.config.game_mode == "story":
+            self._generate_shells_story()
+        elif self.config.game_mode == "solo":
             self._generate_shells_solo()
         else:
             self._generate_shells_multiplayer()
+
+    def _generate_shells_story(self):
+        """Shell generation for 1vs1 Story Mode based on stage rules."""
+        stage = self.current_round  # 0, 1, or 2 (Stage 1, 2, or 3)
+        reload_idx = self.shells_generated_in_round
+        self.shells_generated_in_round += 1
+
+        if stage == 0:  # Stage 1
+            if reload_idx == 0:
+                # First round of stage 1 has three shells: one live, two blank
+                live_count = 1
+                blank_count = 2
+            else:
+                # Second round of stage 1 has five shells: three live, two blank
+                live_count = 3
+                blank_count = 2
+        elif stage == 1:  # Stage 2
+            if reload_idx == 0:
+                # In the first round of stage 2, the dealer loads one live and one blank shell
+                live_count = 1
+                blank_count = 1
+            else:
+                # In subsequent rounds, a random number of live and blank shells are added
+                total = random.randint(2, self.config.rounds[1]["max_shells"])
+                live_count = random.randint(1, total - 1)
+                blank_count = total - live_count
+        else:  # Stage 3
+            # Entirely random, though there is always at least one live shell and at least one blank
+            total = random.randint(2, self.config.rounds[2]["max_shells"])
+            live_count = random.randint(1, total - 1)
+            blank_count = total - live_count
+
+        self._finalize_shells(live_count, blank_count)
 
     def _generate_shells_solo(self):
         """Original singleplayer shell generation."""
@@ -335,7 +384,14 @@ class GameState:
         self.dealt_items = {}
         
         # Build available pool (medicine pre-generated as vodka/water at deal time)
-        base_pool = list(ITEM_POOL_BASE)
+        if self.config.game_mode == "story":
+            # Story mode: только базовые предметы из оригинального сюжетного режима
+            base_pool = [
+                ItemType.BEER, ItemType.HANDSAW, ItemType.HANDCUFFS,
+                ItemType.MAGNIFYING_GLASS, ItemType.CIGARETTES
+            ]
+        else:
+            base_pool = list(ITEM_POOL_BASE)
 
         for p in self.get_alive_players():
             slots_free = self.config.max_items_per_player - len(p.items)
@@ -652,6 +708,12 @@ class GameState:
     def use_item_cigarettes(self, player_id: str):
         p = self.players[player_id]
         self._remove_item(p, ItemType.CIGARETTES)
+
+        # Story mode: in Stage 3 (current_round == 2), if HP <= 2, healing has no effect
+        if self.config.game_mode == "story" and self.current_round == 2 and p.hp <= 2:
+            self._log(f">> #{p.number} использовал сигареты, но кабели перерезаны — лечение не подействовало!", "item")
+            return
+
         old_hp = p.hp
         p.hp = min(p.hp + 1, p.max_hp)
         gained = p.hp - old_hp
@@ -892,8 +954,8 @@ class GameState:
             "winner_name": self.players[self.winner_id].name if self.winner_id else None,
         }
 
-        # Solo mode: add opponent info for dual-HP display on single phone
-        if self.config.game_mode == "solo":
+        # Solo mode / Story mode: add opponent info for dual-HP display on single phone
+        if self.config.game_mode in ("solo", "story"):
             opponent = None
             for pl in self.players.values():
                 if pl.id != player_id:
