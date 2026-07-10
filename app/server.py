@@ -115,7 +115,8 @@ class ToggleShellsResponse(BaseModel):
 class EspShellStatusResponse(BaseModel):
     ready: bool
     live: bool
-    fire: bool = False  # одноразовая команда дилера «щёлкни соленоидом»
+    fire: bool = False     # одноразовая команда дилера «щёлкни соленоидом»
+    pending: bool = False  # выстрел был, дилер ещё не выбрал цель (соленоид заблокирован)
 
 
 class CurrentPlayerSummary(BaseModel):
@@ -1115,6 +1116,7 @@ async def esp_shell_status():
         "(боевой патрон/курок). Сервер выставляет одноразовый флаг `fire=true`, "
         "который плата ESP32 заберёт в ближайшем опросе `/api/esp/shell_status` "
         "(задержка ≤ интервала опроса, обычно до 1 c) и щёлкнет соленоидом один раз. "
+        "Тратит один капсюль барабана револьвера (как боевой выстрел). "
         "Работает только с прошивкой, читающей поле `fire`."
     ),
     response_model=OkResponse,
@@ -1122,6 +1124,10 @@ async def esp_shell_status():
 async def esp_force_fire_cmd():
     global esp_force_fire
     esp_force_fire = True
+    # Принудительный удар соленоида тратит капсюль барабана — как боевой выстрел.
+    if game:
+        game.consume_revolver_ammo()
+        await broadcast_state()
     return {"ok": True}
 
 

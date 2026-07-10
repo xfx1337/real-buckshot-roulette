@@ -8,7 +8,9 @@
       совпал — соленоид включается ТУТ ЖЕ, в том же прерывании, прямой записью
       в GPIO-регистр. Между приёмом последнего бита и ударом соленоида —
       единицы микросекунд. Никакого опроса из loop(), никакого влияния
-      Wi-Fi/HTTP на задержку.
+      Wi-Fi/HTTP на задержку. Выбор цели оператором («в кого попали») идёт
+      ПАРАЛЛЕЛЬНО через сервер и на удар соленоида не влияет — сначала выстрел,
+      меню появляется после.
     - Достаточно ОДНОГО валидного кадра (раньше RCSwitch требовал 2 повтора
       внутри себя + прошивка ждала ещё 2 подтверждения = 4 кадра ≈ 180мс).
       Защита от мусора — не количеством пакетов, а качеством проверки:
@@ -117,6 +119,21 @@ static const uint32_t SOLENOID_BIT = (1UL << SOLENOID_PIN);
 // ── Состояние (loop-контекст) ──
 volatile bool cachedReady = false;  // volatile: читается из ISR при выстреле
 volatile bool cachedLive = false;
+// Блокировка соленоида до выбора цели оператором. Ставится В ISR сразу при
+// физическом выстреле (мгновенно, без ожидания сервера — иначе между выстрелом
+// и обновлением кэша можно успеть нажать курок ещё раз). Снимается в loop(),
+// когда опрос статуса увидит, что сервер закрыл ожидание (pending_shot=false),
+// т.е. дилер выбрал, в кого попали. Пока стоит — курок соленоид не дёргает.
+volatile bool awaitingTarget = false;
+volatile uint32_t awaitingSinceUs = 0;  // когда встала блокировка (для предохранителя)
+// Опрос статуса уже подтвердил, что сервер увидел выстрел (pending поднялся).
+// Только после этого переход pending→false означает выбор цели, а не зазор
+// между выстрелом и подъёмом флага на сервере. Читается/пишется только в loop().
+bool pendingSeen = false;
+// Предохранитель: если дилер так и не выбрал цель (или POST /shoot не дошёл до
+// сервера — сеть моргнула), блокировка не должна залипнуть навсегда. Через этот
+// таймаут снимаем её принудительно, чтобы курок снова работал.
+static const uint32_t AWAIT_TARGET_TIMEOUT_MS = 30000;
 unsigned long lastPollMs = 0;
 unsigned long lastWifiAttemptMs = 0;
 
@@ -149,6 +166,9 @@ static uint32_t rfZeroHiUs, rfZeroLoUs, rfOneHiUs, rfOneLoUs, rfTolUs;
 static uint32_t rfFrameStartUs = 0;
 // Инициализация «в прошлом», чтобы lockout не глушил первое нажатие после старта.
 static volatile uint32_t lastFireUs = (uint32_t)(0UL - CFG_RF_LOCKOUT_MS * 1000UL);
+// Момент последнего валидного кадра ЛЮБОЙ пачки (продлевается на каждом кадре).
+// По паузе относительно него отличаем новое нажатие от хвоста той же пачки.
+static volatile uint32_t lastSeenUs = (uint32_t)(0UL - CFG_RF_LOCKOUT_MS * 1000UL);
 
 // ── Событие выстрела: ISR → задача триггера ──
 static TaskHandle_t triggerTaskHandle = NULL;
@@ -164,10 +184,28 @@ static inline uint32_t IRAM_ATTR udiff(uint32_t a, uint32_t b) {
 // Решение по декодированному валидному коду. Вызывается из ISR на последнем
 // бите кадра — здесь каждая инструкция на счету, никакого Serial/HTTP.
 static void IRAM_ATTR rfFire(uint32_t nowUs) {
-    // Хвост пачки от того же нажатия — молча поглощаем.
-    if (nowUs - lastFireUs < RF_LOCKOUT_MS * 1000UL) {
+    // Пульт при ОДНОМ нажатии шлёт код пачкой одинаковых кадров. Нельзя
+    // отсчитывать lockout от МОМЕНТА ПЕРВОГО кадра фиксированным окном: если
+    // пачка длится дольше RF_LOCKOUT_MS (палец удерживают / длинная посылка),
+    // кадр за окном пройдёт как «новое нажатие» → второй удар соленоида.
+    //
+    // Правильно: считать нажатия РАЗДЕЛЁННЫМИ ПАУЗОЙ в эфире. lastSeenUs
+    // обновляем на КАЖДОМ валидном кадре (продлеваем «занятость» эфира), а
+    // новый выстрел разрешаем только когда с последнего виденного кадра прошёл
+    // весь RF_LOCKOUT_MS — то есть пачка реально закончилась, палец отпущен.
+    uint32_t sinceSeen = nowUs - lastSeenUs;
+    lastSeenUs = nowUs;
+    if (sinceSeen < RF_LOCKOUT_MS * 1000UL) {
+        return;  // тот же непрерывный поток кадров — хвост одного нажатия
+    }
+
+    // Предыдущий выстрел ещё ждёт, пока дилер выберет цель — соленоид заблокирован.
+    // Игнорируем курок целиком: ни удара, ни новой регистрации. Разблокирует
+    // loop(), когда сервер закроет ожидание (см. awaitingTarget / pollShellStatus).
+    if (awaitingTarget) {
         return;
     }
+
     lastFireUs = nowUs;
 
     fireIsLive = cachedReady && cachedLive;
@@ -177,13 +215,23 @@ static void IRAM_ATTR rfFire(uint32_t nowUs) {
 
     if (fireIsLive) {
         // Самый горячий путь: соленоид — НЕМЕДЛЕННО, прямой записью в регистр.
+        // Между приёмом последнего бита курка и ударом — единицы микросекунд.
         GPIO.out_w1ts = SOLENOID_BIT;
         solenoidOn = true;
         solenoidOnSinceUs = nowUs;
     }
 
-    // Будим задачу триггера: она выдержит импульс, выключит соленоид,
-    // напечатает лог и поставит pendingShoot.
+    // Блокируем соленоид до выбора цели. Ставим здесь же, в ISR, при ЛЮБОМ
+    // валидном курке (боевой/холостой) — блокировка не зависит от того, ударил
+    // ли соленоид: одно физическое нажатие = один цикл «выстрел → выбор цели».
+    if (fireAdvance) {
+        awaitingTarget = true;
+        awaitingSinceUs = nowUs;
+    }
+
+    // Будим задачу триггера: она выдержит импульс, выключит соленоид, напечатает
+    // лог и поставит pendingShoot. Выбор цели оператором идёт ПАРАЛЛЕЛЬНО и на
+    // удар соленоида уже не влияет — выстрел мгновенный, меню появляется после.
     BaseType_t woken = pdFALSE;
     vTaskNotifyGiveFromISR(triggerTaskHandle, &woken);
     if (woken == pdTRUE) {
@@ -258,8 +306,8 @@ static void IRAM_ATTR rfIsr() {
     }
 }
 
-// Задача триггера: спит на notify из ISR. Соленоид к её пробуждению УЖЕ
-// включён — задача только выдерживает импульс, выключает, логирует и просит
+// Задача триггера: спит на notify из ISR. Соленоид к её пробуждению УЖЕ включён
+// (боевой) — задача только выдерживает импульс, выключает, логирует и просит
 // loop() уведомить сервер. Высокий приоритет + отдельное от loop() ядро:
 // блокирующий HTTP-опрос никак не влияет ни на импульс, ни на его длительность.
 void triggerTask(void *) {
@@ -284,9 +332,10 @@ void triggerTask(void *) {
             GPIO.out_w1tc = SOLENOID_BIT;
             solenoidOn = false;
         } else {
-            Serial.println(">>> Курок: холостой (или сервер недоступен/не фаза стрельбы) — тишина.");
+            Serial.println(">>> Курок: холостой (или сервер недоступен/не фаза стрельбы) — соленоид молчит.");
         }
 
+        // Выбор цели оператором идёт ПАРАЛЛЕЛЬНО и на удар уже не влияет.
         if (advance) {
             pendingShoot = true;  // HTTP уйдёт из loop()
         }
@@ -394,6 +443,10 @@ bool pollShellStatus() {
     }
 
     HTTPClient http;
+    // setTimeout ограничивает только чтение ответа; TCP-connect к недоступному
+    // хосту без setConnectTimeout висит дольше WDT_TIMEOUT_MS и валит плату
+    // в перезагрузку по watchdog. Ограничиваем оба этапа.
+    http.setConnectTimeout(HTTP_TIMEOUT_MS);
     http.setTimeout(HTTP_TIMEOUT_MS);
     String url = String(SERVER_BASE_URL) + "/api/esp/shell_status";
     if (!http.begin(url)) {
@@ -409,14 +462,33 @@ bool pollShellStatus() {
         // чтобы не тащить в проект библиотеку ради двух булевых полей.
         bool ready = body.indexOf("\"ready\": true") >= 0 || body.indexOf("\"ready\":true") >= 0;
         bool live = body.indexOf("\"live\": true") >= 0 || body.indexOf("\"live\":true") >= 0;
+        bool pending = body.indexOf("\"pending\": true") >= 0 || body.indexOf("\"pending\":true") >= 0;
         // Порядок записи важен: ISR читает пару без блокировки. Сначала гасим
         // ready (ISR перестаёт стрелять), потом обновляем live, потом ready.
         cachedReady = false;
         cachedLive = live;
         cachedReady = ready;
-        // Команда дилера «принудительно щёлкнуть соленоидом» (кнопка на пульте
-        // оператора). Сервер выставляет fire=true разово; отрабатываем импульс
-        // сразу, минуя игровую логику боевого/холостого.
+
+        // Разблокировка соленоида после выбора цели дилером. awaitingTarget
+        // ставит ISR мгновенно при выстреле, а pending_shot на сервере поднимется
+        // лишь после POST /shoot из loop() — поэтому сначала ДОЖИДАЕМСЯ, что
+        // сервер реально увидел выстрел (pending=true, флаг pendingSeen), и лишь
+        // потом переход pending: true→false трактуем как «дилер выбрал цель».
+        // Без pendingSeen опрос, попавший в зазор до подъёма pending, снял бы
+        // блокировку преждевременно.
+        if (awaitingTarget) {
+            if (pending) {
+                pendingSeen = true;
+            } else if (pendingSeen) {
+                awaitingTarget = false;
+                pendingSeen = false;
+                Serial.println("[КУРОК] Дилер выбрал цель — соленоид разблокирован.");
+            }
+        }
+
+        // Команда дилера «принудительно щёлкнуть соленоидом» (кнопка в панели).
+        // Сервер выставляет fire=true разово; отрабатываем импульс сразу, минуя
+        // игровую логику боевого/холостого.
         bool fire = body.indexOf("\"fire\": true") >= 0 || body.indexOf("\"fire\":true") >= 0;
         if (fire) {
             Serial.println(">>> Дилер: принудительный импульс на соленоид!");
@@ -443,6 +515,7 @@ void sendShootToServer() {
     }
 
     HTTPClient http;
+    http.setConnectTimeout(HTTP_TIMEOUT_MS);
     http.setTimeout(HTTP_TIMEOUT_MS);
     String url = String(SERVER_BASE_URL) + "/api/esp/shoot";
     if (!http.begin(url)) {
@@ -597,6 +670,16 @@ void loop() {
     if (solenoidOn && (uint32_t)(micros() - solenoidOnSinceUs) > SOLENOID_MAX_ON_MS * 1000UL) {
         Serial.println("[SAFETY] Превышен лимит удержания соленоида — принудительно выключаю.");
         setSolenoid(false);
+    }
+
+    // Предохранитель блокировки соленоида: если дилер так и не выбрал цель или
+    // POST /shoot не дошёл до сервера, снимаем awaitingTarget по таймауту, чтобы
+    // курок не залип заблокированным навсегда.
+    if (awaitingTarget &&
+        (uint32_t)(micros() - awaitingSinceUs) > AWAIT_TARGET_TIMEOUT_MS * 1000UL) {
+        awaitingTarget = false;
+        pendingSeen = false;
+        Serial.println("[КУРОК] Таймаут ожидания выбора цели — соленоид разблокирован принудительно.");
     }
 
     // Фоновый опрос статуса патрона для кэша ISR и LED-индикатора.

@@ -458,13 +458,16 @@ class GameState:
         physical solenoid trigger. Does not mutate any state (no popping,
         no shell consumption) — safe to poll repeatedly.
         """
+        # pending_shot=true — по прошлому физическому выстрелу дилер ещё НЕ выбрал
+        # цель. Плата держит соленоид заблокированным, пока этот флаг стоит, и
+        # разблокирует, когда он снимется (дилер выбрал → shoot() сбросил его).
         ready = self.phase == GamePhase.PLAYER_TURN and len(self.shells) > 0
         if not ready:
-            return {"ready": False, "live": False}
+            return {"ready": False, "live": False, "pending": self.pending_shot}
         effective = self.shells[0]
         if self.inverted:
             effective = ShellType.BLANK if effective == ShellType.LIVE else ShellType.LIVE
-        return {"ready": True, "live": effective == ShellType.LIVE}
+        return {"ready": True, "live": effective == ShellType.LIVE, "pending": self.pending_shot}
 
     def esp_shoot(self) -> dict:
         """
@@ -498,6 +501,14 @@ class GameState:
         капсюлей на полную ёмкость."""
         self.revolver_ammo = self.config.revolver_capacity
         self._log("[РЕВОЛЬВЕР] Револьвер перезаряжен (капсюли пополнены)", "info")
+        return {"ok": True, "revolver_ammo": self.revolver_ammo}
+
+    def consume_revolver_ammo(self) -> dict:
+        """Расход одного капсюля барабана при принудительном ударе соленоида
+        (кнопка дилера esp/force_fire) — та же трата, что при боевом выстреле."""
+        self.revolver_ammo = max(0, self.revolver_ammo - 1)
+        if self.revolver_ammo == 0:
+            self._log("[РЕВОЛЬВЕР] Капсюли кончились — перезарядите револьвер", "shot")
         return {"ok": True, "revolver_ammo": self.revolver_ammo}
 
     # ── Turn Management ──
