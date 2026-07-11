@@ -1,0 +1,16 @@
+{
+  "name": "backshot-roulette",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Backshot Roulette game server (Python/FastAPI). package.json exists only to vendor JS deps (NoSleep.js) and run Playwright logic tests.",
+  "scripts": {
+    "test": "playwright test",
+    "vendor:nosleep": "cp node_modules/nosleep.js/dist/NoSleep.min.js app/static/nosleep.min.js"
+  },
+  "dependencies": {
+    "nosleep.js": "^0.12.0"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.61.0"
+  }
+}
