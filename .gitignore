@@ -16,3 +16,8 @@ esp/config.h
 # Референсы: декомпилированный Godot-проект игры и дизайн-макеты
 # (большие бинарные ассеты, не часть веб-приложения)
 /reference/
+
+# Node deps (vendored JS + Playwright)
+node_modules/
+test-results/
+playwright-report/
