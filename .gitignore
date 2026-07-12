@@ -17,7 +17,13 @@ esp/config.h
 # (большие бинарные ассеты, не часть веб-приложения)
 /reference/
 
+# Озвучка: пользовательские оверрайды и загруженные звуки (не часть репо)
+sound_overrides.json
+app/static/audio/custom/
+
 # Node deps (vendored JS + Playwright)
 node_modules/
 test-results/
 playwright-report/
+
+.claude/worktrees/

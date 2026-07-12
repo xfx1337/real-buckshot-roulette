@@ -14,8 +14,8 @@ from contextlib import asynccontextmanager
 
 from typing import Optional
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request, Form, HTTPException
-from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request, Form, HTTPException, UploadFile, File
+from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
@@ -24,6 +24,7 @@ from app.game_engine import (
     GameState, GamePhase, GameConfig, ItemType, ITEM_LABELS, ShellType,
     SOLO_DEFAULT_ROUNDS, STORY_DEFAULT_ROUNDS, MULTIPLAYER_DEFAULT_ROUNDS
 )
+from app import sound_config
 
 import socket
 from urllib.parse import quote, unquote
@@ -1029,6 +1030,62 @@ async def update_config(config_json: str = Form(..., description="JSON-объе�
         return {"ok": True}
     except Exception as e:
         raise HTTPException(400, str(e))
+
+
+# ── Sound engine (озвучка) ────────────────────────────────────────────────
+# Стандартные звуки берутся из папки reference/Buckshot Roulette/. Оператор
+# может через веб включать/выключать событие, загружать свой файл или сбросить
+# на стандартный — изменения сразу применяются на бэкенде (см. app/sound_config.py).
+
+@app.get("/api/audio/config", tags=["Game Management"], summary="Список звуковых событий с настройками", include_in_schema=False)
+async def audio_config():
+    return {"events": sound_config.get_config()}
+
+
+@app.post("/api/audio/toggle", tags=["Game Management"], summary="Вкл/выкл звук события", include_in_schema=False)
+async def audio_toggle(key: str = Form(...), enabled: bool = Form(...)):
+    try:
+        sound_config.set_enabled(key, enabled)
+    except KeyError:
+        raise HTTPException(404, f"Неизвестное событие: {key}")
+    return {"ok": True, "key": key, "enabled": enabled}
+
+
+@app.post("/api/audio/reset", tags=["Game Management"], summary="Сбросить событие на стандартный звук", include_in_schema=False)
+async def audio_reset(key: str = Form(...)):
+    try:
+        sound_config.reset_custom(key)
+    except KeyError:
+        raise HTTPException(404, f"Неизвестное событие: {key}")
+    return {"ok": True, "key": key}
+
+
+@app.post("/api/audio/upload", tags=["Game Management"], summary="Загрузить свой звук для события", include_in_schema=False)
+async def audio_upload(key: str = Form(...), file: UploadFile = File(...)):
+    content = await file.read()
+    if not content:
+        raise HTTPException(400, "Пустой файл")
+    if len(content) > 15 * 1024 * 1024:
+        raise HTTPException(400, "Файл больше 15 МБ")
+    try:
+        saved = sound_config.save_upload(key, file.filename or "sound", content)
+    except KeyError:
+        raise HTTPException(404, f"Неизвестное событие: {key}")
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    return {"ok": True, "key": key, "filename": saved}
+
+
+@app.get("/api/audio/file/{key}", tags=["Game Management"], summary="Стрим эффективного звука события", include_in_schema=False)
+async def audio_file(key: str, preview: bool = False):
+    # preview=1 — прослушивание из настроек: играем даже если событие выключено.
+    if not preview and not sound_config.is_enabled(key):
+        # Событие выключено — сообщаем клиенту пустотой (звук не проигрывается).
+        raise HTTPException(204, "disabled")
+    path = sound_config.resolve_file(key)
+    if not path:
+        raise HTTPException(404, "Файл не найден")
+    return FileResponse(str(path), media_type=sound_config.mime_for(path))
 
 
 @app.get(
