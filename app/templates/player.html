@@ -92,11 +92,6 @@
         </div>
     </div>
 
-    <!-- Индикатор «экран не гаснет». Иконка/подпись меняются по состоянию wake lock. -->
-    <div id="wake-indicator" class="wake-indicator wake-inactive" title="Удержание экрана">
-        <img id="wake-indicator-icon" src="/static/icons/check-inactive.png" alt="">
-    </div>
-
     <!-- NoSleep.js — фолбэк удержания экрана (http / браузеры без Wake Lock API). -->
     <script src="/static/nosleep.min.js"></script>
     <script src="/static/wakeLock.js"></script>
@@ -105,19 +100,8 @@
     // Оверлей fullscreen-gate ловит первый тап (жест пользователя нужен для
     // fullscreen и wake lock). По тапу: fullscreen + включаем wake lock через
     // модуль wakeLock.js (нативный Wake Lock API, фолбэк — NoSleep.js).
-    const wakeIndicator = document.getElementById('wake-indicator');
-    const wakeIndicatorIcon = document.getElementById('wake-indicator-icon');
-
-    function renderWakeState(state) {
-        const active = state === 'active-native' || state === 'active-fallback';
-        wakeIndicator.classList.toggle('wake-active', active);
-        wakeIndicator.classList.toggle('wake-inactive', !active);
-        wakeIndicatorIcon.src = active
-            ? '/static/icons/check-active.png'
-            : '/static/icons/check-inactive.png';
-    }
-
-    const wakeLockMgr = createWakeLockManager({ onStateChange: renderWakeState });
+    // Wake lock работает молча — без визуального индикатора на экране.
+    const wakeLockMgr = createWakeLockManager();
 
     function enterImmersiveMode() {
         const el = document.documentElement;

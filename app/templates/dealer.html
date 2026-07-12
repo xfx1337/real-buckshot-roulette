@@ -708,6 +708,19 @@ input[type="checkbox"]{ accent-color:var(--green); cursor:crosshair; }
 .scfg-msg.ok{ color:var(--green,#3fef6a); } .scfg-msg.err{ color:var(--red,#a83232); }
 .scfg-note{ color:var(--text-faint,#6e5f52); font-size:11px; line-height:1.5; margin:6px 0 2px; }
 
+/* ── audio config ── */
+.aud-row{ display:flex; align-items:center; gap:8px; padding:7px 0; border-bottom:1px solid #241a12; }
+.aud-row.disabled{ opacity:.45; }
+.aud-row .aud-label{ flex:1 1 auto; color:var(--text-dim,#8f8073); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.aud-row .aud-file{ flex:0 0 auto; max-width:150px; font-size:10px; color:var(--text-faint,#6e5f52); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.aud-row .aud-file.custom{ color:var(--green,#3fef6a); }
+.aud-row .aud-file.missing{ color:var(--red,#a83232); }
+.aud-row .btn-tiny{ padding:3px 7px; font-size:11px; }
+.aud-cat{ color:var(--green,#3fef6a); margin:14px 0 6px; font-size:12px; letter-spacing:.06em; text-transform:uppercase; }
+.aud-cat:first-child{ margin-top:0; }
+.aud-row input[type=checkbox]{ width:15px; height:15px; accent-color:var(--green,#3fef6a); flex:0 0 auto; }
+.aud-loop-tag{ flex:0 0 auto; font-size:9px; color:var(--text-faint,#6e5f52); border:1px solid #2a2018; padding:0 4px; border-radius:2px; }
+
 /* ── shells ── */
 .loading-actions{ display:flex; flex-wrap:wrap; gap:12px; align-items:center; }
 .loading-actions .btn-dealer{ width:auto; flex:1 1 200px; }
@@ -889,6 +902,7 @@ input[type="checkbox"]{ accent-color:var(--green); cursor:crosshair; }
             <button class="btn btn-plate plate-teal btn-small" id="btn-force-round" onclick="forceRoundOver()" style="display:none">КОНЕЦ РАУНДА</button>
             <!-- Ручное управление железом — доступно всегда (пульт оператора). -->
             <button class="btn btn-plate plate-yellow btn-small" onclick="forceFireSolenoid(this)" title="Принудительно щёлкнуть соленоидом на плате">⚡ СОЛЕНОИД</button>
+            <button class="btn btn-plate plate-teal btn-small" onclick="openAudioConfig()" title="Настройки звука / озвучки">🔊 АУДИО</button>
             <button class="btn btn-plate plate-teal btn-small" onclick="openServerConfig()" title="Настройки сервера и ESP32">⚙ СЕРВЕР</button>
             <button class="btn btn-danger btn-small" onclick="forceEnd()">ЗАВЕРШИТЬ ИГРУ</button>
         </div>
@@ -908,6 +922,30 @@ input[type="checkbox"]{ accent-color:var(--green); cursor:crosshair; }
             <div class="scfg-foot">
                 <div id="server-config-msg" class="scfg-msg"></div>
                 <button class="btn btn-dealer" onclick="saveServerConfig(this)">СОХРАНИТЬ В CONFIG.JSON</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Модалка «Аудио»: настройка озвучки. Стандартные звуки из папки
+         reference/, оператор может выключить событие, загрузить свой файл или
+         сбросить на стандартный. Изменения сразу применяются на бэкенде. -->
+    <div id="audio-config-modal" class="scfg-overlay" style="display:none;">
+        <div class="scfg-box">
+            <div class="scfg-head">
+                <h2>АУДИО / ОЗВУЧКА</h2>
+                <button class="btn btn-small" onclick="closeAudioConfig()">✕</button>
+            </div>
+            <div class="scfg-body">
+                <div class="scfg-row" style="margin-bottom:14px;">
+                    <label>Общая громкость</label>
+                    <input type="range" id="aud-volume" min="0" max="100" value="80" oninput="onVolumeChange(this.value)">
+                    <span id="aud-volume-val" style="flex:0 0 42px; text-align:right; color:var(--green,#3fef6a);">80%</span>
+                </div>
+                <div id="audio-config-body"><p class="hint">Загрузка…</p></div>
+            </div>
+            <div class="scfg-foot">
+                <div id="audio-config-msg" class="scfg-msg"></div>
+                <span class="scfg-note" style="flex:0;">Изменения применяются мгновенно</span>
             </div>
         </div>
     </div>
@@ -1027,6 +1065,7 @@ input[type="checkbox"]{ accent-color:var(--green); cursor:crosshair; }
         </div>
     </div>
 </div>
+<script src="/static/sound.js?v=2"></script>
 <script>
 let ws;
 let gameState = null;
@@ -1058,6 +1097,7 @@ function connect() {
     ws = new WebSocket(`${proto}://${location.host}/ws/dealer`);
     ws.onmessage = (e) => {
         gameState = JSON.parse(e.data);
+        try { if (window.SoundEngine) SoundEngine.onState(gameState); } catch (err) { console.warn('sound', err); }
         render();
     };
     ws.onclose = () => setTimeout(connect, 2000);
@@ -1992,6 +2032,118 @@ async function saveServerConfig(btn) {
     }
     btn.disabled = false;
 }
+
+// ── Модалка «Аудио» (озвучка) ──
+function openAudioConfig() {
+    document.getElementById('audio-config-modal').style.display = 'flex';
+    if (window.SoundEngine) { SoundEngine.play('ui_settings_open'); document.getElementById('aud-volume').value = Math.round(SoundEngine.getVolume()*100); document.getElementById('aud-volume-val').textContent = document.getElementById('aud-volume').value + '%'; }
+    loadAudioConfig();
+}
+function closeAudioConfig() {
+    document.getElementById('audio-config-modal').style.display = 'none';
+    if (window.SoundEngine) SoundEngine.play('ui_settings_close');
+}
+function onVolumeChange(v) {
+    document.getElementById('aud-volume-val').textContent = v + '%';
+    if (window.SoundEngine) SoundEngine.setVolume(parseInt(v)/100);
+}
+
+async function loadAudioConfig() {
+    const body = document.getElementById('audio-config-body');
+    body.innerHTML = '<p class="hint">Загрузка…</p>';
+    try {
+        const r = await fetch('/api/audio/config');
+        const d = await r.json();
+        renderAudioConfig(d.events || []);
+    } catch (e) {
+        body.innerHTML = '<p class="scfg-msg err">Не удалось загрузить: ' + e.message + '</p>';
+    }
+}
+
+function renderAudioConfig(events) {
+    const byCat = {};
+    events.forEach(e => { (byCat[e.category] = byCat[e.category] || []).push(e); });
+    let html = '';
+    Object.keys(byCat).forEach(cat => {
+        html += `<div class="aud-cat">${esc(cat)}</div>`;
+        byCat[cat].forEach(e => {
+            const fileCls = !e.available ? 'missing' : (e.source === 'custom' ? 'custom' : '');
+            const fileTxt = !e.available ? 'ФАЙЛ НЕ НАЙДЕН' : e.filename;
+            html += `
+            <div class="aud-row ${e.enabled ? '' : 'disabled'}" id="aud-row-${e.key}">
+                <input type="checkbox" ${e.enabled ? 'checked' : ''} onchange="toggleAudio('${e.key}', this.checked)" title="Вкл/выкл">
+                <span class="aud-label" title="${esc(e.key)}">${esc(e.label)}</span>
+                ${e.loop ? '<span class="aud-loop-tag">loop</span>' : ''}
+                <span class="aud-file ${fileCls}" title="${esc(fileTxt)}">${esc(fileTxt)}</span>
+                <button class="btn btn-small btn-tiny" onclick="previewAudio('${e.key}')" title="Прослушать">▶</button>
+                <button class="btn btn-small btn-tiny" onclick="document.getElementById('aud-up-${e.key}').click()" title="Загрузить свой файл">⬆</button>
+                ${e.source === 'custom' ? `<button class="btn btn-small btn-tiny" onclick="resetAudio('${e.key}')" title="Сбросить на стандартный">⟲</button>` : ''}
+                <input type="file" id="aud-up-${e.key}" accept="audio/*,.ogg,.wav,.mp3" style="display:none" onchange="uploadAudio('${e.key}', this)">
+            </div>`;
+        });
+    });
+    document.getElementById('audio-config-body').innerHTML = html;
+}
+
+function audioMsg(text, ok) {
+    const m = document.getElementById('audio-config-msg');
+    m.className = 'scfg-msg ' + (ok ? 'ok' : 'err');
+    m.textContent = text;
+    setTimeout(() => { if (m.textContent === text) m.textContent = ''; }, 3000);
+}
+
+async function toggleAudio(key, enabled) {
+    await apiPost('/api/audio/toggle', { key, enabled: enabled ? 'true' : 'false' });
+    const row = document.getElementById('aud-row-' + key);
+    if (row) row.classList.toggle('disabled', !enabled);
+    if (window.SoundEngine) await SoundEngine.reload();
+}
+
+const MEDIA_ERR = { 1: 'ABORTED', 2: 'NETWORK', 3: 'DECODE (формат не поддержан)', 4: 'SRC_NOT_SUPPORTED (формат/URL)' };
+function previewAudio(key) {
+    // Прямой стрим эффективного файла (preview=1 обходит вкл/выкл).
+    try {
+        const a = new Audio('/api/audio/file/' + encodeURIComponent(key) + '?preview=1&t=' + Date.now());
+        a.volume = window.SoundEngine ? SoundEngine.getVolume() : 0.8;
+        a.addEventListener('error', () => {
+            const c = a.error ? a.error.code : 0;
+            audioMsg('✗ Не воспроизвести: ' + (MEDIA_ERR[c] || ('код ' + c)), false);
+        });
+        a.play().then(() => audioMsg('▶ ' + key, true)).catch(err => {
+            if (err && err.name === 'NotAllowedError') audioMsg('✗ Браузер блокирует автоплей — кликните по странице и повторите', false);
+            else audioMsg('✗ ' + (err ? err.name + ': ' + err.message : 'ошибка'), false);
+        });
+    } catch (e) { audioMsg('✗ ' + e.message, false); }
+}
+
+async function uploadAudio(key, input) {
+    if (!input.files || !input.files[0]) return;
+    const fd = new FormData();
+    fd.append('key', key);
+    fd.append('file', input.files[0]);
+    audioMsg('Загрузка…', true);
+    try {
+        const r = await fetch('/api/audio/upload', { method: 'POST', body: fd });
+        if (!r.ok) { const e = await r.json().catch(()=>({detail:'ошибка'})); throw new Error(e.detail || ('HTTP '+r.status)); }
+        audioMsg('✓ Загружено', true);
+        if (window.SoundEngine) await SoundEngine.reload();
+        loadAudioConfig();
+    } catch (e) { audioMsg('✗ ' + e.message, false); }
+    input.value = '';
+}
+
+async function resetAudio(key) {
+    await apiPost('/api/audio/reset', { key });
+    audioMsg('✓ Сброшено на стандартный', true);
+    if (window.SoundEngine) await SoundEngine.reload();
+    loadAudioConfig();
+}
+
+// Клик по любой кнопке пульта — короткий UI-звук (событие ui_click, отключаемо).
+document.addEventListener('click', function (ev) {
+    const b = ev.target.closest('button.btn');
+    if (b && window.SoundEngine) SoundEngine.play('ui_click');
+}, true);
 
 connect();
 </script>

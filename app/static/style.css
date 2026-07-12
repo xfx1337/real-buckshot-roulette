@@ -1310,39 +1310,3 @@ body {
     0%, 100% { box-shadow: 0 0 0 0 rgba(196, 80, 80, 0.5); }
     50% { box-shadow: 0 0 16px 3px rgba(196, 80, 80, 0.35); }
 }
-
-/* ── Индикатор удержания экрана (wake lock) на странице игрока ── */
-.wake-indicator {
-    position: fixed;
-    top: 8px;
-    right: 10px;
-    z-index: 10;
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    padding: 4px 8px;
-    border: 1px solid var(--red);
-    border-radius: 4px;
-    background: rgba(10, 10, 10, 0.55);
-    font-size: 10px;
-    letter-spacing: 1px;
-    text-transform: lowercase;
-    pointer-events: none;
-    user-select: none;
-    opacity: 0.75;
-    transition: color 0.3s, border-color 0.3s, opacity 0.3s;
-}
-.wake-indicator img {
-    width: 12px;
-    height: 12px;
-    image-rendering: pixelated;
-}
-.wake-indicator.wake-inactive {
-    color: var(--text);
-    border-color: var(--red);
-}
-.wake-indicator.wake-active {
-    color: var(--green-bright);
-    border-color: var(--green);
-    opacity: 0.9;
-}
