@@ -1212,6 +1212,8 @@ function renderConfigEditor(s) {
     const magLimit = s && s.physical_magazine_limit !== undefined ? s.physical_magazine_limit : 0;
     const maxItems = s && s.max_items_per_player !== undefined ? s.max_items_per_player : 8;
     const revCap = s && s.revolver_capacity !== undefined ? s.revolver_capacity : 8;
+    const maxLive = s && s.max_live_shells !== undefined ? s.max_live_shells : 4;
+    const maxBlank = s && s.max_blank_shells !== undefined ? s.max_blank_shells : 4;
 
     el.innerHTML = `
         <div class="config-group">
@@ -1239,6 +1241,14 @@ function renderConfigEditor(s) {
             <div class="config-round" style="margin-bottom: 12px;">
                 <label style="width:auto; margin-right: 8px;">Ёмкость револьвера (капсюли):</label>
                 <input type="number" class="cfg-input" id="cfg_rev_cap" value="${revCap}" min="1" max="24">
+            </div>
+            <div class="config-round" style="margin-bottom: 12px;">
+                <label style="width:auto; margin-right: 8px;">Макс. боевых патронов (реквизит, 0=без лимита):</label>
+                <input type="number" class="cfg-input" id="cfg_max_live" value="${maxLive}" min="0" max="20">
+            </div>
+            <div class="config-round" style="margin-bottom: 12px;">
+                <label style="width:auto; margin-right: 8px;">Макс. холостых патронов (реквизит, 0=без лимита):</label>
+                <input type="number" class="cfg-input" id="cfg_max_blank" value="${maxBlank}" min="0" max="20">
             </div>
             <h4>ЛИМИТЫ ПРЕДМЕТОВ (0 = нет лимита)</h4>
             ${Object.entries(ITEM_LABELS).map(([k,v]) => {
@@ -1881,6 +1891,12 @@ function saveConfig() {
     const rev_cap_input = document.getElementById('cfg_rev_cap');
     const revolver_capacity = rev_cap_input ? parseInt(rev_cap_input.value) || 8 : 8;
 
+    const max_live_input = document.getElementById('cfg_max_live');
+    const max_live_shells = max_live_input ? parseInt(max_live_input.value) || 0 : 4;
+
+    const max_blank_input = document.getElementById('cfg_max_blank');
+    const max_blank_shells = max_blank_input ? parseInt(max_blank_input.value) || 0 : 4;
+
     const item_limits_global = {};
     const item_limits_per_player = {};
     Object.keys(ITEM_LABELS).forEach(k => {
@@ -1893,6 +1909,7 @@ function saveConfig() {
     const payload = {
         rounds, show_shells_to_players, physical_magazine_limit,
         max_items_per_player, revolver_capacity,
+        max_live_shells, max_blank_shells,
         item_limits_global, item_limits_per_player
     };
     if (game_mode) payload.game_mode = game_mode;
