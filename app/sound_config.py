@@ -177,6 +177,7 @@ def get_config() -> list[dict]:
             "label": ev["label"],
             "loop": ev["loop"],
             "enabled": ov.get("enabled", True),
+            "volume": ov.get("volume", 1.0),
             "source": "custom" if custom else "default",
             "filename": custom if custom else Path(ev["default"]).name,
             "default_name": Path(ev["default"]).name,
@@ -185,12 +186,27 @@ def get_config() -> list[dict]:
     return out
 
 
+def get_volume(key: str) -> float:
+    ov = _load_overrides().get(key, {})
+    return ov.get("volume", 1.0)
+
+
 def set_enabled(key: str, enabled: bool) -> None:
     if key not in _EVENTS_BY_KEY:
         raise KeyError(key)
     data = _load_overrides()
     entry = data.get(key, {})
     entry["enabled"] = bool(enabled)
+    data[key] = entry
+    _save_overrides(data)
+
+
+def set_volume(key: str, volume: float) -> None:
+    if key not in _EVENTS_BY_KEY:
+        raise KeyError(key)
+    data = _load_overrides()
+    entry = data.get(key, {})
+    entry["volume"] = max(0.0, min(1.0, float(volume)))
     data[key] = entry
     _save_overrides(data)
 
