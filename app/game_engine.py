@@ -445,6 +445,15 @@ class GameState:
         self._confirm_items_dealt()
 
     def _confirm_items_dealt(self):
+        # По правилам оригинальной игры, после каждой перезарядки первым ходит
+        # Игрок 1 (Player). Сбрасываем индекс на Player 1 в solo/story режимах.
+        if self.config.game_mode in ("solo", "story"):
+            for idx, pid in enumerate(self.turn_order):
+                if self.players[pid].number == 1:
+                    self.current_turn_idx = idx
+                    break
+            else:
+                self.current_turn_idx = 0
         self.current_turn_idx = self._find_first_alive_idx(self.current_turn_idx)
         self.phase = GamePhase.PLAYER_TURN
         cp = self.players[self.turn_order[self.current_turn_idx]]
