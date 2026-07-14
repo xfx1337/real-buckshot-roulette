@@ -264,7 +264,7 @@ class GameState:
             else:
                 self.current_turn_idx = 0
 
-        self._generate_shells()
+        self._start_new_load()
 
     def _generate_shells(self):
         if self.config.game_mode == "story":
@@ -381,24 +381,20 @@ class GameState:
         )
         self.phase = GamePhase.DEALER_LOADING
 
-    def confirm_shells_loaded(self):
-        """Dealer confirms they physically loaded the shells."""
-        if self.phase == GamePhase.DEALER_RELOADING:
-            self.phase = GamePhase.PLAYER_TURN
-            self._log(">> Дробовик дозаряжен, игра продолжается", "system")
-            return
-
-        self.phase = GamePhase.DEALER_ITEMS
+    def _start_new_load(self):
+        """Start the process of a new load of shells. First distribute items, then load shells."""
+        # Clear items dealt this sub-round
+        self.dealt_items = {}
+        
         rc = self.config.rounds[self.current_round]
         items_count = rc["items_per_player"]
 
         if items_count == 0:
-            self.dealt_items = {}
-            self._confirm_items_dealt()
+            # If no items are to be distributed, go straight to generating shells
+            self._generate_shells()
             return
 
-        # Generate items for each alive player
-        self.dealt_items = {}
+        self.phase = GamePhase.DEALER_ITEMS
         
         # Build available pool (medicine pre-generated as vodka/water at deal time)
         if self.config.game_mode == "story":
@@ -457,13 +453,15 @@ class GameState:
             names = ", ".join(ITEM_LABELS[i][0] for i in final_chosen)
             self._log(f"Игроку #{p.number} «{p.name}» выданы: {names}", "item")
 
-    def confirm_items_dealt(self):
-        """Dealer confirms items have been physically distributed."""
-        self._confirm_items_dealt()
+    def confirm_shells_loaded(self):
+        """Dealer confirms they physically loaded the shells."""
+        if self.phase == GamePhase.DEALER_RELOADING:
+            self.phase = GamePhase.PLAYER_TURN
+            self._log(">> Дробовик дозаряжен, игра продолжается", "system")
+            return
 
-    def _confirm_items_dealt(self):
-        # По правилам оригинальной игры, после каждой перезарядки первым ходит
-        # Игрок 1 (Player). Сбрасываем индекс на Player 1 в solo/story режимах.
+        # It was GamePhase.DEALER_LOADING. Shells are loaded.
+        # Now we start the player turn.
         if self.config.game_mode in ("solo", "story"):
             for idx, pid in enumerate(self.turn_order):
                 if self.players[pid].number == 1:
@@ -475,6 +473,13 @@ class GameState:
         self.phase = GamePhase.PLAYER_TURN
         cp = self.players[self.turn_order[self.current_turn_idx]]
         self._log(f">> Ход игрока #{cp.number} [{cp.name}]", "info")
+
+    def confirm_items_dealt(self):
+        """Dealer confirms items have been physically distributed."""
+        self._confirm_items_dealt()
+
+    def _confirm_items_dealt(self):
+        self._generate_shells()
 
     # ── ESP32 Trigger Integration ──
 
@@ -593,7 +598,7 @@ class GameState:
             self._log(">> Все патроны расстреляны. Новый магазин...", "round")
             self.saw_active = False
             self.inverted = False
-            self._generate_shells()
+            self._start_new_load()
         elif self.physical_loaded_count <= 0:
             self.phase = GamePhase.DEALER_RELOADING
             limit = self.config.physical_magazine_limit
