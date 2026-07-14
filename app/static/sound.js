@@ -53,10 +53,16 @@
 
   async function loadConfig() {
     try {
-      var r = await fetch('/api/audio/config');
+      var r = await fetch('/api/audio/config?t=' + Date.now());
       var d = await r.json();
       var map = {};
-      (d.events || []).forEach(function (e) { map[e.key] = { enabled: e.enabled, loop: e.loop }; });
+      (d.events || []).forEach(function (e) {
+        map[e.key] = {
+          enabled: e.enabled,
+          loop: e.loop,
+          volume: e.volume !== undefined ? e.volume : 1.0
+        };
+      });
       engine.cfg = map;
       engine.ready = true;
       log('config loaded,', Object.keys(map).length, 'events');
@@ -88,8 +94,9 @@
     if (!enabled(key)) { log('skip (disabled):', key); return; }
     try {
       var a = new Audio(src(key));
-      a.volume = engine.masterVolume;
-      log('play', key);
+      var vol = (engine.cfg[key] && engine.cfg[key].volume !== undefined) ? engine.cfg[key].volume : 1.0;
+      a.volume = engine.masterVolume * vol;
+      log('play', key, 'volume', a.volume);
       attempt(a, key);
     } catch (e) { log('play throw', key, e); }
   }
@@ -102,8 +109,9 @@
     try {
       var a = new Audio(src(key));
       a.loop = true;
-      a.volume = engine.masterVolume * 0.55;
-      log('loop', key);
+      var vol = (engine.cfg[key] && engine.cfg[key].volume !== undefined) ? engine.cfg[key].volume : 1.0;
+      a.volume = engine.masterVolume * 0.55 * vol;
+      log('loop', key, 'volume', a.volume);
       attempt(a, key);
       engine.loopAudio = a;
     } catch (e) { log('loop throw', key, e); }
@@ -237,7 +245,11 @@
     setVolume: function (v) {
       engine.masterVolume = Math.max(0, Math.min(1, v));
       localStorage.setItem('bsr_sound_volume', String(engine.masterVolume));
-      if (engine.loopAudio) engine.loopAudio.volume = engine.masterVolume * 0.55;
+      if (engine.loopAudio) {
+        var key = engine.loopKey;
+        var vol = (engine.cfg[key] && engine.cfg[key].volume !== undefined) ? engine.cfg[key].volume : 1.0;
+        engine.loopAudio.volume = engine.masterVolume * 0.55 * vol;
+      }
     },
     getVolume: function () { return engine.masterVolume; },
     isEnabled: enabled,

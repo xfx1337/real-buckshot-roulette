@@ -712,6 +712,9 @@ input[type="checkbox"]{ accent-color:var(--green); cursor:crosshair; }
 .aud-row{ display:flex; align-items:center; gap:8px; padding:7px 0; border-bottom:1px solid #241a12; }
 .aud-row.disabled{ opacity:.45; }
 .aud-row .aud-label{ flex:1 1 auto; color:var(--text-dim,#8f8073); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.aud-row .aud-vol{ display:flex; align-items:center; gap:6px; flex:0 0 auto; margin:0 4px; }
+.aud-row .aud-vol input[type=range]{ width:55px; height:4px; accent-color:var(--green,#3fef6a); cursor:pointer; background:#2a2018; border:none; outline:none; padding:0; vertical-align:middle; }
+.aud-row .aud-vol span{ font-size:10px; font-family:var(--font-mono,monospace); color:var(--text-faint,#6e5f52); min-width:28px; text-align:right; display:inline-block; }
 .aud-row .aud-file{ flex:0 0 auto; max-width:150px; font-size:10px; color:var(--text-faint,#6e5f52); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .aud-row .aud-file.custom{ color:var(--green,#3fef6a); }
 .aud-row .aud-file.missing{ color:var(--red,#a83232); }
@@ -1065,7 +1068,7 @@ input[type="checkbox"]{ accent-color:var(--green); cursor:crosshair; }
         </div>
     </div>
 </div>
-<script src="/static/sound.js?v=2"></script>
+<script src="/static/sound.js?v=3"></script>
 <script>
 let ws;
 let gameState = null;
@@ -2069,7 +2072,7 @@ async function loadAudioConfig() {
     const body = document.getElementById('audio-config-body');
     body.innerHTML = '<p class="hint">Загрузка…</p>';
     try {
-        const r = await fetch('/api/audio/config');
+        const r = await fetch('/api/audio/config?t=' + Date.now());
         const d = await r.json();
         renderAudioConfig(d.events || []);
     } catch (e) {
@@ -2086,11 +2089,16 @@ function renderAudioConfig(events) {
         byCat[cat].forEach(e => {
             const fileCls = !e.available ? 'missing' : (e.source === 'custom' ? 'custom' : '');
             const fileTxt = !e.available ? 'ФАЙЛ НЕ НАЙДЕН' : e.filename;
+            const volVal = Math.round((e.volume !== undefined ? e.volume : 1.0) * 100);
             html += `
             <div class="aud-row ${e.enabled ? '' : 'disabled'}" id="aud-row-${e.key}">
                 <input type="checkbox" ${e.enabled ? 'checked' : ''} onchange="toggleAudio('${e.key}', this.checked)" title="Вкл/выкл">
                 <span class="aud-label" title="${esc(e.key)}">${esc(e.label)}</span>
                 ${e.loop ? '<span class="aud-loop-tag">loop</span>' : ''}
+                <div class="aud-vol" title="Громкость события">
+                    <input type="range" min="0" max="100" value="${volVal}" oninput="changeEventVolume('${e.key}', this.value)" onchange="saveEventVolume('${e.key}', this.value)">
+                    <span>${volVal}%</span>
+                </div>
                 <span class="aud-file ${fileCls}" title="${esc(fileTxt)}">${esc(fileTxt)}</span>
                 <button class="btn btn-small btn-tiny" onclick="previewAudio('${e.key}')" title="Прослушать">▶</button>
                 <button class="btn btn-small btn-tiny" onclick="document.getElementById('aud-up-${e.key}').click()" title="Загрузить свой файл">⬆</button>
@@ -2100,6 +2108,27 @@ function renderAudioConfig(events) {
         });
     });
     document.getElementById('audio-config-body').innerHTML = html;
+}
+
+function changeEventVolume(key, val) {
+    const row = document.getElementById('aud-row-' + key);
+    if (row) {
+        const span = row.querySelector('.aud-vol span');
+        if (span) span.textContent = val + '%';
+    }
+    if (window.SoundEngine) {
+        if (window.SoundEngine._engine.cfg[key]) {
+            window.SoundEngine._engine.cfg[key].volume = parseInt(val) / 100;
+        }
+        if (window.SoundEngine._engine.loopKey === key && window.SoundEngine._engine.loopAudio) {
+            window.SoundEngine._engine.loopAudio.volume = window.SoundEngine.getVolume() * 0.55 * (parseInt(val) / 100);
+        }
+    }
+}
+
+async function saveEventVolume(key, val) {
+    await apiPost('/api/audio/volume', { key, volume: (parseInt(val) / 100).toString() });
+    if (window.SoundEngine) await SoundEngine.reload();
 }
 
 function audioMsg(text, ok) {
@@ -2121,7 +2150,10 @@ function previewAudio(key) {
     // Прямой стрим эффективного файла (preview=1 обходит вкл/выкл).
     try {
         const a = new Audio('/api/audio/file/' + encodeURIComponent(key) + '?preview=1&t=' + Date.now());
-        a.volume = window.SoundEngine ? SoundEngine.getVolume() : 0.8;
+        const master = window.SoundEngine ? window.SoundEngine.getVolume() : 0.8;
+        const vol = (window.SoundEngine && window.SoundEngine._engine.cfg[key] && window.SoundEngine._engine.cfg[key].volume !== undefined)
+            ? window.SoundEngine._engine.cfg[key].volume : 1.0;
+        a.volume = master * vol;
         a.addEventListener('error', () => {
             const c = a.error ? a.error.code : 0;
             audioMsg('✗ Не воспроизвести: ' + (MEDIA_ERR[c] || ('код ' + c)), false);

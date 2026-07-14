@@ -1055,6 +1055,15 @@ async def audio_toggle(key: str = Form(...), enabled: bool = Form(...)):
     return {"ok": True, "key": key, "enabled": enabled}
 
 
+@app.post("/api/audio/volume", tags=["Game Management"], summary="Установить громкость события", include_in_schema=False)
+async def audio_volume(key: str = Form(...), volume: float = Form(...)):
+    try:
+        sound_config.set_volume(key, volume)
+    except KeyError:
+        raise HTTPException(404, f"Неизвестное событие: {key}")
+    return {"ok": True, "key": key, "volume": volume}
+
+
 @app.post("/api/audio/reset", tags=["Game Management"], summary="Сбросить событие на стандартный звук", include_in_schema=False)
 async def audio_reset(key: str = Form(...)):
     try:
