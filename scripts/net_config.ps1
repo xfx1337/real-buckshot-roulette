@@ -1,20 +1,5 @@
 <#
-    Автосбор сетевых параметров в config.json (Windows / PowerShell).
-
-    Запусти скрипт — он сам определит:
-      • SSID текущей Wi-Fi сети            -> esp.wifi_ssid
-      • пароль этой сети (netsh profile)   -> esp.wifi_password
-      • LAN-IP этого хоста + порт из config.json -> esp.server_base_url
-    и впишет их в корневой config.json (комментарии JSONC сохраняются —
-    правятся только три строки-значения).
-
-    Запуск (из любого места):
-      ./scripts/net_config.ps1              # записать в config.json
-      ./scripts/net_config.ps1 -DryRun      # только показать, что нашлось
-      ./scripts/net_config.ps1 -Flash       # после записи перепрошить (esp/flash.sh через bash)
-
-    Если PowerShell блокирует запуск скриптов:
-      powershell -ExecutionPolicy Bypass -File .\scripts\net_config.ps1
+    Auto-detect network parameters and write to config.json (Windows / PowerShell).
 #>
 [CmdletBinding()]
 param(
@@ -25,15 +10,15 @@ param(
 $ErrorActionPreference = 'Stop'
 
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-$RootDir   = Split-Path -Parent $ScriptDir   # scripts/ лежит на уровень ниже корня
+$RootDir   = Split-Path -Parent $ScriptDir
 $Config    = Join-Path $RootDir 'config.json'
 
 if (-not (Test-Path $Config)) {
-    Write-Error "Не найден $Config. Скопируй config.example.json в config.json."
+    Write-Error "Could not find $Config. Copy config.example.json to config.json."
     exit 1
 }
 
-# ── SSID текущей сети ──────────────────────────────────────────────
+# -- SSID --
 $Ssid = $null
 $netshShow = netsh wlan show interfaces 2>$null
 foreach ($line in $netshShow) {
@@ -43,20 +28,24 @@ foreach ($line in $netshShow) {
     }
 }
 
-# ── Пароль из сохранённого профиля Wi-Fi ───────────────────────────
+# -- Password --
 $Password = $null
 if ($Ssid) {
     $profile = netsh wlan show profile name="$Ssid" key=clear 2>$null
     foreach ($line in $profile) {
+        # Using Unicode escape for "Содержимое ключа" to avoid encoding issues in script parsing
         if ($line -match '^\s*Key Content\s*:\s*(.+?)\s*$' -or
-            $line -match '^\s*Содержимое ключа\s*:\s*(.+?)\s*$') {
+            $line -match '^\s*(\u0421\u043E\u0434\u0435\u0440\u0436\u0438\u043C\u043E\u0435\u0020\u043A\u043B\u044E\u0447\u0430)\s*:\s*(.+?)\s*$') {
             $Password = $Matches[1]
+            if ($Matches.Count -gt 2) {
+                $Password = $Matches[2]
+            }
             break
         }
     }
 }
 
-# ── LAN-IP хоста (IPv4 интерфейса с дефолтным маршрутом) ────────────
+# -- LAN-IP --
 $Ip = $null
 try {
     $route = Get-NetRoute -DestinationPrefix '0.0.0.0/0' -ErrorAction Stop |
@@ -68,13 +57,13 @@ try {
                Select-Object -First 1).IPAddress
     }
 } catch {
-    # Фолбэк: первый «настоящий» IPv4
+    # Fallback
     $Ip = (Get-NetIPAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue |
            Where-Object { $_.IPAddress -notlike '127.*' -and $_.IPAddress -notlike '169.254.*' } |
            Select-Object -First 1).IPAddress
 }
 
-# ── Порт сервера из config.json ────────────────────────────────────
+# -- Port --
 $Port = 8000
 $portMatch = Select-String -Path $Config -Pattern '"port"\s*:\s*(\d+)' | Select-Object -First 1
 if ($portMatch) { $Port = [int]$portMatch.Matches[0].Groups[1].Value }
@@ -82,34 +71,32 @@ if ($portMatch) { $Port = [int]$portMatch.Matches[0].Groups[1].Value }
 $ServerUrl = $null
 if ($Ip) { $ServerUrl = "http://${Ip}:${Port}" }
 
-# ── Отчёт ──────────────────────────────────────────────────────────
-Write-Host "> ОС:            Windows"
-Write-Host "> SSID:          $(if ($Ssid) { $Ssid } else { '<не определён>' })"
-Write-Host "> Пароль:        $(if ($Password) { '<найден>' } else { '<не найден — впиши вручную>' })"
-Write-Host "> IP хоста:      $(if ($Ip) { $Ip } else { '<не определён>' })"
-Write-Host "> server_base_url: $(if ($ServerUrl) { $ServerUrl } else { '<не построен>' })"
+# -- Report --
+Write-Host "> OS:            Windows"
+Write-Host "> SSID:          $(if ($Ssid) { $Ssid } else { '<not determined>' })"
+Write-Host "> Password:      $(if ($Password) { '<found>' } else { '<not found - fill manually>' })"
+Write-Host "> Host IP:       $(if ($Ip) { $Ip } else { '<not determined>' })"
+Write-Host "> server_base_url: $(if ($ServerUrl) { $ServerUrl } else { '<not built>' })"
 Write-Host ""
 
 if ($DryRun) {
-    Write-Host "ℹ️  -DryRun: config.json не изменён."
+    Write-Host "Info: -DryRun: config.json not modified."
     exit 0
 }
 
-# ── Замена значения одного ключа, сохраняя комментарии JSONC ────────
+# -- Replace keys in config.json --
 $text = Get-Content -Path $Config -Raw -Encoding UTF8
 
 function Set-Key {
     param([string]$Key, [string]$Value)
     if ([string]::IsNullOrEmpty($Value)) { return }
-    # JSON-экранирование значения: \ -> \\ и " -> \"
     $jsonVal = $Value -replace '\\', '\\' -replace '"', '\"'
     $pattern = '("' + [regex]::Escape($Key) + '"\s*:\s*")[^"]*(")'
     if ($script:text -match $pattern) {
-        # $ в replacement-строке .NET Regex спецсимвол — удваиваем.
         $repl = '${1}' + ($jsonVal -replace '\$', '$$$$') + '${2}'
         $script:text = [regex]::Replace($script:text, $pattern, $repl)
     } else {
-        Write-Warning "Ключ `"$Key`" не найден в config.json — пропущен."
+        Write-Warning "Key `"$Key`" not found in config.json - skipped."
     }
 }
 
@@ -117,16 +104,15 @@ Set-Key 'wifi_ssid'       $Ssid
 Set-Key 'wifi_password'   $Password
 Set-Key 'server_base_url' $ServerUrl
 
-# Пишем без BOM, чтобы Python json/strip_jsonc читал файл без сюрпризов.
 [System.IO.File]::WriteAllText($Config, $text, (New-Object System.Text.UTF8Encoding($false)))
 
-Write-Host "✅ config.json обновлён."
-if (-not $Ssid)      { Write-Warning "SSID не определён — проверь Wi-Fi и впиши вручную." }
-if (-not $Password)  { Write-Warning "Пароль не найден — впиши esp.wifi_password вручную." }
-if (-not $Ip)        { Write-Warning "IP не определён — впиши esp.server_base_url вручную." }
+Write-Host "config.json updated."
+if (-not $Ssid)      { Write-Warning "SSID not determined - check Wi-Fi and fill manually." }
+if (-not $Password)  { Write-Warning "Password not found - fill esp.wifi_password manually." }
+if (-not $Ip)        { Write-Warning "IP not determined - fill esp.server_base_url manually." }
 
 if ($Flash) {
     Write-Host ""
-    Write-Host "> Перепрошиваю плату…"
+    Write-Host "> Flashing board..."
     bash (Join-Path $RootDir 'esp/flash.sh')
 }

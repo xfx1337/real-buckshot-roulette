@@ -115,6 +115,11 @@ class GameConfig:
     # Ёмкость капсюлей игрушечного револьвера (реквизит). Настраивается дилером;
     # по умолчанию REVOLVER_CAPACITY. Тратится по одному на каждый боевой выстрел.
     revolver_capacity: int = REVOLVER_CAPACITY
+    # Ограничение реквизита: максимальное количество физических боевых/холостых
+    # патронов, доступных для игры. Генерация обрежет до этих значений.
+    # 0 = без ограничения.
+    max_live_shells: int = 4
+    max_blank_shells: int = 4
     # Item limits per item type (0 = disabled/unlimited)
     item_limits_global: dict = field(default_factory=dict)
     item_limits_per_player: dict = field(default_factory=dict)
@@ -344,6 +349,18 @@ class GameState:
 
     def _finalize_shells(self, live_count: int, blank_count: int):
         """Common shell finalization for both modes."""
+        # Ограничение реквизита: нельзя зарядить больше патронов, чем
+        # физически доступно (max_live_shells / max_blank_shells).
+        max_l = self.config.max_live_shells
+        max_b = self.config.max_blank_shells
+        if max_l > 0 and live_count > max_l:
+            live_count = max_l
+        if max_b > 0 and blank_count > max_b:
+            blank_count = max_b
+        # Гарантируем хотя бы 1 боевой и 1 холостой
+        live_count = max(live_count, 1)
+        blank_count = max(blank_count, 1)
+
         total = live_count + blank_count
         self.shells = (
             [ShellType.LIVE] * live_count +
@@ -919,6 +936,8 @@ class GameState:
             # редактор настроек дилера показывал СОХРАНЁННЫЕ значения, а не дефолт.
             data["rounds"] = [dict(r) for r in self.config.rounds]
             data["max_items_per_player"] = self.config.max_items_per_player
+            data["max_live_shells"] = self.config.max_live_shells
+            data["max_blank_shells"] = self.config.max_blank_shells
 
         # Recent log (last 20 events)
         data["log"] = [

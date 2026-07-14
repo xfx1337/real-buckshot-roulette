@@ -1026,6 +1026,10 @@ async def update_config(config_json: str = Form(..., description="JSON-объе�
             # В лобби (единственная фаза, где правим конфиг) револьвер ещё не
             # расходован — сразу подтягиваем текущий запас к новой ёмкости.
             game.revolver_ammo = cap
+        if "max_live_shells" in data:
+            game.config.max_live_shells = max(0, int(data["max_live_shells"]))
+        if "max_blank_shells" in data:
+            game.config.max_blank_shells = max(0, int(data["max_blank_shells"]))
         await broadcast_state()
         return {"ok": True}
     except Exception as e:
