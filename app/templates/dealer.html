@@ -164,6 +164,10 @@ a:hover{ color:var(--green-bright); }
 .shell-pill .primer{ display:block; width:11px; height:11px; border-radius:50%; }
 .shell-pill.live .primer{ background:radial-gradient(circle,#ff6b6b,#7a1a1a); box-shadow:0 0 8px #ff5555; }
 .shell-pill.blank .primer{ background:radial-gradient(circle,#3a5a42,#16221a); }
+/* Серебряный патрон (лечит цель +1 HP) */
+.shell-pill.silver{ background:linear-gradient(180deg,#d8dde3,#9aa3ad); border:1.5px solid #eef2f6; box-shadow:0 0 15px rgba(220,230,240,.6), inset 0 0 8px rgba(0,0,0,.3); }
+.shell-pill.silver .brass{ background:linear-gradient(180deg,#c8cdd3,#8a9099); }
+.shell-pill.silver .primer{ background:radial-gradient(circle,#ffffff,#9aa3ad); box-shadow:0 0 8px #eaf0f6; }
 .shell-pill-chamber{ width:80px; height:36px; border-radius:18px; }
 .shell-pill-chamber .brass{ width:27px; border-radius:18px 4px 4px 18px; }
 .shell-pill-chamber .primer{ width:15px; height:15px; }
@@ -194,6 +198,7 @@ a:hover{ color:var(--green-bright); }
 .sg-chamber-type{ font-family:var(--font-tube); font-size:10px; letter-spacing:.2em; }
 .sg-chamber-type.live{ color:var(--red); text-shadow:0 0 8px rgba(168,50,50,.6); }
 .sg-chamber-type.blank{ color:var(--green); text-shadow:0 0 8px rgba(63,239,106,.5); }
+.sg-chamber-type.silver{ color:#e6ecf2; text-shadow:0 0 8px rgba(220,230,240,.7); }
 .sg-chamber-type.empty{ color:var(--text-faint); }
 
 /* ─────────────────────────────────────────────────────────────
@@ -296,6 +301,8 @@ a:hover{ color:var(--green-bright); }
   box-shadow:0 0 10px rgba(201,64,64,.55), inset 0 1px 2px rgba(255,150,150,.35); }
 .sg-shell.blank .sg-body{ background:linear-gradient(180deg,#4a8ac9 0%,#3a6ea8 55%,#244a72 100%);
   box-shadow:0 0 10px rgba(74,138,201,.5), inset 0 1px 2px rgba(170,210,255,.35); }
+.sg-shell.silver .sg-body{ background:linear-gradient(180deg,#e6ecf2 0%,#b8c0c9 55%,#8a9099 100%);
+  box-shadow:0 0 10px rgba(220,230,240,.6), inset 0 1px 2px rgba(255,255,255,.5); }
 /* размеры по состоянию */
 /* queued растягиваются на всю ширину трубы магазина */
 .sg-shell.queued{ flex:1 1 0; width:auto; min-width:34px; max-width:110px; height:22px; }
@@ -433,6 +440,9 @@ a:hover{ color:var(--green-bright); }
 .ammo-counter-shell .primer{ width:9px; height:9px; border-radius:50%; display:block; }
 .ammo-counter-shell.is-live .primer{ background:radial-gradient(circle,#ff6b6b,#7a1a1a); box-shadow:0 0 6px #ff5555; }
 .ammo-counter-shell.is-blank .primer{ background:radial-gradient(circle,#3a5a42,#16221a); }
+.ammo-counter-shell.is-silver{ background:linear-gradient(180deg,#d8dde3,#9aa3ad); border:1.5px solid #eef2f6; box-shadow:0 0 12px rgba(220,230,240,.55); }
+.ammo-counter-shell.is-silver .brass{ background:linear-gradient(180deg,#c8cdd3,#8a9099); }
+.ammo-counter-shell.is-silver .primer{ background:radial-gradient(circle,#ffffff,#9aa3ad); box-shadow:0 0 6px #eaf0f6; }
 .ammo-counter-label{ font-family:var(--font-tube); font-size:10px; letter-spacing:.28em; text-transform:uppercase; }
 .ammo-counter-value{ font-family:var(--font-tube); font-size:30px; font-weight:600; line-height:1; }
 .ammo-counter.is-live .ammo-counter-label{ color:#6a3a3a; }
@@ -878,11 +888,154 @@ input[type="checkbox"]{ accent-color:var(--green); cursor:crosshair; }
 .log-item,.log-use{ color:var(--green); border-left-color:#2a4a2c; }
 .log-info,.log-system{ color:var(--text-dim); border-left-color:#2a2018; }
 
+/* ══════════════════════════════════════════════════════════════════
+   RECOMPOSITION LAYER — компактная операторская раскладка под 13.3"
+   MacBook Air (эффективно 1280×832), БЕЗ вертикального скролла.
+   Переиспользует ВСЕ исходные компонентные стили; здесь только
+   сетка, плотность и позиционирование действий.
+   ══════════════════════════════════════════════════════════════════ */
+html,body{ height:100%; overflow:hidden; }
+body{ cursor:default; }
+
+/* CRT-зерно тормозит отклик — критично для «быстрого» пульта. Отключаем. */
+.amb-grain{ display:none !important; }
+.amb-smoke i{ filter:blur(24px) !important; }
+
+/* ── фиксированная сцена 1280×832 (viewport MacBook Air 13.3") ── */
+.rd-stage{
+  position:relative; width:1280px; height:832px; margin:0 auto;
+  overflow:hidden; display:flex; flex-direction:column;
+  background:radial-gradient(120% 90% at 70% 0%, #1a0d0d 0%, #121010 40%, #0a0a0a 100%);
+  border:1px solid #241614;
+}
+.rd-stage .amb-smoke,.rd-stage .amb-vignette,.rd-stage .amb-grain,.rd-stage .amb-scan{
+  position:absolute; inset:0;
+}
+.rd-stage .amb-vignette{ box-shadow:inset 0 0 160px 30px rgba(0,0,0,.85), inset 0 0 50px rgba(0,0,0,.6); }
+#dealer-app{ position:relative; z-index:15; flex:1; min-height:0; display:flex; flex-direction:column; }
+
+/* ── компактная шапка ── */
+.dealer-header{
+  position:static; flex:0 0 auto; padding:9px 16px; gap:8px 10px; flex-wrap:nowrap;
+}
+.dealer-header h1{ font-size:12px; letter-spacing:2px; gap:9px; flex:0 0 auto; white-space:nowrap; }
+.dealer-header h1::before{ width:11px; height:11px; }
+.rd-tabs{ display:flex; gap:6px; flex:0 0 auto; }
+.rd-tab{
+  font-family:var(--font-tube); font-size:11px; letter-spacing:.12em; text-transform:uppercase;
+  padding:7px 13px; border:1px solid var(--border-metal); background:#161110; color:var(--text-dim);
+  cursor:pointer; transition:all .12s; white-space:nowrap;
+}
+.rd-tab:hover{ color:var(--text-bright); border-color:#4a382c; }
+.rd-tab.active{ color:#08120b; background:linear-gradient(180deg,var(--green-bright),var(--green)); border-color:var(--green-bright); font-weight:700; }
+.rd-spacer{ flex:1 1 auto; }
+.header-controls{ gap:6px; flex-wrap:nowrap; flex:0 0 auto; }
+.dealer-header .btn-small{ padding:7px 10px; font-size:11px; white-space:nowrap; }
+.dealer-header .phase-badge,.dealer-header .round-badge{ padding:6px 9px; font-size:11px; letter-spacing:1px; white-space:nowrap; }
+
+/* ── область экрана ── */
+.rd-body{ flex:1; min-height:0; padding:12px 16px 14px; overflow:hidden; }
+.rd-screen{ height:100%; }
+.rd-screen[hidden]{ display:none; }
+
+/* ── компактная карточка-секция ── */
+.rd-card{
+  position:relative; background:var(--panel); border:1px solid var(--border-light);
+  padding:12px 14px; display:flex; flex-direction:column; min-height:0;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.03), 0 10px 24px rgba(0,0,0,.4);
+}
+.rd-card > h3{
+  font-family:var(--font-mono); font-size:10px; letter-spacing:2.5px; color:var(--green);
+  margin:0 0 10px; text-transform:uppercase; text-shadow:0 0 var(--glow) var(--green);
+  border-bottom:1px solid var(--border-light); padding-bottom:8px; flex:0 0 auto;
+  display:flex; align-items:center; justify-content:space-between; gap:8px;
+}
+.rd-card > h3 .rd-tag{ color:var(--text-faint); font-size:9px; letter-spacing:.15em; }
+
+/* ══ ГЛАВНЫЙ ЭКРАН «ХОД» — 3 колонки ══ */
+.rd-grid{ display:grid; grid-template-columns:minmax(0,1fr) 330px 296px; gap:12px; height:100%; }
+.rd-col{ display:flex; flex-direction:column; gap:12px; min-height:0; }
+
+.rd-turnbar{ display:flex; align-items:center; gap:12px; flex:0 0 auto; margin-bottom:2px; }
+.rd-turnbar .rd-turn-name{
+  font-family:var(--font-display); font-weight:800; font-size:22px; color:var(--text-bright);
+  text-shadow:0 2px 0 #000; line-height:1; margin:0; white-space:nowrap;
+}
+.rd-turnbar .rd-turn-name::before{ content:"// "; font-family:var(--font-mono); font-weight:400; font-size:.5em; letter-spacing:2px; color:var(--green); }
+
+.rd-card .shotgun-box{ margin:0; padding:12px 12px 10px; }
+.rd-card .ammo-counters{ margin:0; gap:10px; }
+.rd .ammo-counter,.rd-card .ammo-counter{ padding:8px 12px; gap:10px; flex:1 1 120px; }
+.rd-card .ammo-counter-value{ font-size:24px; }
+.rd-card .ammo-counter-shell{ width:42px; height:19px; }
+
+.rd-fire{ flex:1 1 auto; }
+.rd-fire #shoot-targets{ display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+.rd-fire #shoot-targets .fire-btn:only-child{ grid-column:1 / -1; }
+.rd-card .fire-btn{ padding:14px 15px; font-size:15px; letter-spacing:.06em; }
+
+.rd-items-list{ overflow-y:auto; min-height:0; flex:1; }
+.rd-card .prop-card-grid{ grid-template-columns:1fr; gap:8px; }
+.rd-card .prop-card{ padding:10px 12px; min-height:0; gap:11px; }
+.rd-card .prop-card .emoji{ font-size:22px; }
+.rd-card .prop-card-name{ font-size:13px; }
+.rd-card .prop-card-effect{ font-size:9px; margin-top:2px; }
+.rd-card .prop-card-target{ padding:9px 11px; margin:0 0 8px; gap:8px; }
+
+.rd-rev{ flex:0 0 auto; align-items:center; }
+.rd-rev .revolver-box{ margin:0; width:100%; background:none; border:none; padding:0; }
+.rd-rev .revolver-header{ text-align:center; font-size:11px; margin-bottom:0; }
+.rd-rev .drum{ transform:scale(.58); transform-origin:center; margin:-46px auto; }
+.rd-rev .btn-reload-revolver{ transform:none; }
+
+.rd-players{ flex:0 0 auto; }
+.rd-players .sidebar-player{ padding:8px 10px; margin-bottom:7px; }
+.rd-players .sidebar-player:last-child{ margin-bottom:0; }
+.rd-players .sp-top{ margin-bottom:6px; }
+.rd-players .sp-name{ font-size:12px; }
+.rd-players .sp-pips{ margin-bottom:6px; gap:3px; }
+.rd-players .sp-pip{ width:11px; height:11px; }
+.rd-players .sp-controls .btn-tiny{ padding:4px 7px; }
+
+.rd-log{ flex:1 1 auto; min-height:0; }
+.rd-log .event-log{ max-height:none; flex:1; overflow-y:auto; }
+.rd-log .log-entry{ font-size:11px; padding:6px 9px; }
+
+/* ══ ЭКРАН «ЗАРЯДКА» ══ */
+.rd-load-grid{ display:grid; grid-template-columns:minmax(0,1fr) 296px; gap:12px; height:100%; }
+.rd-load-grid .mag-block{ margin:0; }
+.rd-load-grid .ammo-counters{ margin:14px 0 0; }
+
+/* ══ ЭКРАН «ПРЕДМЕТЫ» ══ */
+.rd-items-grid{ display:grid; grid-template-columns:minmax(0,1fr) 296px; gap:12px; height:100%; }
+.rd-items-grid #items-distribution{ margin:0; grid-template-columns:repeat(auto-fill,minmax(180px,1fr)); align-content:start; overflow-y:auto; }
+
+/* ══ ЭКРАН «ЛОББИ / НАСТРОЙКИ» ══ */
+.rd-form-grid{ display:grid; grid-template-columns:320px minmax(0,1fr); gap:12px; height:100%; }
+.rd-form-body{ overflow-y:auto; min-height:0; flex:1; padding-right:4px; }
+.rd-form-body .config-panel{ margin-top:0; border:none; background:none; }
+.rd-form-body .config-panel > summary{ display:none; }
+.rd-form-body #config-editor{ padding:0; }
+
+/* ══ простые экраны (нет игры / раунд окончен / конец) ══ */
+.rd-simple{ height:100%; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:18px; text-align:center; }
+.rd-simple h2{ font-family:var(--font-display); font-weight:800; font-size:32px; color:var(--text-bright); margin:0; }
+.rd-simple h2::before{ content:"// "; font-family:var(--font-mono); font-weight:400; font-size:.5em; color:var(--green); }
+.rd-simple .btn-dealer{ width:auto; padding:14px 32px; animation:none; }
+.rd-simple .cfg-input{ min-width:280px; padding:12px; }
+.rd-simple .rd-simple-winner{ font-family:var(--font-mono); font-size:22px; letter-spacing:3px; color:var(--green-bright); text-shadow:0 0 16px var(--green); }
+
+.rd-stage .scfg-overlay{ position:absolute; }
+
+.rd-load-actions{ display:flex; gap:10px; align-items:center; margin-top:14px; flex:0 0 auto; }
+.rd-load-actions .btn-dealer{ width:auto; animation:none; flex:0 0 auto; padding:12px 24px; }
 
 </style>
 </head>
 
 <body class="page-dealer">
+
+<div class="rd-stage">
 
 <div class="amb-smoke"><i></i><i></i></div>
 <div class="amb-vignette"></div>
@@ -894,22 +1047,169 @@ input[type="checkbox"]{ accent-color:var(--green); cursor:crosshair; }
 
 <div id="dealer-app">
     <header class="dealer-header">
-        <h1><span class="rec-tag">REC</span>УСТРОЙСТВО · КОНТРОЛЬ СТОЛА</h1>
+        <h1><span class="rec-tag">REC</span>ПУЛЬТ ОПЕРАТОРА</h1>
+        <nav class="rd-tabs">
+            <button class="rd-tab" data-screen="turn" onclick="showScreen('turn')">Ход</button>
+            <button class="rd-tab" data-screen="loading" onclick="showScreen('loading')">Зарядка</button>
+            <button class="rd-tab" data-screen="items" onclick="showScreen('items')">Предметы</button>
+            <button class="rd-tab" data-screen="lobby" onclick="showScreen('lobby')">Настройки</button>
+        </nav>
+        <span class="rd-spacer"></span>
         <div class="header-controls">
-            <button class="btn btn-plate plate-yellow btn-small" onclick="undoAction()" id="btn-undo" style="display:none;">ОТКАТИТЬ</button>
             <span id="header-phase" class="phase-badge">---</span>
             <span id="header-round" class="round-badge">---</span>
+            <button class="btn btn-plate plate-yellow btn-small" onclick="undoAction()" id="btn-undo" style="display:none;">ОТКАТИТЬ</button>
             <button class="btn btn-plate plate-teal btn-small" id="btn-force-round" onclick="forceRoundOver()" style="display:none">КОНЕЦ РАУНДА</button>
             <!-- Ручное управление железом — доступно всегда (пульт оператора). -->
-            <button class="btn btn-plate plate-yellow btn-small" onclick="forceFireSolenoid(this)" title="Принудительно щёлкнуть соленоидом на плате">⚡ СОЛЕНОИД</button>
-            <button class="btn btn-plate plate-teal btn-small" onclick="openAudioConfig()" title="Настройки звука / озвучки">🔊 АУДИО</button>
-            <button class="btn btn-plate plate-teal btn-small" onclick="openServerConfig()" title="Настройки сервера и ESP32">⚙ СЕРВЕР</button>
-            <button class="btn btn-danger btn-small" onclick="forceEnd()">ЗАВЕРШИТЬ ИГРУ</button>
+            <button class="btn btn-plate plate-yellow btn-small" onclick="forceFireSolenoid(this)" title="Принудительно щёлкнуть соленоидом на плате">⚡</button>
+            <button class="btn btn-plate plate-teal btn-small" onclick="openAudioConfig()" title="Настройки звука / озвучки">🔊</button>
+            <button class="btn btn-plate plate-teal btn-small" onclick="openServerConfig()" title="Настройки сервера и ESP32">⚙</button>
+            <button class="btn btn-danger btn-small" onclick="forceEnd()">ЗАВЕРШИТЬ</button>
         </div>
     </header>
 
+    <div class="rd-body">
+        <!-- ХОД -->
+        <div class="rd-screen" id="rd-screen-turn" hidden>
+            <div class="rd-grid">
+                <div class="rd-col">
+                    <div class="rd-turnbar">
+                        <h2 class="rd-turn-name">ХОД: <span id="turn-player-name">—</span></h2>
+                        <span class="saw-badge" id="saw-badge" style="display:none">СТВОЛ ОТПИЛЕН ×2</span>
+                        <span class="invert-badge" id="invert-badge" style="display:none">ИНВЕРТИРОВАН</span>
+                    </div>
+                    <div class="rd-card"><h3>Дробовик <span class="rd-tag">магазин · патронник</span></h3>
+                        <div class="shotgun-box" id="turn-mag-block"></div>
+                        <div class="ammo-counters" id="turn-ammo-counters" style="margin-top:12px"></div>
+                    </div>
+                    <div class="rd-card rd-fire"><h3>Выстрел <span class="rd-tag">выберите цель</span></h3>
+                        <!-- Меню "в кого попали?" после физического выстрела (ESP32 курок). -->
+                        <div id="pending-shot-menu" class="pending-shot-menu" style="display:none">
+                            <h3>⚡ ФИЗИЧЕСКИЙ ВЫСТРЕЛ — В КОГО ПОПАЛИ?</h3>
+                            <p class="hint">Курок спущен. Выберите игрока, в которого стреляли:</p>
+                            <div id="pending-shot-targets"></div>
+                        </div>
+                        <div id="shoot-targets"></div>
+                    </div>
+                </div>
+                <div class="rd-col">
+                    <div class="rd-card" style="flex:1 1 auto;"><h3>Предметы игрока</h3>
+                        <div class="rd-items-list"><div id="player-items-list"></div>
+                            <div id="special-results" class="special-results" style="display:none">
+                                <div id="special-content"></div>
+                                <button class="btn btn-secondary" onclick="hideSpecial()">OK</button>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="rd-card rd-rev"><h3 style="align-self:stretch">Реквизит-револьвер</h3>
+                        <div class="revolver-box" id="revolver-box"></div>
+                    </div>
+                </div>
+                <div class="rd-col">
+                    <div class="rd-card rd-players"><h3>Игроки <span class="rd-tag" id="pl-count"></span></h3>
+                        <div class="js-players"></div>
+                    </div>
+                    <div class="rd-card rd-log"><h3>Лог событий</h3>
+                        <div class="event-log js-log"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ЗАРЯДКА -->
+        <div class="rd-screen" id="rd-screen-loading" hidden>
+            <div class="rd-load-grid">
+                <div class="rd-col">
+                    <div class="rd-card" style="flex:1 1 auto;"><h3 id="loading-title">Зарядите дробовик <span class="rd-tag">строго по порядку · LIFO</span></h3>
+                        <p class="hint" style="color:var(--red);font-weight:bold;margin:0 0 12px;">Заряжайте патроны в магазин в этом порядке — первый в списке досылается первым.</p>
+                        <div class="mag-block" id="load-mag-block"></div>
+                        <div class="ammo-counters" id="load-ammo-counters"></div>
+                        <div class="rd-load-actions">
+                            <button class="btn btn-dealer" onclick="confirmShells()">ЗАРЯЖЕНО</button>
+                            <button class="btn btn-toggle-shells" id="btn-toggle-shells" onclick="toggleShells()"></button>
+                        </div>
+                    </div>
+                </div>
+                <div class="rd-col">
+                    <div class="rd-card rd-players"><h3>Игроки</h3><div class="js-players"></div></div>
+                    <div class="rd-card rd-log"><h3>Лог событий</h3><div class="event-log js-log"></div></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ПРЕДМЕТЫ -->
+        <div class="rd-screen" id="rd-screen-items" hidden>
+            <div class="rd-items-grid">
+                <div class="rd-col">
+                    <div class="rd-card" style="flex:1 1 auto;"><h3>Раздайте предметы <span class="rd-tag">по игрокам</span></h3>
+                        <div id="items-distribution"></div>
+                        <div class="rd-load-actions"><button class="btn btn-dealer" onclick="confirmItems()">ПРЕДМЕТЫ РОЗДАНЫ</button></div>
+                    </div>
+                </div>
+                <div class="rd-col">
+                    <div class="rd-card rd-players"><h3>Игроки</h3><div class="js-players"></div></div>
+                    <div class="rd-card rd-log"><h3>Лог событий</h3><div class="event-log js-log"></div></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ЛОББИ / НАСТРОЙКИ -->
+        <div class="rd-screen" id="rd-screen-lobby" hidden>
+            <div class="rd-form-grid">
+                <div class="rd-col">
+                    <div class="rd-card" style="flex:1 1 auto;"><h3>Лобби <span class="rd-tag" id="current-mode-badge"></span></h3>
+                        <div id="lobby-players" class="players-grid" style="grid-template-columns:1fr"></div>
+                        <p class="hint" id="lobby-hint">Ожидание игроков...</p>
+                        <div class="rd-load-actions"><button class="btn btn-dealer" id="btn-start" onclick="startGame()" disabled>НАЧАТЬ ИГРУ</button></div>
+                    </div>
+                </div>
+                <div class="rd-card"><h3>Настройки игры <span class="rd-tag">сохранятся в конфиг</span></h3>
+                    <div class="rd-form-body">
+                        <details class="config-panel" open>
+                            <summary>НАСТРОЙКИ</summary>
+                            <div id="config-editor"></div>
+                        </details>
+                    </div>
+                    <div class="rd-load-actions" style="justify-content:flex-end;border-top:1px solid var(--border-light);padding-top:12px;margin-top:10px;">
+                        <button class="btn btn-dealer" onclick="saveConfig()">СОХРАНИТЬ</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- НЕТ ИГРЫ (виден по умолчанию до первого состояния по WS) -->
+        <div class="rd-screen" id="rd-screen-nogame">
+            <div class="rd-simple">
+                <h2>НЕТ АКТИВНОЙ ИГРЫ</h2>
+                <select id="game-mode-select" class="cfg-input">
+                    <option value="multiplayer">Мультиплеер (2-4 игрока)</option>
+                    <option value="solo">Соло / 1 на 1 (1 телефон на двоих)</option>
+                    <option value="story">Стори мод / 1vs1 (3 стадии как в оригинале)</option>
+                </select>
+                <button class="btn btn-dealer" onclick="createGame()">СОЗДАТЬ ИГРУ</button>
+            </div>
+        </div>
+
+        <!-- РАУНД ОКОНЧЕН -->
+        <div class="rd-screen" id="rd-screen-roundover" hidden>
+            <div class="rd-simple">
+                <h2>РАУНД ЗАВЕРШЕН</h2>
+                <button class="btn btn-dealer" onclick="nextRound()">СЛЕДУЮЩИЙ РАУНД</button>
+            </div>
+        </div>
+
+        <!-- КОНЕЦ ИГРЫ -->
+        <div class="rd-screen" id="rd-screen-gameover" hidden>
+            <div class="rd-simple">
+                <h2 id="gameover-title">ИГРА ОКОНЧЕНА</h2>
+                <p id="gameover-winner" class="rd-simple-winner"></p>
+                <button class="btn btn-dealer" onclick="createGame()">НОВАЯ ИГРА</button>
+            </div>
+        </div>
+    </div>
+
     <!-- Модалка «Сервер/Железо»: редактирует config.json (Wi-Fi, IP, код курка,
-         пины, тайминги ESP). Скрыта по умолчанию, открывается кнопкой ⚙ СЕРВЕР. -->
+         пины, тайминги ESP). Скрыта по умолчанию, открывается кнопкой ⚙. -->
     <div id="server-config-modal" class="scfg-overlay" style="display:none;">
         <div class="scfg-box">
             <div class="scfg-head">
@@ -926,9 +1226,7 @@ input[type="checkbox"]{ accent-color:var(--green); cursor:crosshair; }
         </div>
     </div>
 
-    <!-- Модалка «Аудио»: настройка озвучки. Стандартные звуки из папки
-         reference/, оператор может выключить событие, загрузить свой файл или
-         сбросить на стандартный. Изменения сразу применяются на бэкенде. -->
+    <!-- Модалка «Аудио»: настройка озвучки. -->
     <div id="audio-config-modal" class="scfg-overlay" style="display:none;">
         <div class="scfg-box">
             <div class="scfg-head">
@@ -949,121 +1247,7 @@ input[type="checkbox"]{ accent-color:var(--green); cursor:crosshair; }
             </div>
         </div>
     </div>
-
-    <div class="dealer-layout">
-        <div class="dealer-main">
-            <!-- No Game -->
-            <div id="panel-nogame" class="panel">
-                <h2>НЕТ АКТИВНОЙ ИГРЫ</h2>
-                <div style="margin-bottom: 22px;">
-                    <label for="game-mode-select" style="display: block; margin-bottom: 10px;">РЕЖИМ ИГРЫ:</label>
-                    <select id="game-mode-select" class="cfg-input">
-                        <option value="multiplayer">Мультиплеер (2-4 игрока)</option>
-                        <option value="solo">Соло / 1 на 1 (1 телефон на двоих)</option>
-                        <option value="story">Стори мод / 1vs1 (3 стадии как в оригинале)</option>
-                    </select>
-                </div>
-                <button class="btn btn-dealer" onclick="createGame()">СОЗДАТЬ ИГРУ</button>
-            </div>
-
-            <!-- Lobby -->
-            <div id="panel-lobby" class="panel" style="display:none">
-                <h2>ЛОББИ</h2>
-                <div id="lobby-players" class="players-grid"></div>
-                <p class="hint" id="lobby-hint">Ожидание игроков... (мин. 2, макс. 4)</p>
-                <button class="btn btn-dealer" id="btn-start" onclick="startGame()" disabled="">НАЧАТЬ ИГРУ</button>
-                <details class="config-panel">
-                    <summary>НАСТРОЙКИ ИГРЫ <span id="current-mode-badge" style="font-size: 0.85em; opacity: 0.7; margin-left: 10px;"></span></summary>
-                    <div id="config-editor"></div>
-                    <button class="btn btn-secondary" onclick="saveConfig()">СОХРАНИТЬ</button>
-                </details>
-            </div>
-
-            <!-- Loading Shells -->
-            <div id="panel-loading" class="panel" style="display:none">
-                <h2>ЗАРЯДИТЕ ДРОБОВИК</h2>
-                <p class="hint" style="color: var(--red); font-weight: bold; margin-bottom: 20px;">ВНИМАНИЕ: Заряжайте патроны в магазин строго в таком порядке (LIFO) — первый в списке досылается первым 👇</p>
-                <div class="mag-block" id="load-mag-block"></div>
-                <div class="ammo-counters" id="load-ammo-counters"></div>
-                <div class="loading-actions">
-                    <button class="btn btn-dealer" onclick="confirmShells()">ЗАРЯЖЕНО</button>
-                    <button class="btn btn-toggle-shells" id="btn-toggle-shells" onclick="toggleShells()"></button>
-                </div>
-            </div>
-
-            <!-- Distributing Items -->
-            <div id="panel-items" class="panel" style="display:none">
-                <h2>РАЗДАЙТЕ ПРЕДМЕТЫ</h2>
-                <div id="items-distribution"></div>
-                <button class="btn btn-dealer" onclick="confirmItems()">ПРЕДМЕТЫ РОЗДАНЫ</button>
-            </div>
-
-            <!-- Player Turn -->
-            <div id="panel-turn" class="panel" style="display:none">
-                <div class="current-turn-header">
-                    <h2>ХОД: <span id="turn-player-name">---</span></h2>
-                    <span class="saw-badge" id="saw-badge" style="display:none">СТВОЛ ОТПИЛЕН (x2)</span>
-                    <span class="invert-badge" id="invert-badge" style="display:none">ИНВЕРТИРОВАН</span>
-                </div>
-
-                <div class="shotgun-box" id="turn-mag-block"></div>
-
-                <!-- Меню "в кого попали?" после физического выстрела (ESP32 курок) —
-                     сразу под обоймой: удобно жать и видеть следующий патрон. -->
-                <div id="pending-shot-menu" class="pending-shot-menu" style="display:none">
-                    <h3>⚡ ФИЗИЧЕСКИЙ ВЫСТРЕЛ — В КОГО ПОПАЛИ?</h3>
-                    <p class="hint">Курок спущен. Выберите игрока, в которого стреляли:</p>
-                    <div id="pending-shot-targets"></div>
-                </div>
-
-                <!-- Регистрация выстрела — сразу под обоймой: жмёшь цель
-                     и тут же видишь следующий патрон, не листая вниз. -->
-                <div class="shoot-section">
-                    <h3>ВЫСТРЕЛ</h3>
-                    <div id="shoot-targets"></div>
-                </div>
-
-                <div class="ammo-counters" id="turn-ammo-counters"></div>
-
-                <div class="revolver-box" id="revolver-box"></div>
-
-                <div class="items-section">
-                    <h3>ПРЕДМЕТЫ ИГРОКА</h3>
-                    <div id="player-items-list"></div>
-                </div>
-
-                <div id="special-results" class="special-results" style="display:none">
-                    <div id="special-content"></div>
-                    <button class="btn btn-secondary" onclick="hideSpecial()">OK</button>
-                </div>
-            </div>
-
-            <!-- Round Over -->
-            <div id="panel-roundover" class="panel" style="display:none">
-                <h2>РАУНД ЗАВЕРШЕН</h2>
-                <button class="btn btn-dealer" onclick="nextRound()">СЛЕДУЮЩИЙ РАУНД</button>
-            </div>
-
-            <!-- Game Over -->
-            <div id="panel-gameover" class="panel" style="display:none">
-                <h2 id="gameover-title">ИГРА ОКОНЧЕНА</h2>
-                <p id="gameover-winner"></p>
-                <button class="btn btn-dealer" onclick="createGame()">НОВАЯ ИГРА</button>
-            </div>
-        </div>
-
-        <!-- Sidebar -->
-        <div class="dealer-sidebar">
-            <div class="sidebar-section">
-                <h3>ИГРОКИ</h3>
-                <div id="sidebar-players"></div>
-            </div>
-            <div class="sidebar-section">
-                <h3>ЛОГ</h3>
-                <div id="event-log" class="event-log"></div>
-            </div>
-        </div>
-    </div>
+</div>
 </div>
 <script src="/static/sound.js?v=2"></script>
 <script>
@@ -1103,18 +1287,50 @@ function connect() {
     ws.onclose = () => setTimeout(connect, 2000);
 }
 
+// Фаза сервера → экран новой вкладочной раскладки. Сервер — источник истины:
+// на каждый push переключаемся на экран текущей фазы. Вкладки позволяют
+// оператору «подсмотреть» другой экран между обновлениями (showScreen).
+const SCREENS = ['turn','loading','items','lobby','nogame','roundover','gameover'];
+const PHASE_TO_SCREEN = {
+    lobby: 'lobby',
+    round_start: 'loading', dealer_loading: 'loading', dealer_reloading: 'loading',
+    dealer_items: 'items',
+    player_turn: 'turn',
+    round_over: 'roundover',
+    game_over: 'gameover',
+};
+
+function showScreenEl(name) {
+    SCREENS.forEach(n => {
+        const el = document.getElementById('rd-screen-' + n);
+        if (el) el.hidden = n !== name;
+    });
+    // Активная вкладка только для 4 основных экранов (у простых экранов вкладки нет).
+    document.querySelectorAll('.rd-tab').forEach(t => t.classList.toggle('active', t.dataset.screen === name));
+}
+
+// Ручное переключение вкладки — предпросмотр по последнему состоянию.
+// Следующий push с сервера восстановит экран текущей фазы.
+function showScreen(name) {
+    showScreenEl(name);
+    if (!gameState) return;
+    if (name === 'turn') renderTurn(gameState);
+    else if (name === 'loading') renderLoading(gameState);
+    else if (name === 'items') renderItems(gameState);
+    else if (name === 'lobby') renderLobby(gameState);
+}
+
 function render() {
     if (!gameState) return;
     const s = gameState;
-    const panels = ['panel-nogame','panel-lobby','panel-loading','panel-items','panel-turn','panel-roundover','panel-gameover'];
-    panels.forEach(p => document.getElementById(p).style.display = 'none');
+    const screen = PHASE_TO_SCREEN[s.phase] || 'nogame';
+    showScreenEl(screen);
 
     const showForceRound = !['lobby', 'no_game', 'game_over', 'round_over'].includes(s.phase);
     document.getElementById('btn-force-round').style.display = showForceRound ? 'inline-flex' : 'none';
 
-    const showUndo = s.can_undo === true;
     const btnUndo = document.getElementById('btn-undo');
-    if (btnUndo) btnUndo.style.display = showUndo ? 'inline-flex' : 'none';
+    if (btnUndo) btnUndo.style.display = s.can_undo === true ? 'inline-flex' : 'none';
 
     document.getElementById('header-phase').textContent = phaseLabel(s.phase);
     document.getElementById('header-round').textContent = `РАУНД ${s.current_round}/${s.total_rounds}`;
@@ -1122,16 +1338,13 @@ function render() {
     renderSidebar(s);
     renderLog(s.log);
 
-    switch(s.phase) {
+    switch(screen) {
         case 'lobby': renderLobby(s); break;
-        case 'round_start':
-        case 'dealer_loading':
-        case 'dealer_reloading': renderLoading(s); break;
-        case 'dealer_items': renderItems(s); break;
-        case 'player_turn': renderTurn(s); break;
-        case 'round_over': document.getElementById('panel-roundover').style.display = 'block'; break;
-        case 'game_over': renderGameOver(s); break;
-        default: document.getElementById('panel-nogame').style.display = 'block';
+        case 'loading': renderLoading(s); break;
+        case 'items': renderItems(s); break;
+        case 'turn': renderTurn(s); break;
+        case 'gameover': renderGameOver(s); break;
+        // roundover / nogame — статичные экраны, доп. рендер не нужен.
     }
 }
 
@@ -1151,8 +1364,6 @@ function phaseLabel(p) {
 // ── Render ──
 
 function renderLobby(s) {
-    document.getElementById('panel-lobby').style.display = 'block';
-
     // Show current mode
     const modeBadge = document.getElementById('current-mode-badge');
     if (modeBadge) {
@@ -1315,14 +1526,15 @@ function onModeChange(mode) {
 
 // ── Shell pill markup helper (shared: live/blank + chamber/mag/ejected sizing) ──
 function shellPillHtml(type, sizeClass) {
-    const cls = `shell-pill ${type === 'live' ? 'live' : 'blank'} ${sizeClass || ''}`.trim();
+    const t = type === 'live' ? 'live' : type === 'silver' ? 'silver' : 'blank';
+    const cls = `shell-pill ${t} ${sizeClass || ''}`.trim();
     return `<div class="${cls}"><span class="brass"><span class="primer"></span></span></div>`;
 }
 
 // ── Патрон для ствола помпы (chambered / queued) ──
 // idx: 0 = патронник; для queued idx нужен, чтобы адресовать «следующий».
 function sgShellHtml(type, state, idx) {
-    const t = type === 'live' ? 'live' : 'blank';
+    const t = type === 'live' ? 'live' : type === 'silver' ? 'silver' : 'blank';
     return `<div class="sg-shell ${t} ${state}" data-sg-idx="${idx}">`
         + `<span class="sg-brass"></span><span class="sg-primer"></span>`
         + `<span class="sg-body"></span></div>`;
@@ -1363,7 +1575,8 @@ function sgReset() {
 }
 
 function fireShotgun(type, onAnimationComplete) {
-    const isLive = type === 'live';
+    // Серебряный — физический выстрел, анимируем как боевой разряд.
+    const isLive = type === 'live' || type === 'silver';
     const box = document.getElementById('turn-mag-block');
     const barrel = document.getElementById('sg-barrel');
     if (!box || !barrel) { if (onAnimationComplete) onAnimationComplete(); return; }
@@ -1466,14 +1679,13 @@ function fireShotgun(type, onAnimationComplete) {
 }
 
 function renderLoading(s) {
-    document.getElementById('panel-loading').style.display = 'block';
-
     const seq = s.shells_sequence || [];
     // Порядок ЗАРЯДКИ (в магазин) — обратный порядку выстрелов (LIFO).
     const loadOrder = [...seq].reverse();
 
     const isReload = s.phase === 'dealer_reloading';
-    document.querySelector('#panel-loading h2').textContent = isReload ? "ДОЗАРЯДКА ДРОБОВИКА" : "ЗАРЯДИТЕ ДРОБОВИК";
+    const titleEl = document.getElementById('loading-title');
+    if (titleEl) titleEl.firstChild.textContent = isReload ? "Дозарядка дробовика " : "Зарядите дробовик ";
 
     document.getElementById('load-mag-block').innerHTML = `
         <div class="mag-block-head">
@@ -1494,6 +1706,7 @@ function renderLoading(s) {
 
     const liveChunk = seq.filter(x => x === 'live').length;
     const blankChunk = seq.filter(x => x === 'blank').length;
+    const silverChunk = seq.filter(x => x === 'silver').length;
 
     document.getElementById('load-ammo-counters').innerHTML = `
         <div class="ammo-counter is-live">
@@ -1510,6 +1723,14 @@ function renderLoading(s) {
                 <div class="ammo-counter-value">${blankChunk}</div>
             </div>
         </div>
+        ${silverChunk ? `
+        <div class="ammo-counter is-silver">
+            <div class="ammo-counter-shell is-silver"><span class="brass"><span class="primer"></span></span></div>
+            <div>
+                <div class="ammo-counter-label">Серебряных</div>
+                <div class="ammo-counter-value">${silverChunk}</div>
+            </div>
+        </div>` : ''}
     `;
     updateToggleShellsBtn(s);
 }
@@ -1524,7 +1745,6 @@ function updateToggleShellsBtn(s) {
 }
 
 function renderItems(s) {
-    document.getElementById('panel-items').style.display = 'block';
     const el = document.getElementById('items-distribution');
     const dealt = s.dealt_items || {};
     el.innerHTML = s.players.filter(p => p.alive).map(p => {
@@ -1580,8 +1800,8 @@ function renderTurnMagazine(s) {
     const chamberType = seq[0];
     const queue = seq.slice(1);
 
-    const typeCls = chamberType === 'live' ? 'live' : chamberType === 'blank' ? 'blank' : 'empty';
-    const typeLbl = chamberType === 'live' ? '◉ БОЕВОЙ' : chamberType === 'blank' ? '○ ХОЛОСТОЙ' : 'ПУСТО';
+    const typeCls = chamberType === 'live' ? 'live' : chamberType === 'silver' ? 'silver' : chamberType === 'blank' ? 'blank' : 'empty';
+    const typeLbl = chamberType === 'live' ? '◉ БОЕВОЙ' : chamberType === 'silver' ? '❖ СЕРЕБРЯНЫЙ' : chamberType === 'blank' ? '○ ХОЛОСТОЙ' : 'ПУСТО';
 
     // Патроны магазина (queued) — ближайший к патроннику последним в DOM (справа).
     const queueHtml = queue.map((sh, i) => sgShellHtml(sh, 'queued', queue.length - 1 - i)).join('');
@@ -1631,11 +1851,18 @@ function renderTurnMagazine(s) {
                 <div class="ammo-counter-value">${s.blank_count}</div>
             </div>
         </div>
+        ${s.silver_count ? `
+        <div class="ammo-counter is-silver">
+            <div class="ammo-counter-shell is-silver"><span class="brass"><span class="primer"></span></span></div>
+            <div>
+                <div class="ammo-counter-label">Серебряных</div>
+                <div class="ammo-counter-value">${s.silver_count}</div>
+            </div>
+        </div>` : ''}
     `;
 }
 
 function renderTurn(s) {
-    document.getElementById('panel-turn').style.display = 'block';
     const cp = s.current_player;
     if (!cp) return;
     document.getElementById('turn-player-name').textContent = `#${cp.number} ${cp.name}`;
@@ -1739,7 +1966,6 @@ function updateAdrItems(idx, targetId) {
 }
 
 function renderGameOver(s) {
-    document.getElementById('panel-gameover').style.display = 'block';
     if (s.winner_name) {
         document.getElementById('gameover-title').textContent = 'ПОБЕДИТЕЛЬ';
         document.getElementById('gameover-winner').textContent = s.winner_name;
@@ -1759,9 +1985,13 @@ function hpPips(p) {
 }
 
 function renderSidebar(s) {
-    const el = document.getElementById('sidebar-players');
+    // Сайдбар игроков дублируется на каждом экране (класс .js-players).
+    const els = document.querySelectorAll('.js-players');
+    const plc = document.getElementById('pl-count');
+    if (plc) plc.textContent = s.players.filter(p => p.alive).length + ' в игре';
+    if (!els.length) return;
     const turnId = s.current_player ? s.current_player.id : null;
-    el.innerHTML = s.players.map(p => `
+    const html = s.players.map(p => `
         <div class="sidebar-player ${!p.alive ? 'sp-dead' : ''} ${p.id === turnId ? 'sp-turn' : ''}">
             <div class="sp-top">
                 <span class="sp-badge">${p.id === turnId ? '▶' : '#' + p.number}</span>
@@ -1776,14 +2006,18 @@ function renderSidebar(s) {
             ${p.skip_next_turn ? '<span class="sp-cuff">НАРУЧНИКИ</span>' : ''}
         </div>
     `).join('');
+    els.forEach(el => el.innerHTML = html);
 }
 
 function renderLog(log) {
-    const el = document.getElementById('event-log');
-    el.innerHTML = (log || []).slice().reverse().map(e => {
+    // Лог событий дублируется на каждом экране (класс .js-log).
+    const els = document.querySelectorAll('.js-log');
+    if (!els.length) return;
+    const html = (log || []).slice().reverse().map(e => {
         const cls = 'log-' + e.type;
         return `<div class="log-entry ${cls}">${e.message}</div>`;
     }).join('');
+    els.forEach(el => el.innerHTML = html);
 }
 
 // ── API ──
@@ -1843,9 +2077,10 @@ function playFireFx(isLive) {
 
 function shoot(targetId) {
     const seq = (gameState && gameState.shells_sequence) || [];
-    const isLive = seq[0] === 'live';
-    playFireFx(isLive);
-    fireShotgun(isLive ? 'live' : 'blank');
+    // Серебряный — тоже физический выстрел: анимируем как боевой (вспышка).
+    const isDischarge = seq[0] === 'live' || seq[0] === 'silver';
+    playFireFx(isDischarge);
+    fireShotgun(seq[0] === 'silver' ? 'silver' : (seq[0] === 'live' ? 'live' : 'blank'));
     apiPost('/api/shoot', {target_id: targetId});
 }
 function adjustHp(id, delta) { apiPost('/api/adjust_hp', {player_id: id, delta: delta}); }
