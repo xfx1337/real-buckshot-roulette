@@ -343,19 +343,11 @@ void triggerTask(void *) {
 }
 
 void updateLiveLed() {
-    if (!(cachedReady && cachedLive)) {
-        if (liveLedOn) {
-            liveLedOn = false;
-            digitalWrite(LIVE_LED_PIN, LOW);
-        }
-        return;
-    }
-
-    unsigned long now = millis();
-    if (now - lastLiveLedToggleMs >= LIVE_LED_BLINK_MS) {
-        lastLiveLedToggleMs = now;
-        liveLedOn = !liveLedOn;
-        digitalWrite(LIVE_LED_PIN, liveLedOn ? HIGH : LOW);
+    // Мигание синего диода перед боевым патроном ОТКЛЮЧЕНО: оно раскрывало
+    // игрокам тип следующего патрона (спойлер). Диод держим погашенным.
+    if (liveLedOn) {
+        liveLedOn = false;
+        digitalWrite(LIVE_LED_PIN, LOW);
     }
 }
 

@@ -16,14 +16,14 @@
         <!-- Connecting -->
         <div id="connecting" class="player-screen">
             <div class="player-lobby-msg">
-                connecting<span class="cursor-blink">_</span>
+                подключение<span class="cursor-blink">_</span>
             </div>
         </div>
 
         <!-- Lobby -->
         <div id="state-lobby" class="player-screen" style="display:none">
             <div class="player-lobby-msg">
-                waiting for game<span class="cursor-blink">_</span>
+                ожидание игры<span class="cursor-blink">_</span>
             </div>
         </div>
 
@@ -32,7 +32,7 @@
             
             <!-- MULTIPLAYER MODE -->
             <div id="mp-layout" style="display:none; width:100%; height:100%; flex-direction:column; align-items:center;">
-                <div class="turn-label" id="turn-label-mp">[Your Turn]</div>
+                <div class="turn-label" id="turn-label-mp">[ ваш ход ]</div>
                 <div class="lightning-container" id="lightning-container-mp"></div>
             </div>
 
@@ -43,13 +43,13 @@
                 
                 <div class="solo-half left-half">
                     <div class="solo-turn-label" id="solo-dealer-turn"></div>
-                    <div class="solo-label" id="solo-dealer-label">DEALER</div>
+                    <div class="solo-label" id="solo-dealer-label">ДИЛЕР</div>
                     <div class="solo-bolts" id="opponent-lightning-container"></div>
                 </div>
                 
                 <div class="solo-half right-half">
                     <div class="solo-turn-label" id="solo-player-turn"></div>
-                    <div class="solo-label" id="solo-player-label">PLAYER</div>
+                    <div class="solo-label" id="solo-player-label">ИГРОК</div>
                     <div class="solo-bolts" id="solo-lightning-container"></div>
                 </div>
             </div>
@@ -57,12 +57,12 @@
 
         <!-- Dead -->
         <div id="state-dead" class="dead-screen" style="display:none">
-            <div class="dead-text">dead</div>
+            <div class="dead-text">убит</div>
         </div>
 
         <!-- Game Over -->
         <div id="state-gameover" class="gameover-screen" style="display:none">
-            <div class="gameover-text" id="gameover-text">game over</div>
+            <div class="gameover-text" id="gameover-text">конец игры</div>
             <div class="gameover-winner" id="gameover-winner"></div>
         </div>
 
@@ -73,22 +73,22 @@
                     <!-- injected by JS -->
                 </div>
                 <div class="player-lobby-msg" id="roundover-msg" style="margin-top: 30px; opacity: 0; transition: opacity 0.5s;">
-                    waiting for dealer<span class="cursor-blink">_</span>
+                    ожидание дилера<span class="cursor-blink">_</span>
                 </div>
             </div>
         </div>
 
         <!-- Dealer Loading -->
         <div id="state-loading" class="player-screen" style="display:none">
-            <div class="shell-counts-display" id="player-shell-counts">
-                <!-- will be injected -->
+            <div class="player-lobby-msg" id="player-loading-msg">
+                дилер заряжает дробовик<span class="cursor-blink">_</span>
             </div>
         </div>
     </div>
 
     <div id="fullscreen-gate" class="fullscreen-gate">
         <div class="fullscreen-gate-inner">
-            <div class="player-lobby-msg">tap to start<span class="cursor-blink">_</span></div>
+            <div class="player-lobby-msg">нажмите чтобы начать<span class="cursor-blink">_</span></div>
         </div>
     </div>
 
@@ -166,10 +166,10 @@
         if (data.phase === 'game_over') {
             document.getElementById('state-gameover').style.display = 'flex';
             if (data.winner_name) {
-                document.getElementById('gameover-text').textContent = 'winner';
+                document.getElementById('gameover-text').textContent = 'победитель';
                 document.getElementById('gameover-winner').textContent = data.winner_name;
             } else {
-                document.getElementById('gameover-text').textContent = 'game over';
+                document.getElementById('gameover-text').textContent = 'конец игры';
                 document.getElementById('gameover-winner').textContent = '';
             }
             if (!gameOverTimeout) {
@@ -243,16 +243,17 @@
         }
 
         if (data.phase === 'dealer_loading') {
+            // Зарядка: HP и число патронов НЕ показываем (патроны видны в лотке).
             document.getElementById('state-loading').style.display = 'flex';
-            document.getElementById('player-shell-counts').innerHTML = 
-                `<span class="sc-live">${data.live_count} live</span> // <span class="sc-blank">${data.blank_count} blank</span>`;
+            document.getElementById('player-loading-msg').innerHTML =
+                `дилер заряжает дробовик<span class="cursor-blink">_</span>`;
             return;
         }
 
         if (data.phase === 'dealer_reloading') {
             document.getElementById('state-loading').style.display = 'flex';
-            document.getElementById('player-shell-counts').innerHTML = 
-                `<span style="color:var(--text-color); font-size:1.5rem">waiting for dealer...</span>`;
+            document.getElementById('player-loading-msg').innerHTML =
+                `дилер дозаряжает<span class="cursor-blink">_</span>`;
             return;
         }
 
@@ -284,12 +285,12 @@
             if (data.opponent_handcuffed) {
                 dLabel.style.color = 'var(--red)';
                 dLabel.classList.remove('active');
-                dTurn.textContent = '[ handcuffed ]';
+                dTurn.textContent = '[ в наручниках ]';
                 dTurn.style.color = 'var(--red)';
             } else if (data.is_opponent_turn) {
                 dLabel.style.color = 'var(--red)';
                 dLabel.classList.add('active');
-                dTurn.textContent = '[ dealer turn ]';
+                dTurn.textContent = '[ ход дилера ]';
                 dTurn.style.color = 'var(--red)';
             } else {
                 dLabel.style.color = 'var(--text-bright)';
@@ -303,12 +304,12 @@
             if (data.my_handcuffed) {
                 pLabel.style.color = 'var(--red)';
                 pLabel.classList.remove('active');
-                pTurn.textContent = '[ handcuffed ]';
+                pTurn.textContent = '[ в наручниках ]';
                 pTurn.style.color = 'var(--red)';
             } else if (data.is_my_turn) {
                 pLabel.style.color = 'var(--green-bright)';
                 pLabel.classList.add('active');
-                pTurn.textContent = '[ player turn ]';
+                pTurn.textContent = '[ ваш ход ]';
                 pTurn.style.color = 'var(--green-bright)';
             } else {
                 pLabel.style.color = 'var(--text-bright)';
@@ -326,12 +327,12 @@
             // Player Turn label
             const turnLabel = document.getElementById('turn-label-mp');
             if (data.my_handcuffed) {
-                turnLabel.textContent = '[ handcuffed ]';
+                turnLabel.textContent = '[ в наручниках ]';
                 turnLabel.style.color = 'var(--red)';
                 turnLabel.classList.add('active');
                 turnLabel.style.animation = 'none';
             } else if (data.is_my_turn) {
-                turnLabel.textContent = '[ this player turn ]';
+                turnLabel.textContent = '[ ваш ход ]';
                 turnLabel.style.color = 'var(--green-bright)';
                 turnLabel.classList.add('active');
                 turnLabel.style.animation = ''; // Restore blink

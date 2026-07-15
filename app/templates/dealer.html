@@ -739,6 +739,8 @@ input[type="checkbox"]{ accent-color:var(--green); cursor:crosshair; }
 .loading-actions .btn-dealer{ width:auto; flex:1 1 200px; }
 .btn-toggle-shells{ flex:0 0 auto; }
 .btn-toggle-shells.shells-hidden{ color:var(--red); border-color:#522020; }
+.load-ammo-warning{ margin:10px 0; padding:10px 12px; border:1px solid #a83232; background:#2a1010;
+   color:#ffb; font-weight:bold; border-radius:4px; line-height:1.35; }
 .check-box{ width:12px; height:12px; border:1px solid currentColor; display:inline-block; position:relative; }
 .check-box.on{ background:var(--green); border-color:var(--green); box-shadow:0 0 8px rgba(63,239,106,.5); }
 
@@ -1127,9 +1129,9 @@ body{ cursor:default; }
                         <p class="hint" style="color:var(--red);font-weight:bold;margin:0 0 12px;">Заряжайте патроны в магазин в этом порядке — первый в списке досылается первым.</p>
                         <div class="mag-block" id="load-mag-block"></div>
                         <div class="ammo-counters" id="load-ammo-counters"></div>
+                        <div id="load-ammo-warning" class="load-ammo-warning" style="display:none;"></div>
                         <div class="rd-load-actions">
                             <button class="btn btn-dealer" onclick="confirmShells()">ЗАРЯЖЕНО</button>
-                            <button class="btn btn-toggle-shells" id="btn-toggle-shells" onclick="toggleShells()"></button>
                         </div>
                     </div>
                 </div>
@@ -1745,7 +1747,22 @@ function renderLoading(s) {
             </div>
         </div>` : ''}
     `;
-    updateToggleShellsBtn(s);
+
+    // Предупреждение: капсюлей в реквизит-револьвере может не хватить на раунд.
+    // Каждый боевой И серебряный выстрел тратит один капсюль. Если заряжённых
+    // капсюлей меньше, чем боевых+серебряных в магазине — оператор должен
+    // дозарядить револьвер заранее.
+    const warnEl = document.getElementById('load-ammo-warning');
+    if (warnEl) {
+        const needCaps = liveChunk + silverChunk;
+        const haveCaps = (typeof s.revolver_ammo === 'number') ? s.revolver_ammo : (s.revolver_capacity || 0);
+        if (needCaps > haveCaps) {
+            warnEl.style.display = '';
+            warnEl.innerHTML = `⚠ Капсюлей может не хватить: в магазине ${needCaps} «стреляющих» патрон(ов), а в револьвере заряжено ${haveCaps} капсюл(ей). Дозарядите револьвер.`;
+        } else {
+            warnEl.style.display = 'none';
+        }
+    }
 }
 
 function updateToggleShellsBtn(s) {
@@ -2331,7 +2348,7 @@ function renderAudioConfig(events) {
                 <span class="aud-label" title="${esc(e.key)}">${esc(e.label)}</span>
                 ${e.loop ? '<span class="aud-loop-tag">loop</span>' : ''}
                 <div class="aud-vol" title="Громкость события">
-                    <input type="range" min="0" max="100" value="${volVal}" oninput="changeEventVolume('${e.key}', this.value)" onchange="saveEventVolume('${e.key}', this.value)">
+                    <input type="range" min="0" max="200" value="${volVal}" oninput="changeEventVolume('${e.key}', this.value)" onchange="saveEventVolume('${e.key}', this.value)">
                     <span>${volVal}%</span>
                 </div>
                 <span class="aud-file ${fileCls}" title="${esc(fileTxt)}">${esc(fileTxt)}</span>

@@ -22,10 +22,12 @@
 
   var LOOP_BY_PHASE = {
     lobby: 'ambient_lobby',
-    round_start: 'ambient_loading',
-    dealer_loading: 'ambient_loading',
-    dealer_reloading: 'ambient_loading',
-    dealer_items: 'ambient_loading',
+    // Зарядка/дозарядка/раздача = «дилер заряжает дробовик» и вход в комнату —
+    // играет музыка главного меню (bgm_menu).
+    round_start: 'bgm_menu',
+    dealer_loading: 'bgm_menu',
+    dealer_reloading: 'bgm_menu',
+    dealer_items: 'bgm_menu',
     round_over: 'ambient_between_rounds',
     game_over: 'bgm_death',
     // player_turn выбирается динамически (pending → ambient_pending, иначе bgm_main)
@@ -90,12 +92,41 @@
     }
   }
 
+  // WebAudio-контекст для усиления >1.0 (HTMLAudio.volume режется на 1.0).
+  var audioCtx = null;
+  function getCtx() {
+    if (audioCtx) return audioCtx;
+    var AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return null;
+    try { audioCtx = new AC(); } catch (e) { audioCtx = null; }
+    return audioCtx;
+  }
+
   function play(key) {
     if (!enabled(key)) { log('skip (disabled):', key); return; }
     try {
-      var a = new Audio(src(key));
       var vol = (engine.cfg[key] && engine.cfg[key].volume !== undefined) ? engine.cfg[key].volume : 1.0;
-      a.volume = engine.masterVolume * vol;
+      var target = engine.masterVolume * vol;
+      var a = new Audio(src(key));
+      if (target > 1.0) {
+        // Усиление через WebAudio gain (например, «звук из рая» +40%).
+        var ctx = getCtx();
+        if (ctx) {
+          if (ctx.state === 'suspended') { try { ctx.resume(); } catch (e) {} }
+          try {
+            var srcNode = ctx.createMediaElementSource(a);
+            var gain = ctx.createGain();
+            gain.gain.value = target;
+            srcNode.connect(gain); gain.connect(ctx.destination);
+            log('play(gain)', key, 'gain', target);
+            attempt(a, key);
+            return;
+          } catch (e) { log('gain path failed, fallback', key, e); }
+        }
+        a.volume = 1.0;   // фолбэк: без WebAudio выше 1.0 не поднять
+      } else {
+        a.volume = target;
+      }
       log('play', key, 'volume', a.volume);
       attempt(a, key);
     } catch (e) { log('play throw', key, e); }
@@ -128,6 +159,8 @@
     if (t === 'shot') {
       if (m.indexOf('[КУРОК]') === 0) return 'trigger_pull';
       if (m.indexOf('[БОЕВОЙ]') === 0) return m.indexOf('(-2 HP)') !== -1 ? 'shot_live_saw' : 'shot_live';
+      // Серебряный — тоже физический выстрел (колонка играет тот же выстрел).
+      if (m.indexOf('[СЕРЕБРЯНЫЙ]') === 0) return 'shot_live';
       if (m.indexOf('[ХОЛОСТОЙ]') === 0) return 'shot_blank';
       if (m.indexOf('испорченного лекарства') !== -1) return 'item_medicine_death';
       if (m.indexOf('выбыл') !== -1) return 'player_dead';
@@ -192,6 +225,7 @@
       if (phase === 'dealer_loading') play('dealer_loading');
       if (phase === 'dealer_reloading') play('dealer_reloading');
       if (phase === 'dealer_items') play('dealer_items');
+      if (phase === 'round_over') play('heaven');
       if (phase === 'player_turn') play('turn_start');
     } else if (phase === 'player_turn' && curPlayerId && curPlayerId !== engine.prevPlayerId) {
       play('turn_start');
@@ -211,6 +245,7 @@
 
   // ── Разблокировка автоплея ──
   function onGesture() {
+    if (audioCtx && audioCtx.state === 'suspended') { try { audioCtx.resume(); } catch (e) {} }
     if (engine.blocked || !engine.loopAudio) {
       // Перезапустить актуальный loop и снять баннер.
       var want = engine.loopKey;
