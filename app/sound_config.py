@@ -57,14 +57,15 @@ SOUND_EVENTS = [
     {"key": "dealer_items",      "category": "Фазы",     "label": "Раздача предметов",         "default": "audio/open briefcase.ogg", "loop": False},
     {"key": "turn_start",        "category": "Фазы",     "label": "Начало хода игрока",        "default": "multiplayer/audio/main audio/mp_display_turn order bootup1.ogg", "loop": False},
     {"key": "round_win",         "category": "Фазы",     "label": "Раунд выигран",            "default": "audio/winner.ogg", "loop": False},
+    {"key": "heaven",            "category": "Фазы",     "label": "Завершение раунда (звук «из рая»)", "default": "audio/god.ogg", "loop": False, "default_volume": 1.4},
     {"key": "round_draw",        "category": "Фазы",     "label": "Ничья в раунде",           "default": "audio/round indicator shut down.ogg", "loop": False},
     {"key": "game_over",         "category": "Фазы",     "label": "Победитель / конец игры",   "default": "audio/playtest win.ogg", "loop": False},
 
     # B. Выстрелы
     {"key": "trigger_pull",      "category": "Выстрелы", "label": "Курок нажат (ждём цель)",   "default": "audio/gun foley1.ogg", "loop": False},
-    {"key": "shot_live",         "category": "Выстрелы", "label": "БОЕВОЙ −1 HP",             "default": "audio/temp gunshot_live.wav", "loop": False},
+    {"key": "shot_live",         "category": "Выстрелы", "label": "БОЕВОЙ −1 HP",             "default": "audio/temp gunshot_live.wav", "loop": False, "default_enabled": False},
     {"key": "shot_live_saw",     "category": "Выстрелы", "label": "БОЕВОЙ x2 (пила) −2 HP",   "default": "multiplayer/audio/main audio/mp_gun fire5.ogg", "loop": False},
-    {"key": "shot_blank",        "category": "Выстрелы", "label": "ХОЛОСТОЙ",                 "default": "audio/temp gunshot_blank.wav", "loop": False},
+    {"key": "shot_blank",        "category": "Выстрелы", "label": "ХОЛОСТОЙ",                 "default": "audio/temp gunshot_blank.wav", "loop": False, "default_enabled": False},
     {"key": "blank_self_extra",  "category": "Выстрелы", "label": "Холостой в себя (доп. ход)", "default": "multiplayer/audio/main audio/mp_dry fire1.wav", "loop": False},
     {"key": "player_dead",       "category": "Выстрелы", "label": "Игрок выбыл",              "default": "audio/splatter1.ogg", "loop": False},
     {"key": "new_magazine",      "category": "Выстрелы", "label": "Новый магазин",            "default": "audio/shell latch1.ogg", "loop": False},
@@ -98,7 +99,8 @@ SOUND_EVENTS = [
     {"key": "ambient_loading",       "category": "Ambient", "label": "Зарядка/дозарядка (фон)", "default": "audio/ambience_fluorescent light.ogg", "loop": True},
 
     # G. Фоновая музыка (loop)
-    {"key": "bgm_main",      "category": "Музыка", "label": "Главная тема (фон)",         "default": "audio/music/music main_techno techno.ogg", "loop": True},
+    {"key": "bgm_menu",      "category": "Музыка", "label": "Меню / вход в комнату (зарядка)", "default": "audio/music/music main_room.ogg", "loop": True},
+    {"key": "bgm_main",      "category": "Музыка", "label": "Главная тема (фон)",         "default": "audio/music/music main_techno techno.ogg", "loop": True, "default_volume": 0.3},
     {"key": "bgm_main_loop", "category": "Музыка", "label": "Главная тема — продолжение", "default": "audio/music/music main second loop_techno techno.ogg", "loop": True},
     {"key": "bgm_death",     "category": "Музыка", "label": "Тема смерти/поражения",       "default": "audio/music_true death vol1.ogg", "loop": True},
 ]
@@ -156,9 +158,17 @@ def resolve_file(key: str) -> Path | None:
     return p if p.exists() else None
 
 
+def _default_enabled(key: str) -> bool:
+    return _EVENTS_BY_KEY.get(key, {}).get("default_enabled", True)
+
+
+def _default_volume(key: str) -> float:
+    return _EVENTS_BY_KEY.get(key, {}).get("default_volume", 1.0)
+
+
 def is_enabled(key: str) -> bool:
     ov = _load_overrides().get(key, {})
-    return ov.get("enabled", True)
+    return ov.get("enabled", _default_enabled(key))
 
 
 def get_config() -> list[dict]:
@@ -176,8 +186,8 @@ def get_config() -> list[dict]:
             "category": ev["category"],
             "label": ev["label"],
             "loop": ev["loop"],
-            "enabled": ov.get("enabled", True),
-            "volume": ov.get("volume", 1.0),
+            "enabled": ov.get("enabled", _default_enabled(ev["key"])),
+            "volume": ov.get("volume", _default_volume(ev["key"])),
             "source": "custom" if custom else "default",
             "filename": custom if custom else Path(ev["default"]).name,
             "default_name": Path(ev["default"]).name,
@@ -188,7 +198,7 @@ def get_config() -> list[dict]:
 
 def get_volume(key: str) -> float:
     ov = _load_overrides().get(key, {})
-    return ov.get("volume", 1.0)
+    return ov.get("volume", _default_volume(key))
 
 
 def set_enabled(key: str, enabled: bool) -> None:
@@ -206,7 +216,9 @@ def set_volume(key: str, volume: float) -> None:
         raise KeyError(key)
     data = _load_overrides()
     entry = data.get(key, {})
-    entry["volume"] = max(0.0, min(1.0, float(volume)))
+    # Потолок 2.0 (а не 1.0): звук «из рая» и др. могут быть громче базовой
+    # единицы — усиление >1 обрабатывается через WebAudio gain на клиенте.
+    entry["volume"] = max(0.0, min(2.0, float(volume)))
     data[key] = entry
     _save_overrides(data)
 

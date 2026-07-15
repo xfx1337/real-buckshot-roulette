@@ -25,6 +25,23 @@ class GamePhase(str, Enum):
 class ShellType(str, Enum):
     LIVE = "live"       # Red / боевой
     BLANK = "blank"     # Blue / холостой
+    SILVER = "silver"   # Серебряный / лечит цель +1 HP (редкий, 5%)
+
+
+# Лимиты патронов в одной зарядке: максимум 4 боевых и 4 холостых.
+MAX_LIVE_SHELLS = 4
+MAX_BLANK_SHELLS = 4
+# Шанс, что в зарядку добавится один серебряный патрон (лечит цель +1 HP).
+SILVER_SHELL_CHANCE = 0.05
+
+
+def _apply_invert(shell: "ShellType") -> "ShellType":
+    """Инвертор меняет боевой↔холостой. Серебряный не инвертируется."""
+    if shell == ShellType.LIVE:
+        return ShellType.BLANK
+    if shell == ShellType.BLANK:
+        return ShellType.LIVE
+    return shell
 
 
 class ItemType(str, Enum):
@@ -361,10 +378,14 @@ class GameState:
         live_count = max(live_count, 1)
         blank_count = max(blank_count, 1)
 
-        total = live_count + blank_count
+        # Серебряный патрон (лечит цель +1 HP) — редкий, шанс 5% на зарядку.
+        silver_count = 1 if random.random() < SILVER_SHELL_CHANCE else 0
+
+        total = live_count + blank_count + silver_count
         self.shells = (
             [ShellType.LIVE] * live_count +
-            [ShellType.BLANK] * blank_count
+            [ShellType.BLANK] * blank_count +
+            [ShellType.SILVER] * silver_count
         )
         random.shuffle(self.shells)
         self.shells_display = list(self.shells)
@@ -375,8 +396,9 @@ class GameState:
         else:
             self.physical_loaded_count = len(self.shells)
 
+        silver_txt = ", 1 серебряный" if silver_count else ""
         self._log(
-            f"Дробовик заряжен: {live_count} боевых, {blank_count} холостых (всего {total})",
+            f"Дробовик заряжен: {live_count} боевых, {blank_count} холостых{silver_txt} (всего {total})",
             "round"
         )
         self.phase = GamePhase.DEALER_LOADING
@@ -497,8 +519,9 @@ class GameState:
             return {"ready": False, "live": False, "pending": self.pending_shot}
         effective = self.shells[0]
         if self.inverted:
-            effective = ShellType.BLANK if effective == ShellType.LIVE else ShellType.LIVE
-        return {"ready": True, "live": effective == ShellType.LIVE, "pending": self.pending_shot}
+            effective = _apply_invert(effective)
+        # Соленоид бьёт и на боевой, и на серебряный (оба — физический выстрел).
+        return {"ready": True, "live": effective in (ShellType.LIVE, ShellType.SILVER), "pending": self.pending_shot}
 
     def esp_shoot(self) -> dict:
         """
@@ -513,17 +536,17 @@ class GameState:
 
         effective = self.shells[0]
         if self.inverted:
-            effective = ShellType.BLANK if effective == ShellType.LIVE else ShellType.LIVE
+            effective = _apply_invert(effective)
 
         self.pending_shot = True
 
-        label = "БОЕВОЙ" if effective == ShellType.LIVE else "ХОЛОСТОЙ"
+        label = {ShellType.LIVE: "БОЕВОЙ", ShellType.SILVER: "СЕРЕБРЯНЫЙ"}.get(effective, "ХОЛОСТОЙ")
         self._log(f"[КУРОК] Физический выстрел ({label}) — выберите, в кого попали", "shot")
 
         return {
             "ok": True,
             "fired": True,
-            "live": effective == ShellType.LIVE,
+            "live": effective in (ShellType.LIVE, ShellType.SILVER),
             "shells_remaining": len(self.shells),
         }
 
@@ -639,9 +662,9 @@ class GameState:
         shell = self.shells.pop(0)
         self.physical_loaded_count = max(0, self.physical_loaded_count - 1)
 
-        # Apply inverter
+        # Apply inverter (серебряный не инвертируется)
         if self.inverted:
-            shell = ShellType.BLANK if shell == ShellType.LIVE else ShellType.LIVE
+            shell = _apply_invert(shell)
             self.inverted = False
 
         is_self_shot = (shooter.id == target_id)
@@ -656,7 +679,25 @@ class GameState:
             "extra_turn": False,
         }
 
-        if shell == ShellType.LIVE:
+        if shell == ShellType.SILVER:
+            # Серебряный патрон лечит цель на +1 HP (физический выстрел — курок,
+            # соленоид и расход капсюля как у боевого, но урона нет).
+            self.revolver_ammo = max(0, self.revolver_ammo - 1)
+            if self.revolver_ammo == 0:
+                self._log("[РЕВОЛЬВЕР] Капсюли кончились — перезарядите револьвер", "shot")
+
+            old_hp = target.hp
+            target.hp = min(target.hp + 1, target.max_hp)
+            healed = target.hp - old_hp
+            result["target_hp_after"] = target.hp
+            self._log(
+                f"[СЕРЕБРЯНЫЙ] #{shooter.number} [{shooter.name}] -> #{target.number} [{target.name}] (+{healed} HP)",
+                "shot"
+            )
+            self.saw_active = False
+            self._advance_turn()
+            self._check_shells_state()
+        elif shell == ShellType.LIVE:
             # Боевой выстрел тратит один капсюль в игрушечном револьвере.
             self.revolver_ammo = max(0, self.revolver_ammo - 1)
             if self.revolver_ammo == 0:
@@ -714,9 +755,10 @@ class GameState:
         ejected = self.shells.pop(0)
         self.physical_loaded_count = max(0, self.physical_loaded_count - 1)
         if self.inverted:
-            ejected = ShellType.BLANK if ejected == ShellType.LIVE else ShellType.LIVE
+            ejected = _apply_invert(ejected)
             self.inverted = False
-        self._log(f">> #{p.number} использовал пиво. Выброшен: {'БОЕВОЙ' if ejected == ShellType.LIVE else 'ХОЛОСТОЙ'}", "item")
+        ejected_lbl = {ShellType.LIVE: "БОЕВОЙ", ShellType.SILVER: "СЕРЕБРЯНЫЙ"}.get(ejected, "ХОЛОСТОЙ")
+        self._log(f">> #{p.number} использовал пиво. Выброшен: {ejected_lbl}", "item")
         self._check_shells_state()
         return {"ejected": ejected.value}
 
@@ -742,8 +784,8 @@ class GameState:
             raise ValueError("Нет патронов")
         current = self.shells[0]
         if self.inverted:
-            current = ShellType.BLANK if current == ShellType.LIVE else ShellType.LIVE
-        self.last_magnify_result = f"{'БОЕВОЙ' if current == ShellType.LIVE else 'ХОЛОСТОЙ'}"
+            current = _apply_invert(current)
+        self.last_magnify_result = {ShellType.LIVE: "БОЕВОЙ", ShellType.SILVER: "СЕРЕБРЯНЫЙ"}.get(current, "ХОЛОСТОЙ")
         self._log(f">> #{p.number} использовал лупу (результат виден дилеру)", "item")
         return {"shell": current.value, "display": self.last_magnify_result}
 
@@ -788,7 +830,7 @@ class GameState:
         # Reveal a random shell position
         idx = random.randint(0, len(self.shells) - 1)
         shell = self.shells[idx]
-        label = "БОЕВОЙ" if shell == ShellType.LIVE else "ХОЛОСТОЙ"
+        label = {ShellType.LIVE: "БОЕВОЙ", ShellType.SILVER: "СЕРЕБРЯНЫЙ"}.get(shell, "ХОЛОСТОЙ")
         self.last_burner_result = f"Патрон #{idx + 1} из {len(self.shells)}: {label}"
         self._log(f">> #{p.number} использовал телефон (подсказка у дилера)", "item")
         return {"position": idx + 1, "total": len(self.shells), "shell": shell.value, "display": self.last_burner_result}
@@ -930,8 +972,10 @@ class GameState:
             # Live/blank counts (total)
             live_c = sum(1 for s in self.shells if s == ShellType.LIVE)
             blank_c = sum(1 for s in self.shells if s == ShellType.BLANK)
+            silver_c = sum(1 for s in self.shells if s == ShellType.SILVER)
             data["live_count"] = live_c
             data["blank_count"] = blank_c
+            data["silver_count"] = silver_c
             data["show_shells_to_players"] = self.show_shells_to_players
             data["physical_magazine_limit"] = self.config.physical_magazine_limit
             data["item_limits_global"] = self.config.item_limits_global
@@ -960,14 +1004,12 @@ class GameState:
         current = self.get_current_player()
         is_my_turn = current and current.id == player_id
 
-        # When shells are hidden, show HP screen instead of shell counts during loading
-        effective_phase = self.phase.value
-        if not self.show_shells_to_players and self.phase == GamePhase.DEALER_LOADING:
-            effective_phase = "player_turn"
-
+        # Во время зарядки/дозарядки телефон игрока показывает нейтральный экран
+        # «дилер заряжает дробовик» — без HP и без числа патронов (патроны видны
+        # физически в лотке). HP не показываем, пока идёт перезарядка.
         view = {
             "game_id": self.game_id,
-            "phase": effective_phase,
+            "phase": self.phase.value,
             "game_mode": self.config.game_mode,
             "my_number": p.number,
             "my_name": p.name,
