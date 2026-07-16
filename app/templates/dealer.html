@@ -1244,6 +1244,10 @@ body{ cursor:default; }
                     <input type="range" id="aud-volume" min="0" max="100" value="80" oninput="onVolumeChange(this.value)">
                     <span id="aud-volume-val" style="flex:0 0 42px; text-align:right; color:var(--green,#3fef6a);">80%</span>
                 </div>
+                <div class="scfg-row" style="margin-bottom:14px; align-items:center; justify-content:flex-start; gap:8px;">
+                    <input type="checkbox" id="aud-ducking" onchange="onDuckingChange(this.checked)" style="width:16px; height:16px; margin:0; cursor:pointer;">
+                    <label for="aud-ducking" style="cursor:pointer; user-select:none; margin:0; font-size:13px;">Приглушать музыку при выстреле</label>
+                </div>
                 <div id="audio-config-body"><p class="hint">Загрузка…</p></div>
             </div>
             <div class="scfg-foot">
@@ -2308,7 +2312,13 @@ async function saveServerConfig(btn) {
 // ── Модалка «Аудио» (озвучка) ──
 function openAudioConfig() {
     document.getElementById('audio-config-modal').style.display = 'flex';
-    if (window.SoundEngine) { SoundEngine.play('ui_settings_open'); document.getElementById('aud-volume').value = Math.round(SoundEngine.getVolume()*100); document.getElementById('aud-volume-val').textContent = document.getElementById('aud-volume').value + '%'; }
+    if (window.SoundEngine) {
+        SoundEngine.play('ui_settings_open');
+        document.getElementById('aud-volume').value = Math.round(SoundEngine.getVolume()*100);
+        document.getElementById('aud-volume-val').textContent = document.getElementById('aud-volume').value + '%';
+        const checkbox = document.getElementById('aud-ducking');
+        if (checkbox) checkbox.checked = SoundEngine.isDuckingEnabled();
+    }
     loadAudioConfig();
 }
 function closeAudioConfig() {
@@ -2318,6 +2328,9 @@ function closeAudioConfig() {
 function onVolumeChange(v) {
     document.getElementById('aud-volume-val').textContent = v + '%';
     if (window.SoundEngine) SoundEngine.setVolume(parseInt(v)/100);
+}
+function onDuckingChange(checked) {
+    if (window.SoundEngine) SoundEngine.setDucking(checked);
 }
 
 async function loadAudioConfig() {
@@ -2372,9 +2385,7 @@ function changeEventVolume(key, val) {
         if (window.SoundEngine._engine.cfg[key]) {
             window.SoundEngine._engine.cfg[key].volume = parseInt(val) / 100;
         }
-        if (window.SoundEngine._engine.loopKey === key && window.SoundEngine._engine.loopAudio) {
-            window.SoundEngine._engine.loopAudio.volume = window.SoundEngine.getVolume() * 0.55 * (parseInt(val) / 100);
-        }
+        window.SoundEngine.updateLoopVolume();
     }
 }
 
