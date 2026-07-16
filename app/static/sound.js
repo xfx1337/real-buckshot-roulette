@@ -38,6 +38,8 @@
     ready: false,
     blocked: false,      // браузер отказал в автоплее — ждём жест
     masterVolume: 0.8,
+    duckingEnabled: true,
+    ducked: false,
     initialized: false,  // получили хотя бы один снапшот
     prevPhase: null,
     prevPlayerId: null,
@@ -52,6 +54,8 @@
 
   var savedVol = parseFloat(localStorage.getItem('bsr_sound_volume'));
   if (!isNaN(savedVol)) engine.masterVolume = savedVol;
+  var savedDucking = localStorage.getItem('bsr_sound_ducking');
+  if (savedDucking !== null) engine.duckingEnabled = savedDucking !== 'false';
 
   async function loadConfig() {
     try {
@@ -104,6 +108,9 @@
 
   function play(key) {
     if (!enabled(key)) { log('skip (disabled):', key); return; }
+    if (key === 'shot_live' || key === 'shot_live_saw' || key === 'shot_blank') {
+      triggerDucking();
+    }
     try {
       var vol = (engine.cfg[key] && engine.cfg[key].volume !== undefined) ? engine.cfg[key].volume : 1.0;
       var target = engine.masterVolume * vol;
@@ -132,15 +139,36 @@
     } catch (e) { log('play throw', key, e); }
   }
 
+  function updateLoopVolume() {
+    if (!engine.loopAudio) return;
+    var key = engine.loopKey;
+    var vol = (engine.cfg[key] && engine.cfg[key].volume !== undefined) ? engine.cfg[key].volume : 1.0;
+    var base = engine.masterVolume * 0.55 * vol;
+    engine.loopAudio.volume = engine.ducked ? base * 0.1 : base;
+  }
+
+  var duckTimeout = null;
+  function triggerDucking() {
+    if (!engine.duckingEnabled || !engine.loopAudio) return;
+    if (duckTimeout) { clearTimeout(duckTimeout); }
+    engine.ducked = true;
+    updateLoopVolume();
+    log('ducking loop volume');
+    duckTimeout = setTimeout(function () {
+      engine.ducked = false;
+      updateLoopVolume();
+      log('restored loop volume');
+      duckTimeout = null;
+    }, 2000);
+  }
+
   function setLoop(key) {
     if (key === engine.loopKey && engine.loopAudio) {
       if (!enabled(key)) {
         try { engine.loopAudio.pause(); } catch (e) {}
         engine.loopAudio = null;
       } else {
-        var vol = (engine.cfg[key] && engine.cfg[key].volume !== undefined) ? engine.cfg[key].volume : 1.0;
-        engine.loopAudio.volume = engine.masterVolume * 0.55 * vol;
-        log('loop volume updated', key, 'volume', engine.loopAudio.volume);
+        updateLoopVolume();
       }
       return;
     }
@@ -150,12 +178,11 @@
     try {
       var a = new Audio(src(key));
       a.loop = true;
-      var vol = (engine.cfg[key] && engine.cfg[key].volume !== undefined) ? engine.cfg[key].volume : 1.0;
-      a.volume = engine.masterVolume * 0.55 * vol;
+      engine.loopAudio = a;
+      updateLoopVolume();
       log('loop', key, 'volume', a.volume);
       attempt(a, key);
-      engine.loopAudio = a;
-    } catch (e) { log('loop throw', key, e); }
+    } catch (e) { log('loop throw', key, e); engine.loopAudio = null; }
   }
 
   function loopForState(s) {
@@ -340,13 +367,15 @@
     setVolume: function (v) {
       engine.masterVolume = Math.max(0, Math.min(1, v));
       localStorage.setItem('bsr_sound_volume', String(engine.masterVolume));
-      if (engine.loopAudio) {
-        var key = engine.loopKey;
-        var vol = (engine.cfg[key] && engine.cfg[key].volume !== undefined) ? engine.cfg[key].volume : 1.0;
-        engine.loopAudio.volume = engine.masterVolume * 0.55 * vol;
-      }
+      updateLoopVolume();
     },
     getVolume: function () { return engine.masterVolume; },
+    setDucking: function (enabled) {
+      engine.duckingEnabled = !!enabled;
+      localStorage.setItem('bsr_sound_ducking', String(engine.duckingEnabled));
+    },
+    isDuckingEnabled: function () { return engine.duckingEnabled; },
+    updateLoopVolume: updateLoopVolume,
     isEnabled: enabled,
     test: function () { play('ui_click'); },   // ручная проверка из консоли
     _engine: engine,
