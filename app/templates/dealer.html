@@ -2427,7 +2427,7 @@ async function uploadAudio(key, input) {
         const r = await fetch('/api/audio/upload', { method: 'POST', body: fd });
         if (!r.ok) { const e = await r.json().catch(()=>({detail:'ошибка'})); throw new Error(e.detail || ('HTTP '+r.status)); }
         audioMsg('✓ Загружено', true);
-        if (window.SoundEngine) await SoundEngine.reload();
+        if (window.SoundEngine) await SoundEngine.reload(true);
         loadAudioConfig();
     } catch (e) { audioMsg('✗ ' + e.message, false); }
     input.value = '';
@@ -2436,7 +2436,7 @@ async function uploadAudio(key, input) {
 async function resetAudio(key) {
     await apiPost('/api/audio/reset', { key });
     audioMsg('✓ Сброшено на стандартный', true);
-    if (window.SoundEngine) await SoundEngine.reload();
+    if (window.SoundEngine) await SoundEngine.reload(true);
     loadAudioConfig();
 }
 

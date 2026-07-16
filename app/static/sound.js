@@ -133,7 +133,17 @@
   }
 
   function setLoop(key) {
-    if (key === engine.loopKey && engine.loopAudio) return;
+    if (key === engine.loopKey && engine.loopAudio) {
+      if (!enabled(key)) {
+        try { engine.loopAudio.pause(); } catch (e) {}
+        engine.loopAudio = null;
+      } else {
+        var vol = (engine.cfg[key] && engine.cfg[key].volume !== undefined) ? engine.cfg[key].volume : 1.0;
+        engine.loopAudio.volume = engine.masterVolume * 0.55 * vol;
+        log('loop volume updated', key, 'volume', engine.loopAudio.volume);
+      }
+      return;
+    }
     engine.loopKey = key;
     if (engine.loopAudio) { try { engine.loopAudio.pause(); } catch (e) {} engine.loopAudio = null; }
     if (!key || !enabled(key)) return;
@@ -154,14 +164,50 @@
     return LOOP_BY_PHASE[s.phase] || null;
   }
 
-  function classify(entry) {
+  function classify(entry, logList, entryIdx, s) {
     var m = entry.message || '', t = entry.type || '';
     if (t === 'shot') {
-      if (m.indexOf('[КУРОК]') === 0) return 'trigger_pull';
-      if (m.indexOf('[БОЕВОЙ]') === 0) return m.indexOf('(-2 HP)') !== -1 ? 'shot_live_saw' : 'shot_live';
-      // Серебряный — тоже физический выстрел (колонка играет тот же выстрел).
-      if (m.indexOf('[СЕРЕБРЯНЫЙ]') === 0) return 'shot_live';
-      if (m.indexOf('[ХОЛОСТОЙ]') === 0) return 'shot_blank';
+      if (m.indexOf('[КУРОК]') === 0) {
+        // Физический выстрел: играем звук выстрела СРАЗУ
+        var isSaw = s && s.saw_active;
+        if (m.indexOf('(БОЕВОЙ)') !== -1 || m.indexOf('(СЕРЕБРЯНЫЙ)') !== -1) {
+          return isSaw ? 'shot_live_saw' : 'shot_live';
+        }
+        if (m.indexOf('(ХОЛОСТОЙ)') !== -1) {
+          return 'shot_blank';
+        }
+        return 'trigger_pull'; // Фолбэк, если не распознали тип
+      }
+      
+      if (m.indexOf('[БОЕВОЙ]') === 0 || m.indexOf('[СЕРЕБРЯНЫЙ]') === 0 || m.indexOf('[ХОЛОСТОЙ]') === 0) {
+        // Проверяем, не был ли этот выстрел уже озвучен на этапе [КУРОК]
+        var wasPhysical = false;
+        if (logList && entryIdx > 0) {
+          for (var i = entryIdx - 1; i >= 0; i--) {
+            var prevMsg = logList[i].message || '';
+            var prevType = logList[i].type || '';
+            if (prevType === 'shot') {
+              if (prevMsg.indexOf('[КУРОК]') === 0) {
+                wasPhysical = true;
+                break;
+              }
+              if (prevMsg.indexOf('[БОЕВОЙ]') === 0 || prevMsg.indexOf('[СЕРЕБРЯНЫЙ]') === 0 || prevMsg.indexOf('[ХОЛОСТОЙ]') === 0) {
+                // Встретили предыдущий исход выстрела раньше [КУРОК] — значит, этот выстрел ручной/дилерский
+                break;
+              }
+            }
+          }
+        }
+        if (wasPhysical) {
+          // Уже проиграли звук выстрела на [КУРОК], пропускаем дублирование
+          return null;
+        }
+        
+        // Для ручных/дилерских выстрелов играем звук как обычно
+        if (m.indexOf('[БОЕВОЙ]') === 0) return m.indexOf('(-2 HP)') !== -1 ? 'shot_live_saw' : 'shot_live';
+        if (m.indexOf('[СЕРЕБРЯНЫЙ]') === 0) return 'shot_live';
+        if (m.indexOf('[ХОЛОСТОЙ]') === 0) return 'shot_blank';
+      }
       if (m.indexOf('испорченного лекарства') !== -1) return 'item_medicine_death';
       if (m.indexOf('выбыл') !== -1) return 'player_dead';
       return null;
@@ -216,7 +262,11 @@
 
     var fresh = newEntries(engine.prevLog, s.log || []);
     if (fresh.length) log('new log entries:', fresh.length);
-    fresh.forEach(function (e) { var k = classify(e); if (k) play(k); });
+    fresh.forEach(function (e) {
+      var idx = s.log ? s.log.indexOf(e) : -1;
+      var k = classify(e, s.log || [], idx, s);
+      if (k) play(k);
+    });
 
     if (phase !== engine.prevPhase) {
       log('phase', engine.prevPhase, '->', phase);
@@ -276,7 +326,17 @@
   window.SoundEngine = {
     onState: onState,
     play: play,
-    reload: async function () { engine.ver++; await loadConfig(); var k = engine.loopKey; engine.loopKey = null; setLoop(k); },
+    reload: async function (forceRestartLoop) {
+      if (forceRestartLoop) {
+        engine.ver++;
+      }
+      await loadConfig();
+      var k = engine.loopKey;
+      if (forceRestartLoop) {
+        engine.loopKey = null;
+      }
+      setLoop(k);
+    },
     setVolume: function (v) {
       engine.masterVolume = Math.max(0, Math.min(1, v));
       localStorage.setItem('bsr_sound_volume', String(engine.masterVolume));
