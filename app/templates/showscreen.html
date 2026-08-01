@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Showscreen</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link rel="stylesheet" href="/static/style.css">
+    <style>
+        .showscreen-container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            text-align: center;
+            padding: 20px;
+            box-sizing: border-box;
+        }
+        .hidden { display: none !important; }
+        .tap-btn {
+            background: none;
+            border: 2px solid var(--green);
+            color: var(--green);
+            font-family: 'Share Tech Mono', monospace;
+            font-size: 24px;
+            padding: 20px 40px;
+            cursor: pointer;
+            text-transform: uppercase;
+            box-shadow: 0 0 10px var(--green-glow);
+            transition: all 0.3s ease;
+        }
+        .tap-btn:active {
+            background: var(--green);
+            color: var(--bg-color);
+        }
+        .msg-display {
+            font-size: 32px;
+            color: var(--green-bright);
+            margin-top: 20px;
+            text-shadow: 0 0 10px var(--green-glow);
+        }
+        .player-name {
+            font-size: 20px;
+            color: var(--text-color);
+            margin-bottom: 30px;
+        }
+        .idle-text {
+            color: var(--text-color);
+            opacity: 0.5;
+            font-size: 18px;
+        }
+    </style>
+</head>
+<body class="page-player">
+    <div class="crt-vignette" style="z-index:5;"></div>
+    <div class="crt-scanlines" style="z-index:6; opacity:.4;"></div>
+    
+    <div class="showscreen-container" id="container">
+        <div id="idle-view">
+            <div class="idle-text">waiting for messages<span class="cursor-blink">_</span></div>
+        </div>
+        
+        <div id="prompt-view" class="hidden">
+            <div class="player-name" id="prompt-player-name"></div>
+            <button class="tap-btn" id="reveal-btn">Tap to read</button>
+        </div>
+        
+        <div id="result-view" class="hidden">
+            <div class="player-name" id="result-player-name"></div>
+            <div class="msg-display" id="result-msg"></div>
+        </div>
+    </div>
+
+    <script>
+        let ws;
+        let reconnectTimer;
+
+        // Prevent screen dimming if possible (wake lock)
+        let wakeLock = null;
+        async function requestWakeLock() {
+            if (!('wakeLock' in navigator)) return;
+            try {
+                wakeLock = await navigator.wakeLock.request('screen');
+                wakeLock.addEventListener('release', () => { wakeLock = null; });
+            } catch (e) {}
+        }
+        document.addEventListener('visibilitychange', () => {
+            if (document.visibilityState === 'visible' && !wakeLock) {
+                requestWakeLock();
+            }
+        });
+        document.body.addEventListener('click', requestWakeLock, {once: true});
+
+        function connect() {
+            const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+            ws = new WebSocket(`${proto}://${location.host}/ws/showscreen`);
+
+            ws.onopen = () => {
+                clearTimeout(reconnectTimer);
+                showIdle();
+            };
+
+            ws.onmessage = (e) => {
+                const data = JSON.parse(e.data);
+                if (data.message) {
+                    showPrompt(data.player_name, data.message);
+                }
+            };
+
+            ws.onclose = () => {
+                document.getElementById('idle-view').innerHTML = '<div class="idle-text">reconnecting<span class="cursor-blink">_</span></div>';
+                showIdle();
+                reconnectTimer = setTimeout(connect, 2000);
+            };
+        }
+
+        function showIdle() {
+            document.getElementById('idle-view').classList.remove('hidden');
+            document.getElementById('prompt-view').classList.add('hidden');
+            document.getElementById('result-view').classList.add('hidden');
+        }
+
+        let currentMessage = '';
+        let currentPlayer = '';
+
+        function showPrompt(playerName, msg) {
+            currentPlayer = playerName;
+            currentMessage = msg;
+            
+            document.getElementById('idle-view').classList.add('hidden');
+            document.getElementById('prompt-view').classList.remove('hidden');
+            document.getElementById('result-view').classList.add('hidden');
+            
+            document.getElementById('prompt-player-name').textContent = `For: ${playerName}`;
+            
+            // vibrate if possible to notify the player
+            if (navigator.vibrate) {
+                navigator.vibrate(200);
+            }
+        }
+
+        document.getElementById('reveal-btn').addEventListener('click', () => {
+            document.getElementById('prompt-view').classList.add('hidden');
+            document.getElementById('result-view').classList.remove('hidden');
+            
+            document.getElementById('result-player-name').textContent = `For: ${currentPlayer}`;
+            document.getElementById('result-msg').innerHTML = currentMessage.replace(/\n/g, '<br>');
+        });
+        
+        // Hide on tap anywhere in result view
+        document.getElementById('result-view').addEventListener('click', () => {
+            showIdle();
+        });
+
+        connect();
+    </script>
+</body>
+</html>

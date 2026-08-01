@@ -203,6 +203,20 @@ game: GameState | None = None
 undo_stack: list[GameState] = []
 connected_clients: dict[str, list[WebSocket]] = {}  # "dealer" or player_id -> [ws]
 dealer_ws_list: list[WebSocket] = []
+showscreen_ws_list: list[WebSocket] = []
+
+async def notify_showscreen(message: str, player_name: str, item: str):
+    if not showscreen_ws_list:
+        return
+    data = json.dumps({"message": message, "player_name": player_name, "item": item}, ensure_ascii=False)
+    dead = []
+    for ws in showscreen_ws_list:
+        try:
+            await ws.send_text(data)
+        except Exception:
+            dead.append(ws)
+    for ws in dead:
+        showscreen_ws_list.remove(ws)
 
 # Команда «принудительно щёлкнуть соленоидом» от дилера к плате. Связь с ESP32
 # односторонняя (плата опрашивает сервер), поэтому команду кладём сюда, а плата
@@ -556,6 +570,11 @@ async def join_page(request: Request):
     return templates.TemplateResponse("join.html", {"request": request, "error": None, "saved_name": saved_name})
 
 
+@app.get("/showscreen", response_class=HTMLResponse, tags=["Pages"], summary="Экран показа скрытых сообщений", include_in_schema=False)
+async def showscreen_page(request: Request):
+    return templates.TemplateResponse("showscreen.html", {"request": request})
+
+
 # ── API: Game Management ──
 
 @app.post(
@@ -793,6 +812,8 @@ async def use_item(
             game.use_item_handcuffs(player_id, target_id)
         elif item == "magnifying_glass":
             result = game.use_item_magnifying_glass(player_id)
+            player_name = game.players[player_id].name
+            await notify_showscreen(f"Лупа показала:\n{result['display']}", player_name, "magnifying_glass")
         elif item == "cigarettes":
             game.use_item_cigarettes(player_id)
         elif item == "adrenaline":
@@ -801,6 +822,8 @@ async def use_item(
             result = game.use_item_adrenaline(player_id, target_id, stolen_item)
         elif item == "burner_phone":
             result = game.use_item_burner_phone(player_id)
+            player_name = game.players[player_id].name
+            await notify_showscreen(f"Телефон сообщил:\n{result['display']}", player_name, "burner_phone")
         elif item == "inverter":
             game.use_item_inverter(player_id)
         elif item == "medicine_vodka":
@@ -1252,6 +1275,20 @@ async def ws_dealer(ws: WebSocket):
     finally:
         if ws in dealer_ws_list:
             dealer_ws_list.remove(ws)
+
+
+@app.websocket("/ws/showscreen")
+async def ws_showscreen(ws: WebSocket):
+    await ws.accept()
+    showscreen_ws_list.append(ws)
+    try:
+        while True:
+            await ws.receive_text()  # Keep alive
+    except WebSocketDisconnect:
+        pass
+    finally:
+        if ws in showscreen_ws_list:
+            showscreen_ws_list.remove(ws)
 
 
 @app.websocket("/ws/player/{player_id}")
