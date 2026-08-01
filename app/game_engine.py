@@ -478,8 +478,17 @@ class GameState:
     def confirm_shells_loaded(self):
         """Dealer confirms they physically loaded the shells."""
         if self.phase == GamePhase.DEALER_RELOADING:
+            if self.config.game_mode == "story":
+                for idx, pid in enumerate(self.turn_order):
+                    p = self.players[pid]
+                    if p.name != "DEALER" and p.alive:
+                        self.current_turn_idx = idx
+                        break
             self.phase = GamePhase.PLAYER_TURN
             self._log(">> Дробовик дозаряжен, игра продолжается", "system")
+            if self.config.game_mode == "story":
+                cp = self.players[self.turn_order[self.current_turn_idx]]
+                self._log(f">> Ход игрока #{cp.number} [{cp.name}]", "info")
             return
 
         # It was GamePhase.DEALER_LOADING. Shells are loaded.
