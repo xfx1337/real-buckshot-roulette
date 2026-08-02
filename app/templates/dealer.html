@@ -1348,6 +1348,10 @@ body{ cursor:default; }
                             <input type="checkbox" id="cctv-dg-hq">
                             <span style="color:var(--orange);">Высококачественные помехи (могут вызывать фризы на слабых TV)</span>
                         </label>
+                        <label style="display:flex; align-items:center; gap:8px; margin:12px 0 0px;">
+                            <input type="checkbox" id="cctv-dg-ui">
+                            <span>Применять помехи ко всему интерфейсу телевизора</span>
+                        </label>
 
                         <label style="display:flex; align-items:center; gap:8px; margin:12px 0 10px;">
                             <input type="checkbox" id="cctv-dg-dynamic">
@@ -2829,6 +2833,7 @@ function renderCctvConfig(c) {
     const dg = c.degrade || {};
     chk('cctv-dg-enabled', dg.enabled);
     chk('cctv-dg-hq', dg.hq);
+    chk('cctv-dg-ui', dg.ui);
     set('cctv-dg-level', dg.level ?? 50);
     document.getElementById('cctv-dg-val').textContent = (dg.level ?? 50) + '%';
     chk('cctv-dg-dynamic', dg.dynamic);
@@ -2892,6 +2897,7 @@ async function cctvSaveConfig() {
         degrade: {
             enabled: document.getElementById('cctv-dg-enabled').checked,
             hq: document.getElementById('cctv-dg-hq').checked,
+            ui: document.getElementById('cctv-dg-ui').checked,
             level: numById('cctv-dg-level', 50),
             dynamic: document.getElementById('cctv-dg-dynamic').checked,
             min_level: numById('cctv-dg-min', 10),

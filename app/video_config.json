@@ -40,12 +40,13 @@
     },
     "degrade": {
       "enabled": true,
-      "level": 50,
+      "level": 90,
       "dynamic": true,
       "min_level": 10,
       "max_level": 85,
       "interval": 6,
-      "hq": true
+      "hq": true,
+      "ui": true
     }
   }
 }
