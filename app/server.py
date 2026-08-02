@@ -1475,6 +1475,19 @@ async def tv_cctv_config(request: Request):
     return {"ok": True, "cctv": cctv}
 
 
+@app.get("/api/cctv/errors", tags=["TV"], summary="Список картинок-ошибок CCTV", include_in_schema=False)
+async def list_cctv_errors():
+    err_dir = Path(__file__).parent / "static" / "cctv_errors"
+    if not err_dir.exists():
+        return {"images": []}
+    
+    images = []
+    for f in err_dir.iterdir():
+        if f.is_file() and f.suffix.lower() in ('.jpg', '.jpeg', '.png', '.gif', '.webp'):
+            images.append(f.name)
+    return {"images": images}
+
+
 mediamtx_process = None
 
 @app.post("/api/cctv/start_server", tags=["TV"], summary="Скачать и запустить MediaMTX", include_in_schema=False)
