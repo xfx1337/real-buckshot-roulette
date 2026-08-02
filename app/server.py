@@ -9,6 +9,10 @@ import json
 import os
 import copy
 import time
+import logging
+import subprocess
+import urllib.request
+import zipfile
 from pathlib import Path
 from contextlib import asynccontextmanager
 
@@ -1416,6 +1420,55 @@ async def tv_play(request: Request):
     tv_video_state = {"action": "play", "video": video, "loop": loop, "volume": vol, "mtime": mtime}
     await broadcast_tv(tv_video_state)
     return {"ok": True, "video": video}
+
+@app.post("/api/tv/cctv", tags=["TV"], summary="Включить/выключить CCTV", include_in_schema=False)
+async def tv_cctv_toggle(request: Request):
+    """Toggle CCTV mode on the TV. Body: {"active": true}"""
+    data = await request.json()
+    active = data.get("active", False)
+    await broadcast_tv({"action": "cctv", "active": active})
+    return {"ok": True, "active": active}
+
+mediamtx_process = None
+
+@app.post("/api/cctv/start_server", tags=["TV"], summary="Скачать и запустить MediaMTX", include_in_schema=False)
+async def start_cctv_server():
+    global mediamtx_process
+    
+    mediamtx_dir = Path(__file__).parent.parent / "mediamtx"
+    mediamtx_exe = mediamtx_dir / "mediamtx.exe"
+    
+    # Download if not exists
+    if not mediamtx_exe.exists():
+        os.makedirs(mediamtx_dir, exist_ok=True)
+        url = "https://github.com/bluenviron/mediamtx/releases/download/v1.9.3/mediamtx_v1.9.3_windows_amd64.zip"
+        zip_path = mediamtx_dir / "mediamtx.zip"
+        
+        try:
+            urllib.request.urlretrieve(url, zip_path)
+            with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+                zip_ref.extractall(mediamtx_dir)
+            if zip_path.exists():
+                os.remove(zip_path)
+        except Exception as e:
+            return {"ok": False, "error": f"Ошибка скачивания: {e}"}
+
+    # Start process if not running
+    if mediamtx_process is None or mediamtx_process.poll() is not None:
+        try:
+            creationflags = 0
+            if os.name == 'nt':
+                creationflags = subprocess.CREATE_NEW_CONSOLE
+                
+            mediamtx_process = subprocess.Popen(
+                [str(mediamtx_exe)],
+                cwd=str(mediamtx_dir),
+                creationflags=creationflags
+            )
+        except Exception as e:
+            return {"ok": False, "error": f"Ошибка запуска: {e}"}
+            
+    return {"ok": True}
 
 
 @app.post("/api/tv/pause", tags=["TV"], summary="Поставить видео на паузу", include_in_schema=False)

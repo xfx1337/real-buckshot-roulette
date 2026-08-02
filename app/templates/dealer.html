@@ -38,6 +38,7 @@ body{
   -webkit-font-smoothing:antialiased;
   cursor:crosshair;
   overflow-x:hidden;
+  overflow-y:auto;
 }
 a{ color:var(--green); text-decoration:none; }
 a:hover{ color:var(--green-bright); }
@@ -1238,6 +1239,10 @@ body{ cursor:default; }
 
                         <h4 style="margin-top:0;">▸ БЫСТРЫЙ ЗАПУСК ПО СЛОТУ</h4>
                         <div class="tv-btns" id="tv-slot-btns"></div>
+                        <div class="tv-btns" style="margin-top: 12px; margin-bottom: 22px; display:flex; gap:8px;">
+                            <button class="btn btn-plate" onclick="tvToggleCCTV()" id="btn-cctv-toggle" style="flex:1; border-color:var(--text-dim); color:white;">📷 РЕЖИМ КАМЕР (CCTV) : ВЫКЛ</button>
+                            <button class="btn btn-plate" onclick="startCctvServer(this)" style="flex:0 0 auto; border-color:var(--text-dim); padding:12px 14px;" title="Скачать и запустить MediaMTX">ЗАПУСТИТЬ СЕРВЕР</button>
+                        </div>
 
                         <h4>▸ РУЧНОЕ ВОСПРОИЗВЕДЕНИЕ</h4>
                         <div class="tv-manual-row">
@@ -2746,6 +2751,51 @@ async function tvResume() {
 async function tvStop() {
     await fetch('/api/tv/stop', { method: 'POST' });
     updateTvStatus();
+}
+
+let cctvActive = false;
+async function tvToggleCCTV() {
+    cctvActive = !cctvActive;
+    const btn = document.getElementById('btn-cctv-toggle');
+    if (cctvActive) {
+        btn.textContent = '📷 РЕЖИМ КАМЕР (CCTV) : ВКЛ';
+        btn.style.borderColor = 'var(--red)';
+        btn.style.background = 'rgba(255,0,0,0.2)';
+    } else {
+        btn.textContent = '📷 РЕЖИМ КАМЕР (CCTV) : ВЫКЛ';
+        btn.style.borderColor = 'var(--text-dim)';
+        btn.style.background = 'transparent';
+    }
+    await fetch('/api/tv/cctv', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ active: cctvActive }) });
+}
+
+async function startCctvServer(btn) {
+    const originalText = btn.textContent;
+    btn.textContent = 'ОЖИДАЙТЕ...';
+    btn.disabled = true;
+    let isOk = false;
+    try {
+        const res = await fetch('/api/cctv/start_server', { method: 'POST' });
+        const data = await res.json();
+        if (data.ok) {
+            isOk = true;
+            btn.textContent = 'СЕРВЕР ЗАПУЩЕН';
+            btn.style.color = 'var(--green)';
+            btn.style.borderColor = 'var(--green)';
+        } else {
+            alert(data.error || 'Ошибка запуска');
+            btn.textContent = 'ОШИБКА';
+        }
+    } catch (e) {
+        alert('Ошибка сети: ' + e);
+        btn.textContent = 'ОШИБКА';
+    }
+    setTimeout(() => {
+        if (!isOk) {
+            btn.disabled = false;
+            btn.textContent = originalText;
+        }
+    }, 3000);
 }
 
 let tvVolumeTimeout = null;
