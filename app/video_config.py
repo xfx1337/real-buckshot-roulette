@@ -33,6 +33,37 @@ DEFAULT_CONFIG = {
     },
     "settings": {
         "volume": 100
+    },
+    # CCTV camera-mode settings. The TV (teleplayer) runs its own random
+    # auto-cycle timer using these values — no cross-device time sync.
+    "cctv": {
+        "auto_enabled": True,    # TV auto-flips into camera mode on a random timer
+        "min_time": 30,          # min seconds between shows
+        "max_time": 120,         # max seconds between shows
+        "min_show": 2,           # min seconds a show stays on screen
+        "max_show": 10,          # max seconds a show stays on screen
+        "mode": "random",        # "random" = coin-flip: one random cam or all; "grid" = all enabled; "single" = one random fullscreen
+        "cameras": ["cam1", "cam2", "cam3", "cam4"],  # enabled camera pool (MediaMTX path names)
+        # Fake "signal lost" glitch — TV-only cosmetic. Dealer /cams page never fakes.
+        "fake_error": {
+            "enabled": False,
+            "chance": 0.25,      # per-camera probability each tick
+            "interval": 15,      # seconds between fake-error ticks
+            "duration": 4        # seconds a faked camera stays "unavailable"
+        },
+        # Artificial picture degradation shown to the player on the TV — blur,
+        # grain, scanlines. Dealer /cams viewer is never degraded.
+        "degrade": {
+            "enabled": False,
+            "level": 50,         # 0..100 "badness" strength (base / static level)
+            # Dynamic drift: each camera walks its own degradation level between
+            # min and max, re-rolling a new target every `interval` seconds.
+            # Cameras drift independently, so the picture never looks synced.
+            "dynamic": False,
+            "min_level": 10,     # 0..100 lower bound of the walk
+            "max_level": 85,     # 0..100 upper bound of the walk
+            "interval": 6        # seconds between per-camera re-rolls
+        }
     }
 }
 
@@ -44,19 +75,24 @@ SLOT_LABELS = {
 }
 
 
+def _merge_defaults(cfg: dict, defaults: dict) -> None:
+    """Fill in missing keys from `defaults` at any nesting depth, in place.
+    Existing values are never overwritten — only gaps are filled, so newly
+    added settings (e.g. cctv.degrade.dynamic) reach configs saved earlier."""
+    for key, val in defaults.items():
+        if key not in cfg:
+            cfg[key] = dict(val) if isinstance(val, dict) else val
+        elif isinstance(val, dict) and isinstance(cfg[key], dict):
+            _merge_defaults(cfg[key], val)
+
+
 def load_config() -> dict:
     """Load video config from disk, or return defaults."""
     if CONFIG_PATH.exists():
         try:
             with open(CONFIG_PATH, "r", encoding="utf-8") as f:
                 cfg = json.load(f)
-            # Merge defaults for any missing keys
-            for key, val in DEFAULT_CONFIG.items():
-                if key not in cfg:
-                    cfg[key] = val
-                elif isinstance(val, dict):
-                    for k2, v2 in val.items():
-                        cfg[key].setdefault(k2, v2)
+            _merge_defaults(cfg, DEFAULT_CONFIG)
             return cfg
         except Exception:
             pass

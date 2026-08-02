@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Камеры — Дилер</title>
+    <link rel="stylesheet" href="/static/style.css">
+    <style>
+        html, body { margin: 0; height: 100%; background: #0a0a0a; color: #e0e0e0;
+            font-family: 'Courier New', Consolas, monospace; }
+        #cams-bar {
+            display: flex; align-items: center; gap: 12px;
+            padding: 8px 14px; border-bottom: 1px solid #333;
+            font-size: 13px; letter-spacing: 1px;
+        }
+        #cams-bar .title { color: #4af626; }
+        #cams-bar .hint { color: #888; font-size: 11px; margin-left: auto; }
+        #cams-grid {
+            display: grid; gap: 6px; padding: 6px;
+            height: calc(100vh - 40px); box-sizing: border-box;
+        }
+        .cam-cell {
+            position: relative; background: #111; overflow: hidden;
+            border: 1px solid #222; cursor: pointer;
+        }
+        .cam-cell iframe { width: 100%; height: 100%; border: none; background: #111; }
+        .cam-cell .cam-label {
+            position: absolute; top: 8px; left: 8px; z-index: 5;
+            background: rgba(0,0,0,.7); color: #fff; padding: 3px 7px;
+            font-size: 11px; border: 1px solid rgba(255,255,255,.2);
+            pointer-events: none;
+        }
+        /* Fullscreen one camera */
+        #cams-grid.fullscreen { grid-template-columns: 1fr !important; grid-template-rows: 1fr !important; }
+        #cams-grid.fullscreen .cam-cell { display: none; }
+        #cams-grid.fullscreen .cam-cell.active { display: block; }
+        .exit-full {
+            display: none; position: absolute; top: 8px; right: 8px; z-index: 6;
+            background: rgba(0,0,0,.7); color: #ff2a2a; border: 1px solid #ff2a2a;
+            padding: 4px 10px; font-family: inherit; cursor: pointer; font-size: 12px;
+        }
+        #cams-grid.fullscreen .cam-cell.active .exit-full { display: block; }
+    </style>
+</head>
+<body>
+    <div id="cams-bar">
+        <span class="title">📷 КАМЕРЫ — ПАНЕЛЬ ДИЛЕРА</span>
+        <span class="hint">клик по камере — на весь экран • ещё клик или ✕ — назад к сетке</span>
+    </div>
+    <div id="cams-grid"></div>
+
+    <script>
+        // Camera path names come from the CCTV config (server-rendered).
+        const CAMERAS = {{ cameras | tojson }};
+        const host = location.hostname;
+        const grid = document.getElementById('cams-grid');
+
+        function layout(n) {
+            const cols = n <= 1 ? 1 : n <= 4 ? 2 : n <= 9 ? 3 : 4;
+            const rows = Math.ceil(n / cols);
+            grid.style.gridTemplateColumns = `repeat(${cols}, 1fr)`;
+            grid.style.gridTemplateRows = `repeat(${rows}, 1fr)`;
+        }
+
+        function render() {
+            layout(CAMERAS.length);
+            grid.innerHTML = CAMERAS.map(cam => `
+                <div class="cam-cell" data-cam="${cam}">
+                    <div class="cam-label">${cam.toUpperCase()} [REC]</div>
+                    <button class="exit-full" data-exit>✕ НАЗАД</button>
+                    <iframe scrolling="no" src="http://${host}:8889/${encodeURIComponent(cam)}/"></iframe>
+                </div>`).join('');
+        }
+
+        function enterFull(cell) {
+            grid.querySelectorAll('.cam-cell').forEach(c => c.classList.remove('active'));
+            cell.classList.add('active');
+            grid.classList.add('fullscreen');
+        }
+        function exitFull() { grid.classList.remove('fullscreen'); }
+
+        grid.addEventListener('click', (e) => {
+            const cell = e.target.closest('.cam-cell');
+            if (!cell) return;
+            if (e.target.closest('[data-exit]')) { exitFull(); return; }
+            if (grid.classList.contains('fullscreen')) exitFull();
+            else enterFull(cell);
+        });
+
+        render();
+    </script>
+</body>
+</html>

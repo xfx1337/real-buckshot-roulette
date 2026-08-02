@@ -46,19 +46,77 @@
             z-index: 90;
             background: #000;
             display: none;
-            grid-template-columns: 1fr 1fr;
-            grid-template-rows: 1fr 1fr;
             gap: 4px;
             padding: 4px;
         }
         #tv-cctv-overlay.active {
             display: grid;
         }
+        /* --dg is inherited from the overlay, but each cell may override it with
+           its own drifting value when dynamic degradation is on. */
+        .cctv-cell { position: relative; overflow: hidden; background: #111; transition: none; }
         .cctv-frame {
             width: 100%;
             height: 100%;
             border: none;
             background: #111;
+        }
+        /* Fake "signal lost" glitch — cosmetic, TV only */
+        .cctv-fault {
+            position: absolute;
+            inset: 0;
+            z-index: 96;
+            display: none;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            background:
+                repeating-linear-gradient(0deg, #000 0, #000 2px, #0a0a0a 2px, #0a0a0a 4px);
+            color: #ff2a2a;
+            font-family: var(--font-mono);
+            text-align: center;
+            animation: cctv-flicker 0.15s steps(2) infinite;
+        }
+        .cctv-cell.faulted .cctv-fault { display: flex; }
+        .cctv-fault .big { font-size: 20px; letter-spacing: 2px; }
+        .cctv-fault .small { font-size: 11px; color: #888; }
+        @keyframes cctv-flicker { 0% { opacity: .82; } 100% { opacity: 1; } }
+
+        /* Artificial camera degradation — blur + grain + scanlines.
+           Strength driven by --dg (0..1), set per overlay from the dealer slider.
+           Applied only on the TV; the dealer /cams viewer never degrades. */
+        #tv-cctv-overlay.degrade .cctv-frame {
+            /* Dynamic drift re-rolls --dg per cell; ease between levels so the
+               picture creeps rather than snapping. */
+            transition: filter 1.2s linear;
+            filter:
+                blur(calc(var(--dg, 0) * 5px))
+                contrast(calc(1 + var(--dg, 0) * 0.7))
+                brightness(calc(1 - var(--dg, 0) * 0.25))
+                saturate(calc(1 - var(--dg, 0) * 0.55));
+        }
+        .cctv-grain {
+            position: absolute; inset: 0; z-index: 94; pointer-events: none;
+            display: none; opacity: var(--dg, 0); transition: opacity 1.2s linear;
+            mix-blend-mode: overlay;
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+            background-size: 180px 180px;
+            animation: cctv-grain-move 0.5s steps(4) infinite;
+        }
+        .cctv-scan {
+            position: absolute; inset: 0; z-index: 93; pointer-events: none;
+            display: none; opacity: calc(var(--dg, 0) * 0.6); transition: opacity 1.2s linear;
+            background: repeating-linear-gradient(0deg, rgba(0,0,0,.35) 0 1px, transparent 1px 3px);
+        }
+        #tv-cctv-overlay.degrade .cctv-grain,
+        #tv-cctv-overlay.degrade .cctv-scan { display: block; }
+        @keyframes cctv-grain-move {
+            0% { background-position: 0 0; }
+            25% { background-position: -40px 20px; }
+            50% { background-position: 30px -30px; }
+            75% { background-position: -20px -40px; }
+            100% { background-position: 20px 30px; }
         }
         .cctv-label {
             position: absolute;
@@ -79,13 +137,8 @@
     <div class="crt-vignette" style="z-index:5;"></div>
     <div class="crt-scanlines" style="z-index:6; opacity:.4;"></div>
 
-    <!-- CCTV Overlay -->
-    <div id="tv-cctv-overlay">
-        <div style="position:relative;"><div class="cctv-label">CAM 1 [REC]</div><iframe id="cctv-frame-1" class="cctv-frame" scrolling="no"></iframe></div>
-        <div style="position:relative;"><div class="cctv-label">CAM 2 [REC]</div><iframe id="cctv-frame-2" class="cctv-frame" scrolling="no"></iframe></div>
-        <div style="position:relative;"><div class="cctv-label">CAM 3 [REC]</div><iframe id="cctv-frame-3" class="cctv-frame" scrolling="no"></iframe></div>
-        <div style="position:relative;"><div class="cctv-label">CAM 4 [REC]</div><iframe id="cctv-frame-4" class="cctv-frame" scrolling="no"></iframe></div>
-    </div>
+    <!-- CCTV Overlay (frames injected by JS from the pushed camera config) -->
+    <div id="tv-cctv-overlay"></div>
 
     <!-- Video overlay -->
     <div id="tv-video-overlay">
@@ -237,20 +290,16 @@
                 }
                 break;
             case 'cctv':
-                const cctvOverlay = document.getElementById('tv-cctv-overlay');
-                if (cmd.active) {
-                    // Load the WebRTC streams dynamically using the current host IP
-                    const host = location.hostname;
-                    for (let i = 1; i <= 4; i++) {
-                        const frame = document.getElementById('cctv-frame-' + i);
-                        if (!frame.src) {
-                            frame.src = `http://${host}:8889/cam${i}/`;
-                        }
-                    }
-                    cctvOverlay.classList.add('active');
-                } else {
-                    cctvOverlay.classList.remove('active');
-                }
+                // Manual toggle from the dealer button — force CCTV on/off now.
+                cctvManualToggle(cmd.active);
+                break;
+            case 'cctv_show':
+                // Dealer picked specific cameras to push to the player right now.
+                cctvShowSpecific(cmd.cameras || []);
+                break;
+            case 'cctv_config':
+                // New auto-cycle / camera / fake-error settings pushed from dealer.
+                cctvSetConfig(cmd.cctv || {});
                 break;
         }
     }
@@ -264,6 +313,256 @@
             }
         }
     });
+
+    // ── CCTV camera mode (runs entirely on this TV device) ──
+    // The TV owns the random auto-cycle timer and the fake-error glitch.
+    // The dealer only pushes settings + a manual on/off. No cross-device sync.
+    const cctvOverlay = document.getElementById('tv-cctv-overlay');
+    let cctvCfg = {
+        auto_enabled: true, min_time: 30, max_time: 120, min_show: 2, max_show: 10,
+        mode: 'random', cameras: ['cam1', 'cam2', 'cam3', 'cam4'],
+        fake_error: { enabled: false, chance: 0.25, interval: 15, duration: 4 },
+        degrade: { enabled: false, level: 50 }
+    };
+    let cctvShown = false;      // overlay currently visible
+    let cctvManual = false;     // held on by dealer's manual toggle
+    let cctvPhaseOk = false;    // game phase allows auto-show (round / waiting)
+    let cctvAutoTimer = null;   // schedules the next auto show
+    let cctvHideTimer = null;   // ends the current auto show
+    let cctvFaultTimer = null;  // fake-error tick
+
+    function cctvRnd(min, max) {
+        min = Number(min); max = Number(max);
+        if (!(max >= min)) max = min;
+        return min + Math.random() * (max - min);
+    }
+
+    // Choose a rows×cols grid for n cells on a 4:3 screen, preferring the
+    // layout whose cells come closest to 4:3 themselves. Returns the column
+    // count plus how many cells sit in the (possibly short) last row.
+    function cctvGridFor(n) {
+        const SCREEN = 4 / 3;
+        let best = null;
+        for (let cols = 1; cols <= n; cols++) {
+            const rows = Math.ceil(n / cols);
+            // Aspect of one cell if the screen is split rows×cols.
+            const cell = (SCREEN / cols) / (1 / rows);
+            // Penalise cell shapes far from 4:3, and ragged last rows —
+            // a full rectangle always beats an equally-shaped ragged one.
+            const shape = Math.abs(Math.log(cell / SCREEN));
+            const ragged = (rows * cols - n) * 0.15;
+            // Camera feeds are landscape: on an exact tie (2×1 vs 1×2) prefer
+            // the wider cell, never the tall sliver.
+            const portrait = cell < SCREEN ? 0.01 : 0;
+            const score = shape + ragged + portrait;
+            if (!best || score < best.score) best = { cols, rows, score };
+        }
+        return best;
+    }
+
+    // Build the camera grid. `cams` = list of MediaMTX path names.
+    // Cells always tile the whole screen: when the last row is short, its
+    // cells stretch across the leftover columns so no black gap is left.
+    function cctvRender(cams) {
+        const host = location.hostname;
+        const n = cams.length;
+        const { cols, rows } = cctvGridFor(n);
+        cctvOverlay.style.gridTemplateColumns = `repeat(${cols}, 1fr)`;
+        cctvOverlay.style.gridTemplateRows = `repeat(${rows}, 1fr)`;
+
+        // How many cells the last row holds, and how wide each must be (in
+        // column tracks) to span the full width. Uneven remainders give the
+        // first cells one extra track each.
+        const lastCount = n - cols * (rows - 1);
+        const firstOfLast = n - lastCount;
+
+        cctvOverlay.innerHTML = cams.map((cam, i) => {
+            let span = '';
+            if (i >= firstOfLast && lastCount < cols) {
+                const idx = i - firstOfLast;
+                const base = Math.floor(cols / lastCount);
+                const extra = cols % lastCount;
+                span = `grid-column: span ${base + (idx < extra ? 1 : 0)};`;
+            }
+            return `
+            <div class="cctv-cell" data-cam="${cam}" style="${span}">
+                <div class="cctv-label">${cam.toUpperCase()} [REC]</div>
+                <iframe class="cctv-frame" scrolling="no" src="http://${host}:8889/${encodeURIComponent(cam)}/"></iframe>
+                <div class="cctv-scan"></div>
+                <div class="cctv-grain"></div>
+                <div class="cctv-fault">
+                    <div class="big">⚠ НЕТ СИГНАЛА</div>
+                    <div class="small">${cam.toUpperCase()} — НЕДОСТУПНО</div>
+                </div>
+            </div>`;
+        }).join('');
+        cctvApplyDegrade();
+    }
+
+    // Toggle + strength of the artificial degradation overlay.
+    function cctvApplyDegrade() {
+        const dg = cctvCfg.degrade || {};
+        const on = !!dg.enabled;
+        const level = Math.max(0, Math.min(100, Number(dg.level ?? 50)));
+        // Overlay-level --dg is the baseline (static mode, and the starting
+        // value for cells before their first drift roll).
+        cctvOverlay.style.setProperty('--dg', (level / 100).toFixed(3));
+        cctvOverlay.classList.toggle('degrade', on);
+        if (on && dg.dynamic) cctvStartDrift();
+        else cctvStopDrift();
+    }
+
+    // ── Dynamic degradation drift ──
+    // Every `interval` seconds each visible camera independently re-rolls its own
+    // degradation level inside [min_level, max_level]. Cells are staggered by a
+    // random phase so they never change together.
+    let cctvDriftTimer = null;
+
+    function cctvDriftCell(cell) {
+        const dg = cctvCfg.degrade || {};
+        const lo = Math.max(0, Math.min(100, Number(dg.min_level ?? 10)));
+        const hi = Math.max(lo, Math.min(100, Number(dg.max_level ?? 85)));
+        const level = cctvRnd(lo, hi);
+        cell.style.setProperty('--dg', (level / 100).toFixed(3));
+    }
+
+    function cctvStartDrift() {
+        cctvStopDrift();
+        const dg = cctvCfg.degrade || {};
+        const interval = Math.max(1, Number(dg.interval ?? 6)) * 1000;
+        // Seed immediately so the effect is visible without waiting a full tick.
+        cctvOverlay.querySelectorAll('.cctv-cell').forEach(cctvDriftCell);
+        cctvDriftTimer = setInterval(() => {
+            cctvOverlay.querySelectorAll('.cctv-cell').forEach(cell => {
+                // Random stagger inside the tick keeps cameras out of lockstep.
+                setTimeout(() => cctvDriftCell(cell), Math.random() * interval * 0.8);
+            });
+        }, interval);
+    }
+
+    function cctvStopDrift() {
+        clearInterval(cctvDriftTimer); cctvDriftTimer = null;
+        // Fall back to the overlay baseline level.
+        cctvOverlay.querySelectorAll('.cctv-cell').forEach(c => c.style.removeProperty('--dg'));
+    }
+
+    // Pick which cameras to show for one show, per mode.
+    //  single — one random camera; grid — all enabled cameras;
+    //  random — coin-flip between those two: either one random camera
+    //           fullscreen, or the full grid. No partial subsets.
+    function cctvPickCams() {
+        const pool = (cctvCfg.cameras && cctvCfg.cameras.length) ? cctvCfg.cameras : ['cam1'];
+        const one = () => [pool[Math.floor(Math.random() * pool.length)]];
+        if (cctvCfg.mode === 'single') return one();
+        if (cctvCfg.mode === 'random') return Math.random() < 0.5 ? one() : pool.slice();
+        return pool.slice();  // grid
+    }
+
+    function cctvShow(cams) {
+        cctvRender(cams);
+        cctvOverlay.classList.add('active');
+        cctvShown = true;
+        cctvStartFaults();
+    }
+
+    function cctvHide() {
+        clearTimeout(cctvHideTimer); cctvHideTimer = null;
+        cctvStopFaults();
+        cctvStopDrift();
+        cctvOverlay.classList.remove('active');
+        cctvOverlay.innerHTML = '';
+        cctvShown = false;
+    }
+
+    // Dealer manual button: force on (grid of all enabled) / off.
+    function cctvManualToggle(active) {
+        cctvManual = !!active;
+        if (cctvManual) {
+            clearTimeout(cctvHideTimer); cctvHideTimer = null;
+            cctvShow(cctvCfg.mode === 'single' ? cctvPickCams() : (cctvCfg.cameras || []));
+        } else {
+            cctvHide();
+        }
+    }
+
+    // Dealer picked an exact camera (or several) to put in front of the player.
+    // Behaves like a manual hold: auto-cycle stays paused until the dealer
+    // turns CCTV off again.
+    function cctvShowSpecific(cams) {
+        cams = (cams || []).filter(Boolean);
+        if (!cams.length) return;
+        clearTimeout(cctvHideTimer); cctvHideTimer = null;
+        clearTimeout(cctvAutoTimer); cctvAutoTimer = null;
+        cctvManual = true;
+        cctvShow(cams);
+    }
+
+    // Auto-cycle loop — schedule one show after a random gap, hold a random
+    // duration, repeat. Manual mode pauses auto (dealer is in control).
+    function cctvScheduleNext() {
+        clearTimeout(cctvAutoTimer); cctvAutoTimer = null;
+        // Only cycle when enabled AND the game is in a round / round-waiting phase.
+        if (!cctvCfg.auto_enabled || !cctvPhaseOk) return;
+        const gap = cctvRnd(cctvCfg.min_time, cctvCfg.max_time) * 1000;
+        cctvAutoTimer = setTimeout(() => {
+            if (cctvCfg.auto_enabled && cctvPhaseOk && !cctvManual) {
+                cctvShow(cctvPickCams());
+                const dur = cctvRnd(cctvCfg.min_show, cctvCfg.max_show) * 1000;
+                cctvHideTimer = setTimeout(() => {
+                    if (!cctvManual) cctvHide();
+                    cctvScheduleNext();
+                }, dur);
+            } else {
+                cctvScheduleNext();
+            }
+        }, gap);
+    }
+
+    // Called from updateUI on every game-state push. Cameras cut in at random
+    // moments regardless of game phase — including the lobby and after game
+    // over — so the TV behaves like a live CCTV feed from the moment it boots.
+    function cctvSetPhase(phase) {
+        if (cctvPhaseOk) return;
+        cctvPhaseOk = true;
+        cctvScheduleNext();
+    }
+
+    // Fake "signal lost" — cosmetic, only while the overlay is visible.
+    function cctvStartFaults() {
+        cctvStopFaults();
+        const fe = cctvCfg.fake_error || {};
+        if (!fe.enabled) return;
+        cctvFaultTimer = setInterval(() => {
+            if (!cctvShown) return;
+            cctvOverlay.querySelectorAll('.cctv-cell').forEach(cell => {
+                if (cell.classList.contains('faulted')) return;
+                if (Math.random() < (fe.chance || 0)) {
+                    cell.classList.add('faulted');
+                    setTimeout(() => cell.classList.remove('faulted'), (fe.duration || 4) * 1000);
+                }
+            });
+        }, Math.max(1, fe.interval || 15) * 1000);
+    }
+    function cctvStopFaults() {
+        clearInterval(cctvFaultTimer); cctvFaultTimer = null;
+        cctvOverlay.querySelectorAll('.cctv-cell.faulted').forEach(c => c.classList.remove('faulted'));
+    }
+
+    // Apply a settings push from the dealer and (re)start the auto loop.
+    function cctvSetConfig(cfg) {
+        cctvCfg = Object.assign({}, cctvCfg, cfg);
+        if (cfg.fake_error) cctvCfg.fake_error = Object.assign({}, cctvCfg.fake_error, cfg.fake_error);
+        if (cfg.degrade) cctvCfg.degrade = Object.assign({}, cctvCfg.degrade, cfg.degrade);
+        cctvApplyDegrade();
+        if (cctvShown && cctvCfg.fake_error && cctvCfg.fake_error.enabled) cctvStartFaults();
+        else if (cctvShown) cctvStopFaults();
+        cctvScheduleNext();
+    }
+
+    // Cameras run from boot — no game state required. The first config push
+    // from the server just refines the timings already in effect.
+    cctvPhaseOk = true;
+    cctvScheduleNext();
 
     connectTV();
 
@@ -301,6 +600,9 @@
             window.location.href = '/';
             return;
         }
+
+        // Gate camera auto-cycle to in-game / round-waiting phases.
+        if (typeof cctvSetPhase === 'function') cctvSetPhase(data.phase);
 
         const screens = ['state-lobby', 'state-game', 'state-dead', 'state-gameover', 'state-roundover', 'state-loading'];
         screens.forEach(s => document.getElementById(s).style.display = 'none');
