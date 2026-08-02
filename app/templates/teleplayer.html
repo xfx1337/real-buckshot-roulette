@@ -87,8 +87,13 @@
            Strength driven by --dg (0..1), set per overlay from the dealer slider.
            Applied only on the TV; the dealer /cams viewer never degrades. */
         #tv-cctv-overlay.degrade .cctv-frame {
-            /* Dynamic drift re-rolls --dg per cell; ease between levels so the
-               picture creeps rather than snapping. */
+            /* Removed blur() and transition as they cause massive frame drops/freezes on weak TV hardware when applied to live WebRTC */
+            filter:
+                contrast(calc(1 + var(--dg, 0) * 0.7))
+                brightness(calc(1 - var(--dg, 0) * 0.25))
+                saturate(calc(1 - var(--dg, 0) * 0.55));
+        }
+        #tv-cctv-overlay.degrade.hq-degrade .cctv-frame {
             transition: filter 1.2s linear;
             filter:
                 blur(calc(var(--dg, 0) * 5px))
@@ -100,9 +105,15 @@
             position: absolute; inset: 0; z-index: 94; pointer-events: none;
             display: none; opacity: var(--dg, 0); transition: opacity 1.2s linear;
             mix-blend-mode: overlay;
+            /* Removed feTurbulence SVG as it causes severe GPU stalls on low-end TVs. Using lightweight CSS repeating gradient. */
+            background-image: repeating-linear-gradient(45deg, rgba(255,255,255,0.05) 0px, rgba(255,255,255,0.05) 1px, transparent 1px, transparent 2px),
+                              repeating-linear-gradient(-45deg, rgba(0,0,0,0.1) 0px, rgba(0,0,0,0.1) 1px, transparent 1px, transparent 2px);
+            background-size: 6px 6px;
+            animation: cctv-grain-move 0.5s steps(4) infinite;
+        }
+        #tv-cctv-overlay.degrade.hq-degrade .cctv-grain {
             background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
             background-size: 180px 180px;
-            animation: cctv-grain-move 0.5s steps(4) infinite;
         }
         .cctv-scan {
             position: absolute; inset: 0; z-index: 93; pointer-events: none;
@@ -360,12 +371,48 @@
         return best;
     }
 
-    // Build the camera grid. `cams` = list of MediaMTX path names.
-    // Cells always tile the whole screen: when the last row is short, its
-    // cells stretch across the leftover columns so no black gap is left.
-    function cctvRender(cams) {
+    let cctvPersistentFrames = {};
+
+    function cctvInitFrames() {
         const host = location.hostname;
+        const pool = (cctvCfg.cameras && cctvCfg.cameras.length) ? cctvCfg.cameras : ['cam1','cam2','cam3','cam4'];
+        
+        // Remove ones not in pool
+        for (const cam of Object.keys(cctvPersistentFrames)) {
+            if (!pool.includes(cam)) {
+                cctvPersistentFrames[cam].remove();
+                delete cctvPersistentFrames[cam];
+            }
+        }
+        
+        for (const cam of pool) {
+            if (!cctvPersistentFrames[cam]) {
+                const cell = document.createElement('div');
+                cell.className = 'cctv-cell';
+                cell.dataset.cam = cam;
+                cell.style.display = 'none';
+                
+                cell.innerHTML = `
+                    <div class="cctv-label">${cam.toUpperCase()} [REC]</div>
+                    <iframe class="cctv-frame" scrolling="no" src="http://${host}:8889/${encodeURIComponent(cam)}/"></iframe>
+                    <img class="cctv-offline-bg" style="position:absolute; inset:0; width:100%; height:100%; object-fit:cover; z-index:92; display:none;" src="" />
+                    <div class="cctv-scan"></div>
+                    <div class="cctv-grain"></div>
+                    <div class="cctv-fault">
+                        <div class="big">⚠ НЕТ СИГНАЛА</div>
+                        <div class="small">${cam.toUpperCase()} — НЕДОСТУПНО</div>
+                    </div>
+                `;
+                cctvOverlay.appendChild(cell);
+                cctvPersistentFrames[cam] = cell;
+            }
+        }
+    }
+
+    // Build the camera grid using preloaded persistent iframes.
+    function cctvRender(cams) {
         const n = cams.length;
+        if (n === 0) return;
         const { cols, rows } = cctvGridFor(n);
         cctvOverlay.style.gridTemplateColumns = `repeat(${cols}, 1fr)`;
         cctvOverlay.style.gridTemplateRows = `repeat(${rows}, 1fr)`;
@@ -376,26 +423,26 @@
         const lastCount = n - cols * (rows - 1);
         const firstOfLast = n - lastCount;
 
-        cctvOverlay.innerHTML = cams.map((cam, i) => {
-            let span = '';
+        // Hide all first
+        Object.values(cctvPersistentFrames).forEach(cell => {
+            cell.style.display = 'none';
+            cell.style.gridColumn = '';
+        });
+
+        cams.forEach((cam, i) => {
+            const cell = cctvPersistentFrames[cam];
+            if (!cell) return;
+            
+            cell.style.display = 'block';
+            
             if (i >= firstOfLast && lastCount < cols) {
                 const idx = i - firstOfLast;
                 const base = Math.floor(cols / lastCount);
                 const extra = cols % lastCount;
-                span = `grid-column: span ${base + (idx < extra ? 1 : 0)};`;
+                cell.style.gridColumn = `span ${base + (idx < extra ? 1 : 0)}`;
             }
-            return `
-            <div class="cctv-cell" data-cam="${cam}" style="${span}">
-                <div class="cctv-label">${cam.toUpperCase()} [REC]</div>
-                <iframe class="cctv-frame" scrolling="no" src="http://${host}:8889/${encodeURIComponent(cam)}/"></iframe>
-                <div class="cctv-scan"></div>
-                <div class="cctv-grain"></div>
-                <div class="cctv-fault">
-                    <div class="big">⚠ НЕТ СИГНАЛА</div>
-                    <div class="small">${cam.toUpperCase()} — НЕДОСТУПНО</div>
-                </div>
-            </div>`;
-        }).join('');
+        });
+
         cctvApplyDegrade();
     }
 
@@ -408,9 +455,53 @@
         // value for cells before their first drift roll).
         cctvOverlay.style.setProperty('--dg', (level / 100).toFixed(3));
         cctvOverlay.classList.toggle('degrade', on);
+        cctvOverlay.classList.toggle('hq-degrade', !!dg.hq);
         if (on && dg.dynamic) cctvStartDrift();
         else cctvStopDrift();
     }
+
+    // ── Stream Status Polling (MediaMTX API) ──
+    let cctvErrorImages = [];
+    fetch('/api/cctv/errors').then(r => r.json()).then(d => { cctvErrorImages = d.images || []; });
+
+    let currentOfflineImg = null;
+    setInterval(async () => {
+        if (!cctvShown || !cctvErrorImages.length) return;
+        try {
+            const res = await fetch(`http://${location.hostname}:9997/v3/paths/list`);
+            const data = await res.json();
+            const activeStreams = (data.items || []).map(p => p.name);
+            
+            let anyOffline = false;
+            Object.keys(cctvPersistentFrames).forEach(cam => {
+                if (!activeStreams.includes(cam)) anyOffline = true;
+            });
+            
+            if (!anyOffline) {
+                currentOfflineImg = null;
+            } else if (!currentOfflineImg) {
+                currentOfflineImg = cctvErrorImages[Math.floor(Math.random() * cctvErrorImages.length)];
+            }
+            
+            Object.keys(cctvPersistentFrames).forEach(cam => {
+                const cell = cctvPersistentFrames[cam];
+                const isOnline = activeStreams.includes(cam);
+                const offlineBg = cell.querySelector('.cctv-offline-bg');
+                
+                if (isOnline) {
+                    offlineBg.style.display = 'none';
+                } else {
+                    const expectedSrc = `/static/cctv_errors/${currentOfflineImg}`;
+                    if (offlineBg.getAttribute('src') !== expectedSrc) {
+                        offlineBg.src = expectedSrc;
+                    }
+                    if (offlineBg.style.display !== 'block') {
+                        offlineBg.style.display = 'block';
+                    }
+                }
+            });
+        } catch(e) {}
+    }, 2000);
 
     // ── Dynamic degradation drift ──
     // Every `interval` seconds each visible camera independently re-rolls its own
@@ -470,7 +561,7 @@
         cctvStopFaults();
         cctvStopDrift();
         cctvOverlay.classList.remove('active');
-        cctvOverlay.innerHTML = '';
+        // persistent iframes remain in DOM, just hidden by the parent's display:none
         cctvShown = false;
     }
 
@@ -497,25 +588,8 @@
         cctvShow(cams);
     }
 
-    // Auto-cycle loop — schedule one show after a random gap, hold a random
-    // duration, repeat. Manual mode pauses auto (dealer is in control).
     function cctvScheduleNext() {
-        clearTimeout(cctvAutoTimer); cctvAutoTimer = null;
-        // Only cycle when enabled AND the game is in a round / round-waiting phase.
-        if (!cctvCfg.auto_enabled || !cctvPhaseOk) return;
-        const gap = cctvRnd(cctvCfg.min_time, cctvCfg.max_time) * 1000;
-        cctvAutoTimer = setTimeout(() => {
-            if (cctvCfg.auto_enabled && cctvPhaseOk && !cctvManual) {
-                cctvShow(cctvPickCams());
-                const dur = cctvRnd(cctvCfg.min_show, cctvCfg.max_show) * 1000;
-                cctvHideTimer = setTimeout(() => {
-                    if (!cctvManual) cctvHide();
-                    cctvScheduleNext();
-                }, dur);
-            } else {
-                cctvScheduleNext();
-            }
-        }, gap);
+        // Dealer explicitly handles auto-cycle now via WebSockets
     }
 
     // Called from updateUI on every game-state push. Cameras cut in at random
@@ -553,6 +627,7 @@
         cctvCfg = Object.assign({}, cctvCfg, cfg);
         if (cfg.fake_error) cctvCfg.fake_error = Object.assign({}, cctvCfg.fake_error, cfg.fake_error);
         if (cfg.degrade) cctvCfg.degrade = Object.assign({}, cctvCfg.degrade, cfg.degrade);
+        cctvInitFrames();
         cctvApplyDegrade();
         if (cctvShown && cctvCfg.fake_error && cctvCfg.fake_error.enabled) cctvStartFaults();
         else if (cctvShown) cctvStopFaults();
@@ -562,7 +637,7 @@
     // Cameras run from boot — no game state required. The first config push
     // from the server just refines the timings already in effect.
     cctvPhaseOk = true;
-    cctvScheduleNext();
+    cctvInitFrames();
 
     connectTV();
 

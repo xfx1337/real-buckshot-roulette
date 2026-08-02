@@ -1344,6 +1344,10 @@ body{ cursor:default; }
                             <input type="range" id="cctv-dg-level" min="0" max="100" value="50" oninput="document.getElementById('cctv-dg-val').textContent=this.value+'%'" style="flex:1;">
                             <span id="cctv-dg-val" style="font-family:var(--font-mono); font-size:12px; color:var(--green); width:38px; text-align:right;">50%</span>
                         </div>
+                        <label style="display:flex; align-items:center; gap:8px; margin:12px 0 0px;">
+                            <input type="checkbox" id="cctv-dg-hq">
+                            <span style="color:var(--orange);">Высококачественные помехи (могут вызывать фризы на слабых TV)</span>
+                        </label>
 
                         <label style="display:flex; align-items:center; gap:8px; margin:12px 0 10px;">
                             <input type="checkbox" id="cctv-dg-dynamic">
@@ -2824,6 +2828,7 @@ function renderCctvConfig(c) {
     set('cctv-fe-duration', fe.duration ?? 4);
     const dg = c.degrade || {};
     chk('cctv-dg-enabled', dg.enabled);
+    chk('cctv-dg-hq', dg.hq);
     set('cctv-dg-level', dg.level ?? 50);
     document.getElementById('cctv-dg-val').textContent = (dg.level ?? 50) + '%';
     chk('cctv-dg-dynamic', dg.dynamic);
@@ -2840,6 +2845,7 @@ function renderCctvConfig(c) {
             cams.map(cam => `<option value="${cam}">${cam.toUpperCase()}</option>`).join('');
         if (cams.includes(prev)) pick.value = prev;
     }
+    runDealerCctvClicker();
 }
 
 // Push one specific camera to the TV. Holds until the dealer toggles CCTV off.
@@ -2885,6 +2891,7 @@ async function cctvSaveConfig() {
         },
         degrade: {
             enabled: document.getElementById('cctv-dg-enabled').checked,
+            hq: document.getElementById('cctv-dg-hq').checked,
             level: numById('cctv-dg-level', 50),
             dynamic: document.getElementById('cctv-dg-dynamic').checked,
             min_level: numById('cctv-dg-min', 10),
@@ -2897,6 +2904,7 @@ async function cctvSaveConfig() {
         await fetch('/api/tv/cctv/config', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body) });
         st.textContent = '✓ сохранено и отправлено на TV';
         st.className = 'tv-status playing';
+        runDealerCctvClicker();
     } catch (e) {
         st.textContent = 'ошибка сохранения';
         st.className = 'tv-status';
@@ -2969,10 +2977,47 @@ function updateCctvButton() {
     }
 }
 
-async function tvToggleCCTV() {
-    cctvActive = !cctvActive;
+async function tvToggleCCTV(forceState = null) {
+    if (forceState !== null && cctvActive === forceState) return;
+    cctvActive = forceState !== null ? forceState : !cctvActive;
     updateCctvButton();
     await fetch('/api/tv/cctv', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ active: cctvActive }) });
+}
+
+let dealerCctvAutoTimer = null;
+let dealerCctvHideTimer = null;
+
+function runDealerCctvClicker() {
+    clearTimeout(dealerCctvAutoTimer);
+    clearTimeout(dealerCctvHideTimer);
+    
+    const enabled = document.getElementById('cctv-auto-enabled');
+    if (!enabled || !enabled.checked) {
+        if (cctvActive) tvToggleCCTV(false);
+        return;
+    }
+    
+    const numById = (id, d) => { const v = parseFloat(document.getElementById(id).value); return isNaN(v) ? d : v; };
+    const minT = numById('cctv-min-time', 30) * 1000;
+    const maxT = Math.max(minT, numById('cctv-max-time', 120) * 1000);
+    const gap = minT + Math.random() * (maxT - minT);
+    
+    dealerCctvAutoTimer = setTimeout(() => {
+        if (!document.getElementById('cctv-auto-enabled').checked) return;
+        
+        tvToggleCCTV(true);
+        
+        const minS = numById('cctv-min-show', 2) * 1000;
+        const maxS = Math.max(minS, numById('cctv-max-show', 10) * 1000);
+        const dur = minS + Math.random() * (maxS - minS);
+        
+        dealerCctvHideTimer = setTimeout(() => {
+            if (document.getElementById('cctv-auto-enabled').checked) {
+                tvToggleCCTV(false);
+            }
+            runDealerCctvClicker();
+        }, dur);
+    }, gap);
 }
 
 async function startCctvServer(btn) {

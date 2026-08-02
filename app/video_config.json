@@ -21,9 +21,9 @@
   },
   "cctv": {
     "auto_enabled": true,
-    "min_time": 30,
-    "max_time": 120,
-    "min_show": 2,
+    "min_time": 5,
+    "max_time": 7,
+    "min_show": 7,
     "max_show": 10,
     "mode": "random",
     "cameras": [
@@ -33,14 +33,19 @@
       "cam4"
     ],
     "fake_error": {
-      "enabled": false,
+      "enabled": true,
       "chance": 0.25,
       "interval": 15,
       "duration": 4
     },
     "degrade": {
-      "enabled": false,
-      "level": 50
+      "enabled": true,
+      "level": 50,
+      "dynamic": true,
+      "min_level": 10,
+      "max_level": 85,
+      "interval": 6,
+      "hq": true
     }
   }
 }
