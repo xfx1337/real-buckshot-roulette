@@ -62,26 +62,7 @@
             background: #111;
         }
         /* Fake "signal lost" glitch — cosmetic, TV only */
-        .cctv-fault {
-            position: absolute;
-            inset: 0;
-            z-index: 96;
-            display: none;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            gap: 8px;
-            background:
-                repeating-linear-gradient(0deg, #000 0, #000 2px, #0a0a0a 2px, #0a0a0a 4px);
-            color: #ff2a2a;
-            font-family: var(--font-mono);
-            text-align: center;
-            animation: cctv-flicker 0.15s steps(2) infinite;
-        }
-        .cctv-cell.faulted .cctv-fault { display: flex; }
-        .cctv-fault .big { font-size: 20px; letter-spacing: 2px; }
-        .cctv-fault .small { font-size: 11px; color: #888; }
-        @keyframes cctv-flicker { 0% { opacity: .82; } 100% { opacity: 1; } }
+        .cctv-cell.faulted .cctv-offline-bg { display: block !important; }
 
         /* Artificial camera degradation — blur + grain + scanlines.
            Strength driven by --dg (0..1), set per overlay from the dealer slider.
@@ -398,10 +379,6 @@
                     <img class="cctv-offline-bg" style="position:absolute; inset:0; width:100%; height:100%; object-fit:cover; z-index:92; display:none;" src="" />
                     <div class="cctv-scan"></div>
                     <div class="cctv-grain"></div>
-                    <div class="cctv-fault">
-                        <div class="big">⚠ НЕТ СИГНАЛА</div>
-                        <div class="small">${cam.toUpperCase()} — НЕДОСТУПНО</div>
-                    </div>
                 `;
                 cctvOverlay.appendChild(cell);
                 cctvPersistentFrames[cam] = cell;
@@ -462,9 +439,23 @@
 
     // ── Stream Status Polling (MediaMTX API) ──
     let cctvErrorImages = [];
-    fetch('/api/cctv/errors').then(r => r.json()).then(d => { cctvErrorImages = d.images || []; });
-
     let currentOfflineImg = null;
+    let prevAnyOffline = false;
+
+    function rollCctvErrorImage() {
+        if (!cctvErrorImages.length) return;
+        currentOfflineImg = cctvErrorImages[Math.floor(Math.random() * cctvErrorImages.length)];
+        Object.values(cctvPersistentFrames).forEach(cell => {
+            const bg = cell.querySelector('.cctv-offline-bg');
+            if (bg) bg.src = `/static/cctv_errors/${currentOfflineImg}`;
+        });
+    }
+
+    fetch('/api/cctv/errors').then(r => r.json()).then(d => { 
+        cctvErrorImages = d.images || []; 
+        rollCctvErrorImage();
+    });
+
     setInterval(async () => {
         if (!cctvShown || !cctvErrorImages.length) return;
         try {
@@ -474,14 +465,15 @@
             
             let anyOffline = false;
             Object.keys(cctvPersistentFrames).forEach(cam => {
-                if (!activeStreams.includes(cam)) anyOffline = true;
+                if (!activeStreams.includes(cam) || cctvPersistentFrames[cam].classList.contains('faulted')) {
+                    anyOffline = true;
+                }
             });
             
-            if (!anyOffline) {
-                currentOfflineImg = null;
-            } else if (!currentOfflineImg) {
-                currentOfflineImg = cctvErrorImages[Math.floor(Math.random() * cctvErrorImages.length)];
+            if (!anyOffline && prevAnyOffline) {
+                rollCctvErrorImage(); // Roll a new image for the next time it breaks
             }
+            prevAnyOffline = anyOffline;
             
             Object.keys(cctvPersistentFrames).forEach(cam => {
                 const cell = cctvPersistentFrames[cam];
@@ -491,10 +483,6 @@
                 if (isOnline) {
                     offlineBg.style.display = 'none';
                 } else {
-                    const expectedSrc = `/static/cctv_errors/${currentOfflineImg}`;
-                    if (offlineBg.getAttribute('src') !== expectedSrc) {
-                        offlineBg.src = expectedSrc;
-                    }
                     if (offlineBg.style.display !== 'block') {
                         offlineBg.style.display = 'block';
                     }
