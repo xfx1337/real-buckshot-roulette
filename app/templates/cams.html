@@ -30,6 +30,7 @@
             font-size: 11px; border: 1px solid rgba(255,255,255,.2);
             pointer-events: none;
         }
+        .click-overlay { position: absolute; inset: 0; z-index: 4; cursor: pointer; }
         /* Fullscreen one camera */
         #cams-grid.fullscreen { grid-template-columns: 1fr !important; grid-template-rows: 1fr !important; }
         #cams-grid.fullscreen .cam-cell { display: none; }
@@ -68,6 +69,7 @@
                 <div class="cam-cell" data-cam="${cam}">
                     <div class="cam-label">${cam.toUpperCase()} [REC]</div>
                     <button class="exit-full" data-exit>✕ НАЗАД</button>
+                    <div class="click-overlay"></div>
                     <iframe scrolling="no" src="http://${host}:8889/${encodeURIComponent(cam)}/"></iframe>
                 </div>`).join('');
         }
