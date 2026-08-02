@@ -1310,6 +1310,10 @@ body{ cursor:default; }
                             <option value="grid">Все камеры сеткой на весь экран</option>
                             <option value="single">По одной камере на весь экран (случайная)</option>
                         </select>
+                        <label style="display:flex; align-items:center; gap:8px; margin-bottom:14px;">
+                            <input type="checkbox" id="cctv-panning">
+                            <span>Виртуальное вращение (камера плавно поворачивается влево-вправо)</span>
+                        </label>
 
                         <h4>▸ ТАЙМИНГИ (секунды)</h4>
                         <div class="tv-slot-row"><label>Пауза между показами</label>
@@ -2826,6 +2830,7 @@ function renderCctvConfig(c) {
     set('cctv-min-show', c.min_show ?? 3);
     set('cctv-max-show', c.max_show ?? 10);
     set('cctv-cameras', (c.cameras || ['cam1','cam2','cam3','cam4']).join(', '));
+    chk('cctv-panning', c.panning);
     chk('cctv-fe-enabled', fe.enabled);
     set('cctv-fe-chance', fe.chance ?? 0.25);
     set('cctv-fe-interval', fe.interval ?? 15);
@@ -2888,6 +2893,7 @@ async function cctvSaveConfig() {
         min_show: numById('cctv-min-show', 3),
         max_show: numById('cctv-max-show', 10),
         cameras: cameras.length ? cameras : ['cam1'],
+        panning: document.getElementById('cctv-panning').checked,
         fake_error: {
             enabled: document.getElementById('cctv-fe-enabled').checked,
             chance: numById('cctv-fe-chance', 0.25),

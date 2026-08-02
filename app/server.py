@@ -1463,7 +1463,7 @@ async def tv_cctv_config(request: Request):
     data = await request.json()
     cfg = video_config.load_config()
     cctv = cfg.setdefault("cctv", {})
-    for key in ("auto_enabled", "min_time", "max_time", "min_show", "max_show", "mode", "cameras"):
+    for key in ("auto_enabled", "min_time", "max_time", "min_show", "max_show", "mode", "cameras", "panning"):
         if key in data:
             cctv[key] = data[key]
     if "fake_error" in data and isinstance(data["fake_error"], dict):
