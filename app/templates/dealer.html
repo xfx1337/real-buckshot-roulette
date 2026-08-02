@@ -1035,6 +1035,21 @@ body{ cursor:default; }
 .rd-load-actions{ display:flex; gap:10px; align-items:center; margin-top:14px; flex:0 0 auto; }
 .rd-load-actions .btn-dealer{ width:auto; animation:none; flex:0 0 auto; padding:12px 24px; }
 
+/* ══ ЭКРАН «TV ВИДЕО» ══ */
+.rd-tv-grid{ display:grid; grid-template-columns:minmax(0,1fr) 296px; gap:12px; height:100%; }
+.rd-tv-grid .rd-col{ display:flex; flex-direction:column; gap:12px; min-height:0; }
+.tv-slot-row{ display:flex; align-items:center; gap:10px; margin-bottom:8px; font-family:var(--font-mono); font-size:12px; }
+.tv-slot-row label{ flex:0 0 200px; color:var(--text-dim); }
+.tv-slot-row select{ flex:1; }
+.tv-manual-row{ display:flex; align-items:center; gap:8px; margin-bottom:10px; flex-wrap:wrap; }
+.tv-manual-row select{ flex:1 1 160px; min-width:140px; }
+.tv-btns{ display:flex; gap:8px; flex-wrap:wrap; margin-top:6px; }
+.tv-btns .btn{ flex:1 1 80px; }
+.tv-status{ font-family:var(--font-tube); font-size:11px; letter-spacing:.1em; color:var(--text-faint); margin-top:10px; }
+.tv-status.playing{ color:var(--green); }
+.tv-status.paused{ color:#e5bc3e; }
+.tv-auto-row{ display:flex; align-items:center; gap:8px; margin-bottom:6px; font-family:var(--font-mono); font-size:12px; color:var(--text-dim); }
+.tv-auto-row input[type=checkbox]{ width:15px; height:15px; }
 </style>
 </head>
 
@@ -1058,6 +1073,7 @@ body{ cursor:default; }
             <button class="rd-tab" data-screen="loading" onclick="showScreen('loading')">Зарядка</button>
             <button class="rd-tab" data-screen="items" onclick="showScreen('items')">Предметы</button>
             <button class="rd-tab" data-screen="lobby" onclick="showScreen('lobby')">Настройки</button>
+            <button class="rd-tab" data-screen="tv" onclick="showScreen('tv')">📺 TV</button>
         </nav>
         <span class="rd-spacer"></span>
         <div class="header-controls">
@@ -1212,6 +1228,54 @@ body{ cursor:default; }
                 <button class="btn btn-dealer" onclick="createGame()">НОВАЯ ИГРА</button>
             </div>
         </div>
+
+        <!-- TV ВИДЕО -->
+        <div class="rd-screen" id="rd-screen-tv" hidden>
+            <div class="rd-tv-grid">
+                <div class="rd-col">
+                    <div class="rd-card" style="flex:1 1 auto;">
+                        <h3>Управление TV-видео <span class="rd-tag">воспроизведение на телевизоре</span></h3>
+
+                        <h4 style="margin-top:0;">▸ БЫСТРЫЙ ЗАПУСК ПО СЛОТУ</h4>
+                        <div class="tv-btns" id="tv-slot-btns"></div>
+
+                        <h4>▸ РУЧНОЕ ВОСПРОИЗВЕДЕНИЕ</h4>
+                        <div class="tv-manual-row">
+                            <select id="tv-manual-video"><option value="">— выберите файл —</option></select>
+                            <label style="flex:0; white-space:nowrap;"><input type="checkbox" id="tv-manual-loop"> loop</label>
+                        </div>
+                        <div class="tv-btns">
+                            <button class="btn btn-plate plate-teal" onclick="tvPlayManual()">▶ ИГРАТЬ</button>
+                            <button class="btn btn-plate" onclick="tvPause()">⏸ ПАУЗА</button>
+                            <button class="btn btn-plate" onclick="tvResume()">▶ СНЯТЬ</button>
+                            <button class="btn btn-plate plate-yellow" onclick="tvStop()">⏹ СТОП</button>
+                        </div>
+
+                        <div class="tv-status" id="tv-status">статус: нет видео</div>
+                    </div>
+
+                    <div class="rd-card">
+                        <h3>Настройки TV <span class="rd-tag">video_config.json</span></h3>
+                        <h4>▸ ГРОМКОСТЬ ВИДЕО НА TV</h4>
+                        <div style="display:flex; align-items:center; gap:10px; margin-bottom:14px;">
+                            <input type="range" id="tv-volume-slider" min="0" max="100" value="100" oninput="tvSetVolume(this.value)" style="flex:1;">
+                            <span id="tv-volume-val" style="font-family:var(--font-mono); font-size:12px; color:var(--green); width:35px; text-align:right;">100%</span>
+                        </div>
+                        
+                        <div id="tv-slot-config" style="margin-top:10px;"></div>
+                        <h4>▸ АВТО-ВОСПРОИЗВЕДЕНИЕ</h4>
+                        <div id="tv-auto-config"></div>
+                        <div class="rd-load-actions" style="margin-top:12px;">
+                            <button class="btn btn-dealer" onclick="tvSaveConfig()">СОХРАНИТЬ КОНФИГ</button>
+                        </div>
+                    </div>
+                </div>
+                <div class="rd-col">
+                    <div class="rd-card rd-players"><h3>Игроки</h3><div class="js-players"></div></div>
+                    <div class="rd-card rd-log"><h3>Лог событий</h3><div class="event-log js-log"></div></div>
+                </div>
+            </div>
+        </div>
     </div>
 
     <!-- Модалка «Сервер/Железо»: редактирует config.json (Wi-Fi, IP, код курка,
@@ -1300,7 +1364,7 @@ function connect() {
 // Фаза сервера → экран новой вкладочной раскладки. Сервер — источник истины:
 // на каждый push переключаемся на экран текущей фазы. Вкладки позволяют
 // оператору «подсмотреть» другой экран между обновлениями (showScreen).
-const SCREENS = ['turn','loading','items','lobby','nogame','roundover','gameover'];
+const SCREENS = ['turn','loading','items','lobby','nogame','roundover','gameover','tv'];
 const PHASE_TO_SCREEN = {
     lobby: 'lobby',
     round_start: 'loading', dealer_loading: 'loading', dealer_reloading: 'loading',
@@ -1328,6 +1392,7 @@ function showScreen(name) {
     else if (name === 'loading') renderLoading(gameState);
     else if (name === 'items') renderItems(gameState);
     else if (name === 'lobby') renderLobby(gameState);
+    else if (name === 'tv') loadTvConfig();
 }
 
 function render() {
@@ -2013,6 +2078,22 @@ function renderGameOver(s) {
         document.getElementById('gameover-title').textContent = 'ИГРА ЗАВЕРШЕНА';
         document.getElementById('gameover-winner').textContent = '';
     }
+
+    // Auto-play end video for TV
+    if (tvConfigCache && tvConfigCache.config.auto_play.result_on_game_over) {
+        if (window._lastGameOverId !== s.game_id) {
+            window._lastGameOverId = s.game_id;
+            
+            const p1 = s.players.find(p => p.number === 1);
+            const playerWon = p1 && s.winner_name === p1.name;
+            
+            if (playerWon) {
+                tvPlaySlot('player_win');
+            } else {
+                tvPlaySlot('player_lose');
+            }
+        }
+    }
 }
 
 function hpPips(p) {
@@ -2072,12 +2153,60 @@ async function apiPost(url, body = {}) {
     return res;
 }
 
+let gameStartStep = 0;
+
 function createGame() {
+    gameStartStep = 0;
+    const btn = document.getElementById('btn-start');
+    if (btn) btn.textContent = 'НАЧАТЬ ИГРУ';
+    
     const modeSelect = document.getElementById('game-mode-select');
     const mode = modeSelect ? modeSelect.value : 'multiplayer';
     apiPost('/api/create_game', { game_mode: mode });
 }
-function startGame() { apiPost('/api/start_game'); }
+
+async function startGame() {
+    if (!tvConfigCache) {
+        try {
+            const r = await fetch('/api/tv/config');
+            tvConfigCache = await r.json();
+        } catch (e) {}
+    }
+    const autoPlay = (tvConfigCache && tvConfigCache.config.auto_play) || {};
+    const btn = document.getElementById('btn-start');
+
+    if (gameStartStep === 0) {
+        let hasNextStep = false;
+        if (autoPlay.static_on_create) {
+            tvPlaySlot('static_noise');
+            gameStartStep = 1;
+            btn.textContent = '▶ ВСТУПИТЕЛЬНЫЙ РОЛИК';
+            if (!autoPlay.intro_after_static) {
+                gameStartStep = 2;
+                btn.textContent = '▶ СТАРТ ИГРЫ';
+            }
+            hasNextStep = true;
+        } else if (autoPlay.intro_after_static) {
+            tvPlaySlot('intro');
+            gameStartStep = 2;
+            btn.textContent = '▶ СТАРТ ИГРЫ';
+            hasNextStep = true;
+        }
+        
+        if (!hasNextStep) {
+            apiPost('/api/start_game');
+        }
+    } else if (gameStartStep === 1) {
+        tvPlaySlot('intro');
+        gameStartStep = 2;
+        btn.textContent = '▶ СТАРТ ИГРЫ';
+    } else if (gameStartStep === 2) {
+        tvStop();
+        apiPost('/api/start_game');
+        gameStartStep = 0;
+        btn.textContent = 'НАЧАТЬ ИГРУ';
+    }
+}
 function confirmShells() { apiPost('/api/confirm_shells'); }
 function reloadRevolver() { apiPost('/api/reload_revolver'); }
 function confirmItems() { apiPost('/api/confirm_items'); }
@@ -2464,6 +2593,147 @@ document.addEventListener('click', function (ev) {
 }, true);
 
 connect();
+
+// ── TV Video Control ──
+let tvConfigCache = null;
+
+async function loadTvConfig() {
+    try {
+        const r = await fetch('/api/tv/config');
+        const data = await r.json();
+        tvConfigCache = data;
+        renderTvConfig(data);
+    } catch (e) { console.warn('tv config', e); }
+}
+
+function renderTvConfig(data) {
+    const { config, videos, slot_labels } = data;
+
+    // Slot quick-play buttons
+    const btnsEl = document.getElementById('tv-slot-btns');
+    btnsEl.innerHTML = Object.entries(slot_labels).map(([slot, label]) => {
+        const file = config.videos[slot] || '—';
+        return `<button class="btn btn-plate plate-teal btn-small" onclick="tvPlaySlot('${slot}')" title="${file}">${label}</button>`;
+    }).join('') + `<div style="width:100%; margin-top:4px;"><label style="font-size:11px; color:var(--text-dim);"><input type="checkbox" id="tv-slot-loop"> Принудительно зациклить выбранный слот</label></div>`;
+
+    // Manual video select
+    const sel = document.getElementById('tv-manual-video');
+    sel.innerHTML = '<option value="">— выберите файл —</option>' +
+        videos.map(v => `<option value="${v}">${v}</option>`).join('');
+
+    // Slot config (dropdowns)
+    const cfgEl = document.getElementById('tv-slot-config');
+    const loopCfg = config.loop || {};
+    cfgEl.innerHTML = Object.entries(slot_labels).map(([slot, label]) => {
+        const opts = '<option value="">(не задано)</option>' +
+            videos.map(v => `<option value="${v}" ${config.videos[slot] === v ? 'selected' : ''}>${v}</option>`).join('');
+        const isLoop = loopCfg[slot] ? 'checked' : '';
+        return `<div class="tv-slot-row">
+            <label>${label}</label>
+            <select data-slot="${slot}">${opts}</select>
+            <label style="flex:0; white-space:nowrap; margin-left:8px;"><input type="checkbox" data-loop="${slot}" ${isLoop}> loop</label>
+        </div>`;
+    }).join('');
+
+    // Auto-play config
+    const autoEl = document.getElementById('tv-auto-config');
+    const autoLabels = {
+        static_on_create: 'Помехи при создании игры',
+        intro_after_static: 'Вступление после подтверждения помех',
+        result_on_game_over: 'Ролик победы/поражения в конце игры',
+    };
+    autoEl.innerHTML = Object.entries(autoLabels).map(([key, label]) => {
+        const checked = config.auto_play[key] ? 'checked' : '';
+        return `<div class="tv-auto-row"><input type="checkbox" data-auto="${key}" ${checked}><label>${label}</label></div>`;
+    }).join('');
+    
+    // Settings (Volume)
+    if (config.settings && config.settings.volume !== undefined) {
+        document.getElementById('tv-volume-slider').value = config.settings.volume;
+        document.getElementById('tv-volume-val').textContent = config.settings.volume + '%';
+    }
+
+    // Status
+    updateTvStatus();
+}
+
+async function updateTvStatus() {
+    try {
+        const r = await fetch('/api/tv/state');
+        const st = await r.json();
+        const el = document.getElementById('tv-status');
+        if (st.action === 'play') {
+            el.textContent = `▶ воспроизведение: ${st.video}`;
+            el.className = 'tv-status playing';
+        } else if (st.action === 'pause') {
+            el.textContent = `⏸ пауза: ${st.video}`;
+            el.className = 'tv-status paused';
+        } else {
+            el.textContent = 'статус: нет видео';
+            el.className = 'tv-status';
+        }
+    } catch (e) {}
+}
+
+async function tvPlaySlot(slot) {
+    const forceLoop = document.getElementById('tv-slot-loop') ? document.getElementById('tv-slot-loop').checked : false;
+    const configLoop = (tvConfigCache && tvConfigCache.config.loop && tvConfigCache.config.loop[slot]) || false;
+    const shouldLoop = forceLoop || configLoop;
+    await fetch('/api/tv/play', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ slot, loop: shouldLoop }) });
+    updateTvStatus();
+}
+
+async function tvPlayManual() {
+    const video = document.getElementById('tv-manual-video').value;
+    if (!video) return;
+    const loop = document.getElementById('tv-manual-loop').checked;
+    await fetch('/api/tv/play', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ video, loop }) });
+    updateTvStatus();
+}
+
+async function tvPause() {
+    await fetch('/api/tv/pause', { method: 'POST' });
+    updateTvStatus();
+}
+
+async function tvResume() {
+    await fetch('/api/tv/resume', { method: 'POST' });
+    updateTvStatus();
+}
+
+async function tvStop() {
+    await fetch('/api/tv/stop', { method: 'POST' });
+    updateTvStatus();
+}
+
+let tvVolumeTimeout = null;
+function tvSetVolume(val) {
+    document.getElementById('tv-volume-val').textContent = val + '%';
+    clearTimeout(tvVolumeTimeout);
+    tvVolumeTimeout = setTimeout(async () => {
+        await fetch('/api/tv/volume', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ volume: parseInt(val) }) });
+    }, 200); // Debounce
+}
+
+async function tvSaveConfig() {
+    const videos = {};
+    const loop = {};
+    document.querySelectorAll('#tv-slot-config select[data-slot]').forEach(sel => {
+        videos[sel.dataset.slot] = sel.value;
+    });
+    document.querySelectorAll('#tv-slot-config input[data-loop]').forEach(cb => {
+        loop[cb.dataset.loop] = cb.checked;
+    });
+    const auto_play = {};
+    document.querySelectorAll('#tv-auto-config input[data-auto]').forEach(cb => {
+        auto_play[cb.dataset.auto] = cb.checked;
+    });
+    const volume = parseInt(document.getElementById('tv-volume-slider').value) || 100;
+    
+    await fetch('/api/tv/config/save', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ videos, loop, auto_play, settings: { volume } }) });
+    loadTvConfig();
+}
+
 </script>
 
 

@@ -1,0 +1,22 @@
+{
+  "videos": {
+    "static_noise": "noize.mp4",
+    "intro": "intro.mp4",
+    "player_win": "win.mp4",
+    "player_lose": "lose.mp4"
+  },
+  "auto_play": {
+    "static_on_create": true,
+    "intro_after_static": true,
+    "result_on_game_over": true
+  },
+  "settings": {
+    "volume": 52
+  },
+  "loop": {
+    "static_noise": true,
+    "intro": false,
+    "player_win": false,
+    "player_lose": false
+  }
+}
