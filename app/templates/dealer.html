@@ -1321,6 +1321,22 @@ body{ cursor:default; }
             </div>
         </div>
     </div>
+
+    <!-- Модалка «Осмотр магазина» -->
+    <div id="mag-inspect-modal" class="scfg-overlay" style="display:none; z-index:200;">
+        <div class="scfg-box" style="width:360px; max-height:80vh; overflow-y:auto;">
+            <div class="scfg-head">
+                <h2>СОДЕРЖИМОЕ МАГАЗИНА</h2>
+                <button class="btn btn-small" onclick="document.getElementById('mag-inspect-modal').style.display='none'">✕</button>
+            </div>
+            <div class="scfg-body" id="mag-inspect-body" style="display:flex; flex-direction:column; gap:8px;">
+            </div>
+            <div class="scfg-foot">
+                <span class="scfg-note" style="flex:1; text-align:center;">Очередь выстрелов (сверху вниз)</span>
+            </div>
+        </div>
+    </div>
+
 </div>
 </div>
 <script src="/static/sound.js?v=3"></script>
@@ -1915,7 +1931,10 @@ function renderTurnMagazine(s) {
     document.getElementById('turn-mag-block').innerHTML = `
         <div class="sg-header">
             <div class="sg-title">Помповый дробовик · ${seq.length} патр.</div>
-            <div class="sg-chamber-type ${typeCls}">${typeLbl}</div>
+            <div style="display:flex; gap:8px; align-items:center;">
+                <button class="btn btn-secondary btn-tiny" onclick="showMagInspect()" style="padding:4px 8px; font-size:10px;">ВЕСЬ СПИСОК</button>
+                <div class="sg-chamber-type ${typeCls}">${typeLbl}</div>
+            </div>
         </div>
         <div class="sg-barrel" id="sg-barrel">
             <!-- верхний ствол + ствольная коробка (патронник + дуло) -->
@@ -1965,6 +1984,29 @@ function renderTurnMagazine(s) {
             </div>
         </div>` : ''}
     `;
+}
+
+function showMagInspect() {
+    if (!gameState || !gameState.shells_sequence) return;
+    const seq = gameState.shells_sequence;
+    const body = document.getElementById('mag-inspect-body');
+    let html = '';
+    seq.forEach((sh, i) => {
+        const typeLbl = sh === 'live' ? '◉ БОЕВОЙ' : sh === 'silver' ? '❖ СЕРЕБРЯНЫЙ' : sh === 'blank' ? '○ ХОЛОСТОЙ' : 'ПУСТО';
+        const color = sh === 'live' ? 'var(--red)' : sh === 'silver' ? '#a5a5cc' : 'var(--text-faint)';
+        const bg = i === 0 ? 'rgba(255,255,255,0.05)' : 'transparent';
+        html += `<div style="display:flex; align-items:center; justify-content:space-between; padding:8px; border-bottom:1px solid #333; background:${bg};">
+            <span style="color:var(--text-dim); font-size:13px; font-family:var(--font-mono);">
+                ${i+1}-й выстрел ${i===0 ? '<span style="color:var(--green)">(в патроннике)</span>' : ''}
+            </span>
+            <span style="color:${color}; font-weight:bold;">${typeLbl}</span>
+        </div>`;
+    });
+    if (seq.length === 0) {
+        html = '<div class="hint">Оружие разряжено</div>';
+    }
+    body.innerHTML = html;
+    document.getElementById('mag-inspect-modal').style.display = 'flex';
 }
 
 function renderTurn(s) {
