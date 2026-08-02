@@ -39,11 +39,53 @@
             background: #3fef6a;
             box-shadow: 0 0 6px rgba(63, 239, 106, 0.6);
         }
+        /* CCTV Overlay */
+        #tv-cctv-overlay {
+            position: fixed;
+            inset: 0;
+            z-index: 90;
+            background: #000;
+            display: none;
+            grid-template-columns: 1fr 1fr;
+            grid-template-rows: 1fr 1fr;
+            gap: 4px;
+            padding: 4px;
+        }
+        #tv-cctv-overlay.active {
+            display: grid;
+        }
+        .cctv-frame {
+            width: 100%;
+            height: 100%;
+            border: none;
+            background: #111;
+        }
+        .cctv-label {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            background: rgba(0,0,0,0.7);
+            color: #fff;
+            padding: 4px 8px;
+            font-family: var(--font-mono);
+            font-size: 12px;
+            z-index: 95;
+            pointer-events: none;
+            border: 1px solid rgba(255,255,255,0.2);
+        }
     </style>
 </head>
 <body class="page-player">
     <div class="crt-vignette" style="z-index:5;"></div>
     <div class="crt-scanlines" style="z-index:6; opacity:.4;"></div>
+
+    <!-- CCTV Overlay -->
+    <div id="tv-cctv-overlay">
+        <div style="position:relative;"><div class="cctv-label">CAM 1 [REC]</div><iframe id="cctv-frame-1" class="cctv-frame" scrolling="no"></iframe></div>
+        <div style="position:relative;"><div class="cctv-label">CAM 2 [REC]</div><iframe id="cctv-frame-2" class="cctv-frame" scrolling="no"></iframe></div>
+        <div style="position:relative;"><div class="cctv-label">CAM 3 [REC]</div><iframe id="cctv-frame-3" class="cctv-frame" scrolling="no"></iframe></div>
+        <div style="position:relative;"><div class="cctv-label">CAM 4 [REC]</div><iframe id="cctv-frame-4" class="cctv-frame" scrolling="no"></iframe></div>
+    </div>
 
     <!-- Video overlay -->
     <div id="tv-video-overlay">
@@ -192,6 +234,22 @@
             case 'set_volume':
                 if (cmd.volume !== undefined) {
                     videoEl.volume = Math.max(0, Math.min(100, cmd.volume)) / 100.0;
+                }
+                break;
+            case 'cctv':
+                const cctvOverlay = document.getElementById('tv-cctv-overlay');
+                if (cmd.active) {
+                    // Load the WebRTC streams dynamically using the current host IP
+                    const host = location.hostname;
+                    for (let i = 1; i <= 4; i++) {
+                        const frame = document.getElementById('cctv-frame-' + i);
+                        if (!frame.src) {
+                            frame.src = `http://${host}:8889/cam${i}/`;
+                        }
+                    }
+                    cctvOverlay.classList.add('active');
+                } else {
+                    cctvOverlay.classList.remove('active');
                 }
                 break;
         }
