@@ -1190,6 +1190,7 @@ body{ cursor:default; }
                     <option value="multiplayer">Мультиплеер (2-4 игрока)</option>
                     <option value="solo">Соло / 1 на 1 (1 телефон на двоих)</option>
                     <option value="story">Стори мод / 1vs1 (3 стадии как в оригинале)</option>
+                    <option value="story_one_round">Стори-like 1 на 1 (1 раунд, 4 HP, предметы после первой дозарядки)</option>
                 </select>
                 <button class="btn btn-dealer" onclick="createGame()">СОЗДАТЬ ИГРУ</button>
             </div>
@@ -1378,6 +1379,8 @@ function renderLobby(s) {
     if (modeBadge) {
         if (s.game_mode === 'story') {
             modeBadge.textContent = '[ СТОРИ МОД 1vs1 ]';
+        } else if (s.game_mode === 'story_one_round') {
+            modeBadge.textContent = '[ СТОРИ-ЛАЙК 1 на 1 ]';
         } else if (s.game_mode === 'solo') {
             modeBadge.textContent = '[ РЕЖИМ 1 на 1 ]';
         } else {
@@ -1394,7 +1397,7 @@ function renderLobby(s) {
         </div>
     `).join('') || '<p class="hint">---</p>';
 
-    if (s.game_mode === 'solo' || s.game_mode === 'story') {
+    if (s.game_mode === 'solo' || s.game_mode === 'story' || s.game_mode === 'story_one_round') {
         document.getElementById('btn-start').disabled = s.players.length !== 1;
         document.getElementById('lobby-hint').textContent = `Игроков: ${s.players.length}/1 (Только один игрок должен зайти с телефона)`;
     } else {
@@ -1413,6 +1416,8 @@ function defaultRoundsFor(mode) {
         return [{hp:2,items_per_player:0,max_shells:3},{hp:4,items_per_player:2,max_shells:6},{hp:6,items_per_player:4,max_shells:8}];
     if (mode === 'story')
         return [{hp:2,items_per_player:0,max_shells:5},{hp:4,items_per_player:2,max_shells:8},{hp:6,items_per_player:4,max_shells:8}];
+    if (mode === 'story_one_round')
+        return [{hp:4,items_per_player:2,max_shells:8}];
     return [{hp:0,items_per_player:0,max_shells:4},{hp:0,items_per_player:2,max_shells:6},{hp:0,items_per_player:4,max_shells:8}];
 }
 
@@ -1441,9 +1446,10 @@ function renderConfigEditor(s) {
             <div class="config-round" style="margin-bottom: 12px;">
                 <label style="width:auto; margin-right: 8px;">Режим:</label>
                 <select id="cfg_game_mode" class="cfg-input" style="width:auto;" onchange="onModeChange(this.value)">
-                    <option value="multiplayer" ${mode!=='solo'&&mode!=='story'?'selected':''}>Мультиплеер</option>
+                    <option value="multiplayer" ${mode!=='solo'&&mode!=='story'&&mode!=='story_one_round'?'selected':''}>Мультиплеер</option>
                     <option value="solo" ${mode==='solo'?'selected':''}>Соло (1 на 1)</option>
                     <option value="story" ${mode==='story'?'selected':''}>Стори мод (1vs1, 3 стадии)</option>
+                    <option value="story_one_round" ${mode==='story_one_round'?'selected':''}>Стори-лайк 1 на 1 (1 раунд, 4 HP, предметы после первой дозарядки)</option>
                 </select>
             </div>
             <div class="config-round" style="margin-bottom: 12px;">

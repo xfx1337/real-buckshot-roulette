@@ -115,6 +115,12 @@ STORY_DEFAULT_ROUNDS = [
     {"hp": 6, "items_per_player": 4, "max_shells": 8},
 ]
 
+# Новое режимное дополнение: одна сюжетная стадия с 4 HP и 2 предметами после
+# первой физической перезарядки дробовика.
+STORY_ONE_ROUND_DEFAULT_ROUNDS = [
+    {"hp": 4, "items_per_player": 2, "max_shells": 8},
+]
+
 # Ёмкость капсюлей в игрушечном револьвере (физический реквизит). Каждый
 # БОЕВОЙ выстрел тратит один капсюль; когда они кончаются, дилер физически
 # перезаряжает револьвер и жмёт «Я перезарядил».
@@ -191,6 +197,7 @@ class GameState:
         # каждом боевом выстреле; когда 0 — нужно физически перезарядить.
         self.revolver_ammo: int = self.config.revolver_capacity
 
+
     def _log(self, msg: str, event_type: str = "info"):
         self.event_log.append(GameEvent(time.time(), msg, event_type))
 
@@ -223,7 +230,7 @@ class GameState:
 
     def start_game(self):
         # Solo mode or Story mode: if only 1 player joined, auto-create DEALER as opponent
-        if self.config.game_mode in ("solo", "story"):
+        if self.config.game_mode in ("solo", "story", "story_one_round"):
             if len(self.players) < 1:
                 raise ValueError("Нужен хотя бы 1 игрок")
             if len(self.players) == 1:
@@ -235,8 +242,10 @@ class GameState:
             # Apply round config
             if self.config.game_mode == "solo":
                 self.config.rounds = [dict(r) for r in SOLO_DEFAULT_ROUNDS]
-            else:
+            elif self.config.game_mode == "story":
                 self.config.rounds = [dict(r) for r in STORY_DEFAULT_ROUNDS]
+            else:
+                self.config.rounds = [dict(r) for r in STORY_ONE_ROUND_DEFAULT_ROUNDS]
         else:
             if len(self.players) < 2:
                 raise ValueError("Нужно минимум 2 игрока")
@@ -286,6 +295,8 @@ class GameState:
     def _generate_shells(self):
         if self.config.game_mode == "story":
             self._generate_shells_story()
+        elif self.config.game_mode == "story_one_round":
+            self._generate_shells_story_one_round()
         elif self.config.game_mode == "solo":
             self._generate_shells_solo()
         else:
@@ -323,6 +334,84 @@ class GameState:
             blank_count = total - live_count
 
         self._finalize_shells(live_count, blank_count)
+
+    def _generate_shells_story_one_round(self):
+        """Shell generation for the single-round story mode."""
+        rc = self.config.rounds[self.current_round]
+        reload_idx = self.shells_generated_in_round
+        self.shells_generated_in_round += 1
+
+        if reload_idx == 0:
+            # Initial load before any items: like story stage 1 first load.
+            live_count = 1
+            blank_count = 2
+        else:
+            # Subsequent loads: like story stage 2 loads, at least one live and one blank.
+            total = random.randint(2, rc["max_shells"])
+            live_count = random.randint(1, total - 1)
+            blank_count = total - live_count
+
+        self._finalize_shells(live_count, blank_count)
+
+    def _distribute_items(self, items_count: int):
+        """Distribute a given number of items to alive players without loading shells."""
+        self.dealt_items = {}
+        if items_count == 0:
+            return
+
+        self.phase = GamePhase.DEALER_ITEMS
+        if self.config.game_mode in ("story", "story_one_round"):
+            base_pool = [
+                ItemType.BEER, ItemType.HANDSAW, ItemType.HANDCUFFS,
+                ItemType.MAGNIFYING_GLASS, ItemType.CIGARETTES
+            ]
+        else:
+            base_pool = list(ITEM_POOL_BASE)
+
+        for p in self.get_alive_players():
+            slots_free = self.config.max_items_per_player - len(p.items)
+            count = min(items_count, slots_free)
+            final_chosen = []
+
+            for _ in range(count):
+                table_counts = {item: 0 for item in base_pool}
+                for alive_p in self.get_alive_players():
+                    for i in alive_p.items:
+                        if i in table_counts:
+                            table_counts[i] += 1
+                for i in final_chosen:
+                    if i in table_counts:
+                        table_counts[i] += 1
+
+                current_pool = []
+                for item in base_pool:
+                    g_limit = self.config.item_limits_global.get(item, 0)
+                    global_ok = (g_limit == 0) or (table_counts.get(item, 0) < g_limit)
+
+                    personal_count = sum(1 for x in p.items if x == item) + sum(1 for x in final_chosen if x == item)
+                    p_limit = self.config.item_limits_per_player.get(item, 0)
+                    personal_limit = p_limit if p_limit > 0 else self.config.max_items_per_player
+                    personal_ok = personal_count < personal_limit
+
+                    if global_ok and personal_ok:
+                        current_pool.append(item)
+
+                if not current_pool:
+                    break
+
+                chosen = random.choice(current_pool)
+                if chosen == ItemType.EXPIRED_MEDICINE:
+                    if random.random() < 0.5:
+                        chosen = ItemType.MEDICINE_VODKA
+                    else:
+                        chosen = ItemType.MEDICINE_WATER
+                final_chosen.append(chosen)
+
+            p.items.extend(final_chosen)
+            self.dealt_items[p.id] = final_chosen
+            names = ", ".join(ITEM_LABELS[i][0] for i in final_chosen)
+            self._log(f"Игроку #{p.number} «{p.name}» выданы: {names}", "item")
+
 
     def _generate_shells_solo(self):
         """Original singleplayer shell generation."""
@@ -412,14 +501,20 @@ class GameState:
         items_count = rc["items_per_player"]
 
         if items_count == 0:
-            # If no items are to be distributed, go straight to generating shells
+            self._generate_shells()
+            return
+
+        if self.config.game_mode == "story_one_round" and self.shells_generated_in_round == 0:
+            # In story_one_round, the very first shell load happens without items.
+            # Items are distributed starting from the second load onward (after
+            # the first shotgun reload when all shells have been fired).
             self._generate_shells()
             return
 
         self.phase = GamePhase.DEALER_ITEMS
         
         # Build available pool (medicine pre-generated as vodka/water at deal time)
-        if self.config.game_mode == "story":
+        if self.config.game_mode in ("story", "story_one_round"):
             # Story mode: только базовые предметы из оригинального сюжетного режима
             base_pool = [
                 ItemType.BEER, ItemType.HANDSAW, ItemType.HANDCUFFS,
@@ -478,7 +573,7 @@ class GameState:
     def confirm_shells_loaded(self):
         """Dealer confirms they physically loaded the shells."""
         if self.phase == GamePhase.DEALER_RELOADING:
-            if self.config.game_mode == "story":
+            if self.config.game_mode in ("story", "story_one_round"):
                 for idx, pid in enumerate(self.turn_order):
                     p = self.players[pid]
                     if p.name != "DEALER" and p.alive:
@@ -486,14 +581,14 @@ class GameState:
                         break
             self.phase = GamePhase.PLAYER_TURN
             self._log(">> Дробовик дозаряжен, игра продолжается", "system")
-            if self.config.game_mode == "story":
+            if self.config.game_mode in ("story", "story_one_round"):
                 cp = self.players[self.turn_order[self.current_turn_idx]]
                 self._log(f">> Ход игрока #{cp.number} [{cp.name}]", "info")
             return
 
         # It was GamePhase.DEALER_LOADING. Shells are loaded.
         # Now we start the player turn.
-        if self.config.game_mode in ("solo", "story"):
+        if self.config.game_mode in ("solo", "story", "story_one_round"):
             for idx, pid in enumerate(self.turn_order):
                 if self.players[pid].number == 1:
                     self.current_turn_idx = idx
@@ -1049,8 +1144,8 @@ class GameState:
             "winner_name": self.players[self.winner_id].name if self.winner_id else None,
         }
 
-        # Solo mode / Story mode: add opponent info for dual-HP display on single phone
-        if self.config.game_mode in ("solo", "story"):
+        # Solo mode / Story mode / single-round story-like mode: add opponent info for dual-HP display on single phone
+        if self.config.game_mode in ("solo", "story", "story_one_round"):
             opponent = None
             for pl in self.players.values():
                 if pl.id != player_id:

@@ -22,7 +22,8 @@ from pydantic import BaseModel
 
 from app.game_engine import (
     GameState, GamePhase, GameConfig, ItemType, ITEM_LABELS, ShellType,
-    SOLO_DEFAULT_ROUNDS, STORY_DEFAULT_ROUNDS, MULTIPLAYER_DEFAULT_ROUNDS
+    SOLO_DEFAULT_ROUNDS, STORY_DEFAULT_ROUNDS, STORY_ONE_ROUND_DEFAULT_ROUNDS,
+    MULTIPLAYER_DEFAULT_ROUNDS
 )
 from app import sound_config
 
@@ -588,7 +589,7 @@ async def showscreen_page(request: Request):
     response_model=CreateGameResponse,
 )
 async def create_game(
-    game_mode: str = Form("multiplayer", description="Режим игры: `multiplayer` (2-4 игрока), `solo` (1 на 1 с виртуальным DEALER) или `story` (сюжетный режим, 3 стадии)"),
+    game_mode: str = Form("multiplayer", description="Режим игры: `multiplayer` (2-4 игрока), `solo` (1 на 1 с виртуальным DEALER), `story` (сюжетный режим, 3 стадии) или `story_one_round` (1 раунд, 4 HP, предметы после первой дозарядки)")
 ):
     global game, undo_stack
     game = GameState()
@@ -597,6 +598,8 @@ async def create_game(
         game.config.rounds = [dict(r) for r in SOLO_DEFAULT_ROUNDS]
     elif game_mode == "story":
         game.config.rounds = [dict(r) for r in STORY_DEFAULT_ROUNDS]
+    elif game_mode == "story_one_round":
+        game.config.rounds = [dict(r) for r in STORY_ONE_ROUND_DEFAULT_ROUNDS]
     undo_stack.clear()
     await broadcast_state()
     return {"ok": True, "game_id": game.game_id, "game_mode": game_mode}
