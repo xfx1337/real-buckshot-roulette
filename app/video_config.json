@@ -18,5 +18,29 @@
     "intro": false,
     "player_win": false,
     "player_lose": false
+  },
+  "cctv": {
+    "auto_enabled": true,
+    "min_time": 30,
+    "max_time": 120,
+    "min_show": 2,
+    "max_show": 10,
+    "mode": "random",
+    "cameras": [
+      "cam1",
+      "cam2",
+      "cam3",
+      "cam4"
+    ],
+    "fake_error": {
+      "enabled": false,
+      "chance": 0.25,
+      "interval": 15,
+      "duration": 4
+    },
+    "degrade": {
+      "enabled": false,
+      "level": 50
+    }
   }
 }

@@ -7,6 +7,22 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link rel="stylesheet" href="/static/style.css">
+    <style>
+        /* Tuned for a 4:3 14" LG display (≈640×480). Everything sized in vmin
+           so it scales with the short side and always fits without scrolling. */
+        body.page-join .center-content{
+            min-height:0; height:100vh; height:100dvh;
+            padding:3vmin; gap:3vmin; justify-content:center; overflow:hidden;
+        }
+        body.page-join .logo-block.small h1{ font-size:5.5vmin; letter-spacing:.4vmin; }
+        body.page-join .card{ max-width:min(70vw,460px); width:100%; padding:4vmin; }
+        body.page-join .join-form{ gap:2.6vmin; }
+        body.page-join .join-form label{ font-size:3vmin; }
+        body.page-join .join-form input{ font-size:3.4vmin; padding:2.4vmin; }
+        body.page-join .btn-player{ font-size:3.4vmin; padding:2.8vmin; }
+        body.page-join .btn-back{ font-size:2.8vmin; margin-top:2vmin; }
+        body.page-join .alert-error{ font-size:2.8vmin; }
+    </style>
 </head>
 <body class="page-join crt-bg">
     <div class="crt-ambient-smoke"><span></span><span></span></div>

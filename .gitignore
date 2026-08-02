@@ -28,3 +28,6 @@ test-results/
 playwright-report/
 
 .claude/worktrees/
+
+# MediaMTX: скачивается автоматически кнопкой «Запустить сервер» (~29 МБ бинарь)
+mediamtx/

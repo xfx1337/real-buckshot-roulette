@@ -621,6 +621,15 @@ async def showscreen_page(request: Request):
     return templates.TemplateResponse("showscreen.html", {"request": request})
 
 
+@app.get("/cams", response_class=HTMLResponse, tags=["Pages"], summary="Просмотр камер (для дилера)", include_in_schema=False)
+async def cams_page(request: Request):
+    """Dealer-only camera viewer — a separate browser tab, not the TV.
+    Shows all configured cameras; click one to go fullscreen. Never faked."""
+    cctv = video_config.load_config().get("cctv", {})
+    cameras = cctv.get("cameras") or ["cam1", "cam2", "cam3", "cam4"]
+    return templates.TemplateResponse("cams.html", {"request": request, "cameras": cameras})
+
+
 
 # ── API: Game Management ──
 
@@ -1375,6 +1384,8 @@ async def tv_save_config(request: Request):
         cfg.setdefault("loop", {}).update(data["loop"])
     if "settings" in data:
         cfg.setdefault("settings", {}).update(data["settings"])
+    if "cctv" in data:
+        cfg.setdefault("cctv", {}).update(data["cctv"])
     video_config.save_config(cfg)
     return {"ok": True}
 
@@ -1428,6 +1439,41 @@ async def tv_cctv_toggle(request: Request):
     active = data.get("active", False)
     await broadcast_tv({"action": "cctv", "active": active})
     return {"ok": True, "active": active}
+
+
+@app.post("/api/tv/cctv/show", tags=["TV"], summary="Показать игроку выбранные камеры", include_in_schema=False)
+async def tv_cctv_show(request: Request):
+    """Force specific cameras onto the TV. Body: {"cameras": ["cam2"]}.
+    Holds until the dealer turns CCTV off — auto-cycle stays paused."""
+    data = await request.json()
+    cameras = data.get("cameras") or []
+    if isinstance(cameras, str):
+        cameras = [cameras]
+    cameras = [str(c).strip() for c in cameras if str(c).strip()]
+    if not cameras:
+        return {"ok": False, "error": "Камера не выбрана"}
+    await broadcast_tv({"action": "cctv_show", "cameras": cameras})
+    return {"ok": True, "cameras": cameras}
+
+
+@app.post("/api/tv/cctv/config", tags=["TV"], summary="Сохранить настройки CCTV и разослать на TV", include_in_schema=False)
+async def tv_cctv_config(request: Request):
+    """Save CCTV auto-cycle / camera / fake-error settings and push them live
+    to every connected TV. The TV runs its own random timer from these values."""
+    data = await request.json()
+    cfg = video_config.load_config()
+    cctv = cfg.setdefault("cctv", {})
+    for key in ("auto_enabled", "min_time", "max_time", "min_show", "max_show", "mode", "cameras"):
+        if key in data:
+            cctv[key] = data[key]
+    if "fake_error" in data and isinstance(data["fake_error"], dict):
+        cctv.setdefault("fake_error", {}).update(data["fake_error"])
+    if "degrade" in data and isinstance(data["degrade"], dict):
+        cctv.setdefault("degrade", {}).update(data["degrade"])
+    video_config.save_config(cfg)
+    await broadcast_tv({"action": "cctv_config", "cctv": cctv})
+    return {"ok": True, "cctv": cctv}
+
 
 mediamtx_process = None
 
@@ -1579,6 +1625,10 @@ async def ws_tv(ws: WebSocket):
     await ws.accept()
     tv_ws_list.append(ws)
     try:
+        # Send current CCTV settings on connect so the TV can run its own
+        # auto-cycle timer even if the dealer never re-saves during this session.
+        _cctv = video_config.load_config().get("cctv", {})
+        await ws.send_text(json.dumps({"action": "cctv_config", "cctv": _cctv}, ensure_ascii=False))
         # Send current video state on connect
         if tv_video_state["action"] != "idle":
             await ws.send_text(json.dumps(tv_video_state, ensure_ascii=False))

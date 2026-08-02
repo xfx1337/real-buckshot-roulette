@@ -1,0 +1,581 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Phone Camera Stream</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link rel="stylesheet" href="/static/style.css">
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background: #000;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            font-family: 'Share Tech Mono', monospace;
+        }
+        
+        #video-container {
+            position: relative;
+            width: 100%;
+            max-width: 640px;
+            aspect-ratio: 4/3;
+            background: #111;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        
+        #camera-video {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+        
+        #controls {
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            background: rgba(0, 0, 0, 0.9);
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+            align-items: center;
+        }
+        
+        .control-row {
+            display: flex;
+            gap: 10px;
+            width: 100%;
+            max-width: 400px;
+            justify-content: center;
+            flex-wrap: wrap;
+        }
+        
+        .btn {
+            background: none;
+            border: 2px solid var(--green);
+            color: var(--green);
+            font-family: 'Share Tech Mono', monospace;
+            font-size: 14px;
+            padding: 12px 20px;
+            cursor: pointer;
+            text-transform: uppercase;
+            box-shadow: 0 0 10px var(--green-glow);
+            transition: all 0.3s ease;
+            flex: 1;
+            min-width: 100px;
+        }
+        
+        .btn:active, .btn.active {
+            background: var(--green);
+            color: var(--bg-color);
+        }
+        
+        .btn:disabled {
+            opacity: 0.3;
+            cursor: not-allowed;
+        }
+        
+        .btn.red {
+            border-color: var(--red);
+            color: var(--red);
+            box-shadow: 0 0 10px rgba(168, 50, 50, 0.6);
+        }
+        
+        .btn.red:active {
+            background: var(--red);
+        }
+        
+        #status {
+            color: var(--text-color);
+            font-size: 12px;
+            text-align: center;
+            opacity: 0.7;
+        }
+        
+        #phone-name-input {
+            background: rgba(0, 0, 0, 0.5);
+            border: 1px solid var(--green);
+            color: var(--green);
+            font-family: 'Share Tech Mono', monospace;
+            font-size: 14px;
+            padding: 10px;
+            width: 100%;
+            max-width: 300px;
+            text-align: center;
+        }
+        
+        .status-dot {
+            display: inline-block;
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: var(--red);
+            margin-right: 5px;
+            box-shadow: 0 0 6px var(--red);
+        }
+        
+        .status-dot.connected {
+            background: var(--green);
+            box-shadow: 0 0 6px var(--green-glow);
+        }
+        
+        #info-overlay {
+            position: fixed;
+            top: 10px;
+            left: 10px;
+            right: 10px;
+            background: rgba(0, 0, 0, 0.8);
+            padding: 10px;
+            color: var(--text-color);
+            font-size: 11px;
+            border: 1px solid rgba(63, 239, 106, 0.3);
+            z-index: 100;
+        }
+        
+        #stats {
+            display: flex;
+            justify-content: space-between;
+            margin-top: 5px;
+            font-size: 10px;
+            opacity: 0.7;
+        }
+        
+        select {
+            background: rgba(0, 0, 0, 0.5);
+            border: 1px solid var(--green);
+            color: var(--green);
+            font-family: 'Share Tech Mono', monospace;
+            font-size: 12px;
+            padding: 8px;
+            width: 100%;
+            max-width: 300px;
+        }
+    </style>
+</head>
+<body>
+    <div id="info-overlay">
+        <div><span class="status-dot" id="ws-indicator"></span> <span id="connection-status">Disconnected</span></div>
+        <div id="phone-id-display" style="margin-top: 5px; opacity: 0.7;"></div>
+        <div id="stats">
+            <span>FPS: <span id="fps">0</span></span>
+            <span>Viewers: <span id="viewers">0</span></span>
+            <span>Sent: <span id="frames-sent">0</span></span>
+        </div>
+    </div>
+
+    <div id="video-container">
+        <video id="camera-video" autoplay playsinline muted></video>
+    </div>
+
+    <div id="controls">
+        <input type="text" id="phone-name-input" placeholder="Phone Name (optional)" />
+        
+        <select id="camera-select">
+            <option value="">Загрузка камер...</option>
+        </select>
+        
+        <button class="btn" id="refresh-cameras-btn" style="max-width: 200px;">🔄 Обновить список</button>
+        
+        <div class="control-row">
+            <button class="btn" id="start-btn">Start Stream</button>
+            <button class="btn red" id="stop-btn" disabled>Stop Stream</button>
+        </div>
+        
+        <div class="control-row">
+            <button class="btn" id="flip-btn" disabled>Flip Camera</button>
+            <button class="btn" id="quality-btn" disabled>Quality: <span id="quality-label">Med</span></button>
+        </div>
+        
+        <div id="status">Готов к запуску</div>
+    </div>
+
+    <script>
+        const video = document.getElementById('camera-video');
+        const startBtn = document.getElementById('start-btn');
+        const stopBtn = document.getElementById('stop-btn');
+        const flipBtn = document.getElementById('flip-btn');
+        const qualityBtn = document.getElementById('quality-btn');
+        const qualityLabel = document.getElementById('quality-label');
+        const statusDiv = document.getElementById('status');
+        const phoneNameInput = document.getElementById('phone-name-input');
+        const cameraSelect = document.getElementById('camera-select');
+        const refreshCamerasBtn = document.getElementById('refresh-cameras-btn');
+        const wsIndicator = document.getElementById('ws-indicator');
+        const connectionStatus = document.getElementById('connection-status');
+        const phoneIdDisplay = document.getElementById('phone-id-display');
+        const fpsDisplay = document.getElementById('fps');
+        const viewersDisplay = document.getElementById('viewers');
+        const framesSentDisplay = document.getElementById('frames-sent');
+
+        let ws;
+        let stream;
+        let phoneId = generatePhoneId();
+        let isStreaming = false;
+        let facingMode = 'environment'; // 'user' for front, 'environment' for back
+        let quality = 1; // 0=low, 1=medium, 2=high
+        let framesSent = 0;
+        let lastFrameTime = 0;
+        let fps = 0;
+        let canvas = document.createElement('canvas');
+        let ctx = canvas.getContext('2d');
+        let devices = [];
+        let permissionGranted = false;
+
+        const qualitySettings = [
+            { label: 'Low', width: 320, height: 240, fps: 15, quality: 0.5 },
+            { label: 'Med', width: 640, height: 480, fps: 20, quality: 0.7 },
+            { label: 'High', width: 1280, height: 720, fps: 30, quality: 0.85 }
+        ];
+
+        phoneIdDisplay.textContent = `Phone ID: ${phoneId}`;
+
+        function generatePhoneId() {
+            return 'phone_' + Math.random().toString(36).substr(2, 9);
+        }
+
+        // List available cameras
+        async function listCameras() {
+            try {
+                const deviceList = await navigator.mediaDevices.enumerateDevices();
+                devices = deviceList.filter(d => d.kind === 'videoinput');
+                
+                cameraSelect.innerHTML = '<option value="">Выбрать камеру...</option>';
+                
+                if (devices.length === 0) {
+                    cameraSelect.innerHTML += '<option value="" disabled>Камеры не найдены</option>';
+                    statusDiv.textContent = 'Камеры не найдены';
+                    return;
+                }
+                
+                devices.forEach((device, idx) => {
+                    const option = document.createElement('option');
+                    option.value = device.deviceId;
+                    option.textContent = device.label || `Камера ${idx + 1}`;
+                    cameraSelect.appendChild(option);
+                });
+                
+                if (devices.length > 0) {
+                    cameraSelect.value = devices[0].deviceId;
+                    statusDiv.textContent = `✓ Найдено камер: ${devices.length}. Нажмите "Start Stream"`;
+                }
+            } catch (err) {
+                console.error('Error listing cameras:', err);
+                statusDiv.textContent = `Ошибка: ${err.message}`;
+            }
+        }
+
+        // Request camera permission
+        async function requestCameraPermission() {
+            try {
+                statusDiv.textContent = 'Запрос доступа к камере...';
+                startBtn.disabled = true;
+                
+                // Request camera permissions
+                const tempStream = await navigator.mediaDevices.getUserMedia({ video: true });
+                
+                // Stop the temporary stream immediately
+                tempStream.getTracks().forEach(t => t.stop());
+                
+                permissionGranted = true;
+                
+                // Now enumerate devices - labels will be available
+                await listCameras();
+                
+                startBtn.disabled = false;
+                refreshCamerasBtn.disabled = false;
+                
+            } catch (err) {
+                console.error('Camera permission error:', err);
+                permissionGranted = false;
+                startBtn.disabled = false;
+                refreshCamerasBtn.disabled = false;
+                
+                if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
+                    statusDiv.textContent = '❌ Доступ к камере запрещён. Разрешите в настройках браузера.';
+                    cameraSelect.innerHTML = '<option value="">Разрешите доступ к камере</option>';
+                } else if (err.name === 'NotFoundError') {
+                    statusDiv.textContent = '❌ Камера не найдена на устройстве';
+                    cameraSelect.innerHTML = '<option value="">Камера не найдена</option>';
+                } else {
+                    statusDiv.textContent = `❌ Ошибка: ${err.message}`;
+                    cameraSelect.innerHTML = '<option value="">Ошибка доступа к камере</option>';
+                }
+            }
+        }
+
+        function connectWebSocket() {
+            const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+            ws = new WebSocket(`${proto}://${location.host}/ws/phonestream/${phoneId}`);
+
+            ws.onopen = () => {
+                wsIndicator.classList.add('connected');
+                connectionStatus.textContent = 'Connected';
+                statusDiv.textContent = 'Подключено к серверу';
+                
+                // Send init message
+                ws.send(JSON.stringify({
+                    type: 'init',
+                    name: phoneNameInput.value || `Phone ${phoneId.substr(-4)}`
+                }));
+            };
+
+            ws.onmessage = (e) => {
+                try {
+                    const data = JSON.parse(e.data);
+                    if (data.type === 'ack') {
+                        console.log('Server acknowledged:', data);
+                    }
+                } catch (err) {
+                    console.warn('WS message parse error', err);
+                }
+            };
+
+            ws.onclose = () => {
+                wsIndicator.classList.remove('connected');
+                connectionStatus.textContent = 'Disconnected';
+                statusDiv.textContent = 'Потеря связи с сервером';
+                
+                if (isStreaming) {
+                    setTimeout(connectWebSocket, 2000);
+                }
+            };
+
+            ws.onerror = (err) => {
+                console.error('WebSocket error:', err);
+            };
+        }
+
+        async function startCamera() {
+            try {
+                const settings = qualitySettings[quality];
+                const selectedDeviceId = cameraSelect.value;
+                
+                const constraints = {
+                    video: {
+                        width: { ideal: settings.width },
+                        height: { ideal: settings.height },
+                        frameRate: { ideal: settings.fps }
+                    }
+                };
+
+                if (selectedDeviceId) {
+                    constraints.video.deviceId = { exact: selectedDeviceId };
+                } else {
+                    constraints.video.facingMode = facingMode;
+                }
+
+                if (stream) {
+                    stream.getTracks().forEach(track => track.stop());
+                }
+
+                stream = await navigator.mediaDevices.getUserMedia(constraints);
+                video.srcObject = stream;
+                
+                return true;
+            } catch (err) {
+                console.error('Camera error:', err);
+                statusDiv.textContent = `Ошибка камеры: ${err.message}`;
+                return false;
+            }
+        }
+
+        function captureAndSend() {
+            if (!isStreaming || !ws || ws.readyState !== WebSocket.OPEN) return;
+
+            const settings = qualitySettings[quality];
+            
+            // Set canvas size
+            canvas.width = settings.width;
+            canvas.height = settings.height;
+            
+            // Draw video frame to canvas
+            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+            
+            // Convert to JPEG and get base64
+            canvas.toBlob((blob) => {
+                if (!blob) return;
+                
+                const reader = new FileReader();
+                reader.onloadend = () => {
+                    const base64 = reader.result.split(',')[1];
+                    
+                    try {
+                        ws.send(JSON.stringify({
+                            type: 'frame',
+                            data: base64
+                        }));
+                        
+                        framesSent++;
+                        framesSentDisplay.textContent = framesSent;
+                        
+                        // Calculate FPS
+                        const now = Date.now();
+                        if (lastFrameTime > 0) {
+                            const delta = now - lastFrameTime;
+                            fps = Math.round(1000 / delta);
+                            fpsDisplay.textContent = fps;
+                        }
+                        lastFrameTime = now;
+                        
+                    } catch (err) {
+                        console.error('Send error:', err);
+                    }
+                };
+                reader.readAsDataURL(blob);
+            }, 'image/jpeg', settings.quality);
+
+            // Schedule next frame
+            const frameInterval = 1000 / settings.fps;
+            setTimeout(captureAndSend, frameInterval);
+        }
+
+        startBtn.addEventListener('click', async () => {
+            // If permission not granted yet, request it first
+            if (!permissionGranted) {
+                await requestCameraPermission();
+                if (!permissionGranted) {
+                    return; // Permission denied, can't proceed
+                }
+            }
+            
+            if (!ws || ws.readyState !== WebSocket.OPEN) {
+                connectWebSocket();
+                await new Promise(resolve => setTimeout(resolve, 500));
+            }
+            
+            if (await startCamera()) {
+                isStreaming = true;
+                startBtn.disabled = true;
+                stopBtn.disabled = false;
+                flipBtn.disabled = false;
+                qualityBtn.disabled = false;
+                cameraSelect.disabled = true;
+                phoneNameInput.disabled = true;
+                statusDiv.textContent = 'Стриминг активен';
+                
+                // Update phone name if changed
+                if (phoneNameInput.value) {
+                    ws.send(JSON.stringify({
+                        type: 'init',
+                        name: phoneNameInput.value
+                    }));
+                }
+                
+                captureAndSend();
+            }
+        });
+
+        stopBtn.addEventListener('click', () => {
+            isStreaming = false;
+            
+            if (stream) {
+                stream.getTracks().forEach(track => track.stop());
+                stream = null;
+            }
+            
+            video.srcObject = null;
+            
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.close();
+            }
+            
+            startBtn.disabled = false;
+            stopBtn.disabled = true;
+            flipBtn.disabled = true;
+            qualityBtn.disabled = true;
+            cameraSelect.disabled = false;
+            phoneNameInput.disabled = false;
+            statusDiv.textContent = 'Остановлено';
+            framesSent = 0;
+            framesSentDisplay.textContent = '0';
+            fpsDisplay.textContent = '0';
+        });
+
+        flipBtn.addEventListener('click', async () => {
+            facingMode = facingMode === 'user' ? 'environment' : 'user';
+            if (isStreaming) {
+                await startCamera();
+            }
+        });
+
+        qualityBtn.addEventListener('click', async () => {
+            quality = (quality + 1) % 3;
+            qualityLabel.textContent = qualitySettings[quality].label;
+            if (isStreaming) {
+                await startCamera();
+            }
+        });
+        
+        refreshCamerasBtn.addEventListener('click', async () => {
+            refreshCamerasBtn.disabled = true;
+            refreshCamerasBtn.textContent = 'Обновление...';
+            await requestCameraPermission();
+            refreshCamerasBtn.textContent = '🔄 Обновить список';
+        });
+
+        // Prevent screen sleep
+        let wakeLock = null;
+        async function requestWakeLock() {
+            if (!('wakeLock' in navigator)) return;
+            try {
+                wakeLock = await navigator.wakeLock.request('screen');
+                wakeLock.addEventListener('release', () => { wakeLock = null; });
+            } catch (e) {
+                console.warn('Wake lock error:', e);
+            }
+        }
+
+        document.addEventListener('visibilitychange', () => {
+            if (document.visibilityState === 'visible' && !wakeLock && isStreaming) {
+                requestWakeLock();
+            }
+        });
+
+        // Initialize
+        async function initialize() {
+            try {
+                // Check if we already have permission
+                if (navigator.permissions && navigator.permissions.query) {
+                    const permissionStatus = await navigator.permissions.query({ name: 'camera' });
+                    
+                    if (permissionStatus.state === 'granted') {
+                        // Permission already granted, auto-load cameras
+                        await requestCameraPermission();
+                    } else {
+                        // Permission not granted, wait for user action
+                        statusDiv.textContent = '👆 Нажмите "Start Stream" или "🔄 Обновить список" для доступа к камерам';
+                        cameraSelect.innerHTML = '<option value="">Нажмите кнопку для доступа к камере</option>';
+                    }
+                    
+                    // Listen for permission changes
+                    permissionStatus.onchange = () => {
+                        if (permissionStatus.state === 'granted' && !permissionGranted) {
+                            requestCameraPermission();
+                        }
+                    };
+                } else {
+                    // Permissions API not supported, show instruction
+                    statusDiv.textContent = '👆 Нажмите "Start Stream" или "🔄 Обновить список" для доступа к камерам';
+                    cameraSelect.innerHTML = '<option value="">Нажмите кнопку для доступа к камере</option>';
+                }
+            } catch (err) {
+                console.error('Initialization error:', err);
+                statusDiv.textContent = '👆 Нажмите "Start Stream" или "🔄 Обновить список" для доступа к камерам';
+                cameraSelect.innerHTML = '<option value="">Нажмите кнопку для доступа к камере</option>';
+            }
+        }
+        
+        // Start initialization
+        initialize();
+    </script>
+</body>
+</html>

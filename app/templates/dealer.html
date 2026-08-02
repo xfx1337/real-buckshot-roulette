@@ -960,7 +960,7 @@ body{ cursor:default; }
 
 /* ══ ГЛАВНЫЙ ЭКРАН «ХОД» — 3 колонки ══ */
 .rd-grid{ display:grid; grid-template-columns:minmax(0,1fr) 330px 296px; gap:12px; height:100%; }
-.rd-col{ display:flex; flex-direction:column; gap:12px; min-height:0; }
+.rd-col{ display:flex; flex-direction:column; gap:12px; min-height:0; overflow-y:auto; overflow-x:hidden; padding-right:4px; }
 
 .rd-turnbar{ display:flex; align-items:center; gap:12px; flex:0 0 auto; margin-bottom:2px; }
 .rd-turnbar .rd-turn-name{
@@ -1038,7 +1038,16 @@ body{ cursor:default; }
 
 /* ══ ЭКРАН «TV ВИДЕО» ══ */
 .rd-tv-grid{ display:grid; grid-template-columns:minmax(0,1fr) 296px; gap:12px; height:100%; }
-.rd-tv-grid .rd-col{ display:flex; flex-direction:column; gap:12px; min-height:0; }
+.rd-tv-grid .rd-col{ display:flex; flex-direction:column; gap:12px; min-height:0; overflow-y:auto; overflow-x:hidden; padding-right:4px; }
+/* Карточки TV-экрана не сжимаются и не обрезаются: колонка скроллится целиком,
+   иначе flex-shrink давит длинный блок CCTV и нижние настройки недоступны. */
+.rd-tv-grid .rd-col > .rd-card{ flex:0 0 auto; overflow:visible; }
+/* Левая колонка TV: правая (игроки/лог) остаётся тянущейся, как на других экранах. */
+.rd-tv-grid .rd-col:last-child > .rd-card.rd-log{ flex:1 1 auto; min-height:180px; overflow:hidden; }
+/* Safety: any screen whose column is taller than the viewport scrolls
+   internally instead of being clipped by .rd-body{overflow:hidden}. */
+.rd-load-grid > *, .rd-items-grid > *, .rd-form-grid > *{ min-height:0; overflow-y:auto; overflow-x:hidden; }
+.rd-simple{ overflow-y:auto; }
 .tv-slot-row{ display:flex; align-items:center; gap:10px; margin-bottom:8px; font-family:var(--font-mono); font-size:12px; }
 .tv-slot-row label{ flex:0 0 200px; color:var(--text-dim); }
 .tv-slot-row select{ flex:1; }
@@ -1046,6 +1055,11 @@ body{ cursor:default; }
 .tv-manual-row select{ flex:1 1 160px; min-width:140px; }
 .tv-btns{ display:flex; gap:8px; flex-wrap:wrap; margin-top:6px; }
 .tv-btns .btn{ flex:1 1 80px; }
+/* Quick-launch-by-slot block: 2×2 grid with roomy buttons so long labels
+   wrap and never get clipped. */
+#tv-slot-btns{ display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-top:6px; }
+#tv-slot-btns .btn{ min-height:56px; white-space:normal; line-height:1.15; padding:10px 12px; text-align:center; }
+#tv-slot-btns > div{ grid-column:1 / -1; }
 .tv-status{ font-family:var(--font-tube); font-size:11px; letter-spacing:.1em; color:var(--text-faint); margin-top:10px; }
 .tv-status.playing{ color:var(--green); }
 .tv-status.paused{ color:#e5bc3e; }
@@ -1234,7 +1248,7 @@ body{ cursor:default; }
         <div class="rd-screen" id="rd-screen-tv" hidden>
             <div class="rd-tv-grid">
                 <div class="rd-col">
-                    <div class="rd-card" style="flex:1 1 auto;">
+                    <div class="rd-card">
                         <h3>Управление TV-видео <span class="rd-tag">воспроизведение на телевизоре</span></h3>
 
                         <h4 style="margin-top:0;">▸ БЫСТРЫЙ ЗАПУСК ПО СЛОТУ</h4>
@@ -1242,7 +1256,15 @@ body{ cursor:default; }
                         <div class="tv-btns" style="margin-top: 12px; margin-bottom: 22px; display:flex; gap:8px;">
                             <button class="btn btn-plate" onclick="tvToggleCCTV()" id="btn-cctv-toggle" style="flex:1; border-color:var(--text-dim); color:white;">📷 РЕЖИМ КАМЕР (CCTV) : ВЫКЛ</button>
                             <button class="btn btn-plate" onclick="startCctvServer(this)" style="flex:0 0 auto; border-color:var(--text-dim); padding:12px 14px;" title="Скачать и запустить MediaMTX">ЗАПУСТИТЬ СЕРВЕР</button>
+                            <button class="btn btn-plate" onclick="window.open('/cams','_blank')" style="flex:0 0 auto; border-color:var(--text-dim); padding:12px 14px;" title="Открыть камеры в отдельной вкладке (для дилера)">🖥 КАМЕРЫ (ДИЛЕР)</button>
                         </div>
+
+                        <h4>▸ ПОКАЗАТЬ ИГРОКУ КОНКРЕТНУЮ КАМЕРУ</h4>
+                        <div class="tv-manual-row">
+                            <select id="cctv-pick-cam"><option value="">— выберите камеру —</option></select>
+                            <button class="btn btn-plate plate-teal" onclick="cctvShowToPlayer()" style="flex:0 0 auto;">📡 ПОКАЗАТЬ ИГРОКУ</button>
+                        </div>
+                        <div class="tv-status" id="cctv-pick-status" style="margin-bottom:18px;">камера не отправлена</div>
 
                         <h4>▸ РУЧНОЕ ВОСПРОИЗВЕДЕНИЕ</h4>
                         <div class="tv-manual-row">
@@ -1273,6 +1295,70 @@ body{ cursor:default; }
                         <div class="rd-load-actions" style="margin-top:12px;">
                             <button class="btn btn-dealer" onclick="tvSaveConfig()">СОХРАНИТЬ КОНФИГ</button>
                         </div>
+                    </div>
+
+                    <div class="rd-card">
+                        <h3>Авто-режим камер (CCTV) <span class="rd-tag">крутилка на телевизоре</span></h3>
+                        <label style="display:flex; align-items:center; gap:8px; margin-bottom:12px;">
+                            <input type="checkbox" id="cctv-auto-enabled">
+                            <span>Авто-показ камер на TV (телевизор сам включает камеры в случайные моменты)</span>
+                        </label>
+
+                        <h4>▸ РЕЖИМ ОТОБРАЖЕНИЯ</h4>
+                        <select id="cctv-mode" style="width:100%; margin-bottom:14px;">
+                            <option value="random">Случайно: одна камера или все сразу</option>
+                            <option value="grid">Все камеры сеткой на весь экран</option>
+                            <option value="single">По одной камере на весь экран (случайная)</option>
+                        </select>
+
+                        <h4>▸ ТАЙМИНГИ (секунды)</h4>
+                        <div class="tv-slot-row"><label>Пауза между показами</label>
+                            <input type="number" id="cctv-min-time" min="1" style="width:70px;"> —
+                            <input type="number" id="cctv-max-time" min="1" style="width:70px;"></div>
+                        <div class="tv-slot-row" style="margin-top:8px;"><label>Длительность показа</label>
+                            <input type="number" id="cctv-min-show" min="1" style="width:70px;"> —
+                            <input type="number" id="cctv-max-show" min="1" style="width:70px;"></div>
+
+                        <h4 style="margin-top:14px;">▸ КАМЕРЫ (пути MediaMTX, через запятую)</h4>
+                        <input type="text" id="cctv-cameras" placeholder="cam1, cam2, cam3, cam4" style="width:100%;">
+
+                        <h4 style="margin-top:16px;">▸ ФЕЙКОВАЯ ОШИБКА «НЕДОСТУПНО»</h4>
+                        <label style="display:flex; align-items:center; gap:8px; margin-bottom:10px;">
+                            <input type="checkbox" id="cctv-fe-enabled">
+                            <span>Иногда показывать «нет сигнала» на TV (у дилера камеры работают)</span>
+                        </label>
+                        <div class="tv-slot-row"><label>Шанс на камеру (0–1)</label>
+                            <input type="number" id="cctv-fe-chance" min="0" max="1" step="0.05" style="width:70px;"></div>
+                        <div class="tv-slot-row" style="margin-top:8px;"><label>Интервал проверки, сек</label>
+                            <input type="number" id="cctv-fe-interval" min="1" style="width:70px;"></div>
+                        <div class="tv-slot-row" style="margin-top:8px;"><label>Длительность «ошибки», сек</label>
+                            <input type="number" id="cctv-fe-duration" min="1" style="width:70px;"></div>
+
+                        <h4 style="margin-top:16px;">▸ УХУДШЕНИЕ КАРТИНКИ (помехи / шум / замыливание)</h4>
+                        <label style="display:flex; align-items:center; gap:8px; margin-bottom:10px;">
+                            <input type="checkbox" id="cctv-dg-enabled">
+                            <span>Портить изображение камер игроку (у дилера — чисто)</span>
+                        </label>
+                        <div style="display:flex; align-items:center; gap:10px;">
+                            <span style="font-size:11px; color:var(--text-dim);">степень</span>
+                            <input type="range" id="cctv-dg-level" min="0" max="100" value="50" oninput="document.getElementById('cctv-dg-val').textContent=this.value+'%'" style="flex:1;">
+                            <span id="cctv-dg-val" style="font-family:var(--font-mono); font-size:12px; color:var(--green); width:38px; text-align:right;">50%</span>
+                        </div>
+
+                        <label style="display:flex; align-items:center; gap:8px; margin:12px 0 10px;">
+                            <input type="checkbox" id="cctv-dg-dynamic">
+                            <span>Динамическое ухудшение (каждая камера сама «плавает» в случайном порядке)</span>
+                        </label>
+                        <div class="tv-slot-row"><label>Диапазон степени, %</label>
+                            <input type="number" id="cctv-dg-min" min="0" max="100" style="width:70px;"> —
+                            <input type="number" id="cctv-dg-max" min="0" max="100" style="width:70px;"></div>
+                        <div class="tv-slot-row" style="margin-top:8px;"><label>Смена значения, сек</label>
+                            <input type="number" id="cctv-dg-interval" min="1" style="width:70px;"></div>
+
+                        <div class="rd-load-actions" style="margin-top:14px;">
+                            <button class="btn btn-dealer" onclick="cctvSaveConfig()">СОХРАНИТЬ И ПРИМЕНИТЬ</button>
+                        </div>
+                        <div class="tv-status" id="cctv-cfg-status" style="margin-top:8px;"></div>
                     </div>
                 </div>
                 <div class="rd-col">
@@ -1395,6 +1481,10 @@ const PHASE_TO_SCREEN = {
     game_over: 'gameover',
 };
 
+// Когда оператор вручную открывает экран TV (настройки видео/камер), пиним его,
+// чтобы очередной push состояния не выбросил обратно на экран текущей фазы.
+let pinnedScreen = null;
+
 function showScreenEl(name) {
     SCREENS.forEach(n => {
         const el = document.getElementById('rd-screen-' + n);
@@ -1407,6 +1497,8 @@ function showScreenEl(name) {
 // Ручное переключение вкладки — предпросмотр по последнему состоянию.
 // Следующий push с сервера восстановит экран текущей фазы.
 function showScreen(name) {
+    // TV-экран держим закреплённым, любой другой таб — снимаем закрепление.
+    pinnedScreen = (name === 'tv') ? 'tv' : null;
     showScreenEl(name);
     if (!gameState) return;
     if (name === 'turn') renderTurn(gameState);
@@ -1416,10 +1508,18 @@ function showScreen(name) {
     else if (name === 'tv') loadTvConfig();
 }
 
+// Экраны без вкладки: попасть на них можно только автоматически по фазе.
+// Если пин TV их перекроет, оператор потеряет кнопки «СЛЕДУЮЩИЙ РАУНД» /
+// «НОВАЯ ИГРА» без единого способа вернуться — поэтому пин тут снимается.
+const UNPINNABLE_SCREENS = ['roundover', 'gameover', 'nogame'];
+
 function render() {
     if (!gameState) return;
     const s = gameState;
-    const screen = PHASE_TO_SCREEN[s.phase] || 'nogame';
+    const phaseScreen = PHASE_TO_SCREEN[s.phase] || 'nogame';
+    if (pinnedScreen && UNPINNABLE_SCREENS.includes(phaseScreen)) pinnedScreen = null;
+    // Пока оператор закрепил TV-экран — не перебиваем его экраном фазы.
+    const screen = pinnedScreen || phaseScreen;
     showScreenEl(screen);
 
     const showForceRound = !['lobby', 'no_game', 'game_over', 'round_over'].includes(s.phase);
@@ -2700,8 +2800,107 @@ function renderTvConfig(data) {
         document.getElementById('tv-volume-val').textContent = config.settings.volume + '%';
     }
 
+    // CCTV auto-mode settings
+    renderCctvConfig(config.cctv || {});
+
     // Status
     updateTvStatus();
+}
+
+function renderCctvConfig(c) {
+    const fe = c.fake_error || {};
+    const set = (id, v) => { const el = document.getElementById(id); if (el) el.value = v; };
+    const chk = (id, v) => { const el = document.getElementById(id); if (el) el.checked = !!v; };
+    chk('cctv-auto-enabled', c.auto_enabled);
+    set('cctv-mode', c.mode || 'random');
+    set('cctv-min-time', c.min_time ?? 30);
+    set('cctv-max-time', c.max_time ?? 120);
+    set('cctv-min-show', c.min_show ?? 3);
+    set('cctv-max-show', c.max_show ?? 10);
+    set('cctv-cameras', (c.cameras || ['cam1','cam2','cam3','cam4']).join(', '));
+    chk('cctv-fe-enabled', fe.enabled);
+    set('cctv-fe-chance', fe.chance ?? 0.25);
+    set('cctv-fe-interval', fe.interval ?? 15);
+    set('cctv-fe-duration', fe.duration ?? 4);
+    const dg = c.degrade || {};
+    chk('cctv-dg-enabled', dg.enabled);
+    set('cctv-dg-level', dg.level ?? 50);
+    document.getElementById('cctv-dg-val').textContent = (dg.level ?? 50) + '%';
+    chk('cctv-dg-dynamic', dg.dynamic);
+    set('cctv-dg-min', dg.min_level ?? 10);
+    set('cctv-dg-max', dg.max_level ?? 85);
+    set('cctv-dg-interval', dg.interval ?? 6);
+
+    // Keep the "show one camera to the player" picker in sync with the pool.
+    const pick = document.getElementById('cctv-pick-cam');
+    if (pick) {
+        const cams = c.cameras || ['cam1','cam2','cam3','cam4'];
+        const prev = pick.value;
+        pick.innerHTML = '<option value="">— выберите камеру —</option>' +
+            cams.map(cam => `<option value="${cam}">${cam.toUpperCase()}</option>`).join('');
+        if (cams.includes(prev)) pick.value = prev;
+    }
+}
+
+// Push one specific camera to the TV. Holds until the dealer toggles CCTV off.
+async function cctvShowToPlayer() {
+    const cam = document.getElementById('cctv-pick-cam').value;
+    const st = document.getElementById('cctv-pick-status');
+    if (!cam) { st.textContent = 'сначала выберите камеру'; st.className = 'tv-status'; return; }
+    try {
+        const r = await fetch('/api/tv/cctv/show', {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ cameras: [cam] })
+        });
+        const j = await r.json();
+        if (!j.ok) throw new Error(j.error || 'ошибка');
+        st.textContent = '✓ игроку показана ' + cam.toUpperCase();
+        st.className = 'tv-status playing';
+        // The TV is now holding CCTV on — reflect that in the toggle button.
+        cctvActive = true;
+        updateCctvButton();
+    } catch (e) {
+        st.textContent = 'ошибка отправки';
+        st.className = 'tv-status';
+    }
+}
+
+async function cctvSaveConfig() {
+    const numById = (id, d) => { const v = parseFloat(document.getElementById(id).value); return isNaN(v) ? d : v; };
+    const cameras = document.getElementById('cctv-cameras').value
+        .split(',').map(s => s.trim()).filter(Boolean);
+    const body = {
+        auto_enabled: document.getElementById('cctv-auto-enabled').checked,
+        mode: document.getElementById('cctv-mode').value,
+        min_time: numById('cctv-min-time', 30),
+        max_time: numById('cctv-max-time', 120),
+        min_show: numById('cctv-min-show', 3),
+        max_show: numById('cctv-max-show', 10),
+        cameras: cameras.length ? cameras : ['cam1'],
+        fake_error: {
+            enabled: document.getElementById('cctv-fe-enabled').checked,
+            chance: numById('cctv-fe-chance', 0.25),
+            interval: numById('cctv-fe-interval', 15),
+            duration: numById('cctv-fe-duration', 4),
+        },
+        degrade: {
+            enabled: document.getElementById('cctv-dg-enabled').checked,
+            level: numById('cctv-dg-level', 50),
+            dynamic: document.getElementById('cctv-dg-dynamic').checked,
+            min_level: numById('cctv-dg-min', 10),
+            max_level: numById('cctv-dg-max', 85),
+            interval: numById('cctv-dg-interval', 6),
+        }
+    };
+    const st = document.getElementById('cctv-cfg-status');
+    try {
+        await fetch('/api/tv/cctv/config', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body) });
+        st.textContent = '✓ сохранено и отправлено на TV';
+        st.className = 'tv-status playing';
+    } catch (e) {
+        st.textContent = 'ошибка сохранения';
+        st.className = 'tv-status';
+    }
 }
 
 async function updateTvStatus() {
@@ -2754,9 +2953,11 @@ async function tvStop() {
 }
 
 let cctvActive = false;
-async function tvToggleCCTV() {
-    cctvActive = !cctvActive;
+// Repaint the CCTV toggle from `cctvActive` — also called after pushing a
+// specific camera, which leaves the TV holding CCTV on.
+function updateCctvButton() {
     const btn = document.getElementById('btn-cctv-toggle');
+    if (!btn) return;
     if (cctvActive) {
         btn.textContent = '📷 РЕЖИМ КАМЕР (CCTV) : ВКЛ';
         btn.style.borderColor = 'var(--red)';
@@ -2766,6 +2967,11 @@ async function tvToggleCCTV() {
         btn.style.borderColor = 'var(--text-dim)';
         btn.style.background = 'transparent';
     }
+}
+
+async function tvToggleCCTV() {
+    cctvActive = !cctvActive;
+    updateCctvButton();
     await fetch('/api/tv/cctv', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ active: cctvActive }) });
 }
 
