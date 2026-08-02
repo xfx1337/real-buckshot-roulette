@@ -131,6 +131,7 @@
 
     <!-- CCTV Overlay (frames injected by JS from the pushed camera config) -->
     <div id="tv-cctv-overlay"></div>
+    <video id="tv-cctv-transition" src="/videos/noize.mp4" playsinline muted style="position:fixed; inset:0; width:100%; height:100%; object-fit:cover; z-index:91; display:none; pointer-events:none;"></video>
 
     <!-- Video overlay -->
     <div id="tv-video-overlay">
@@ -553,14 +554,38 @@
         cctvShown = false;
     }
 
+    // Transition noise effect
+    let cctvTransitionTimer1 = null;
+    let cctvTransitionTimer2 = null;
+    function playCctvTransition(callback) {
+        const vid = document.getElementById('tv-cctv-transition');
+        clearTimeout(cctvTransitionTimer1);
+        clearTimeout(cctvTransitionTimer2);
+        
+        vid.style.display = 'block';
+        vid.currentTime = 0;
+        const p = vid.play();
+        if (p) p.catch(() => {});
+        
+        // At 300ms, execute the switch (show/hide CCTV) underneath the static
+        cctvTransitionTimer1 = setTimeout(() => {
+            callback();
+            // Wait another 300ms then hide the static
+            cctvTransitionTimer2 = setTimeout(() => {
+                vid.style.display = 'none';
+                vid.pause();
+            }, 300);
+        }, 300);
+    }
+
     // Dealer manual button: force on (grid of all enabled) / off.
     function cctvManualToggle(active) {
         cctvManual = !!active;
         if (cctvManual) {
             clearTimeout(cctvHideTimer); cctvHideTimer = null;
-            cctvShow(cctvCfg.mode === 'single' ? cctvPickCams() : (cctvCfg.cameras || []));
+            playCctvTransition(() => cctvShow(cctvPickCams()));
         } else {
-            cctvHide();
+            playCctvTransition(() => cctvHide());
         }
     }
 
@@ -573,7 +598,7 @@
         clearTimeout(cctvHideTimer); cctvHideTimer = null;
         clearTimeout(cctvAutoTimer); cctvAutoTimer = null;
         cctvManual = true;
-        cctvShow(cams);
+        playCctvTransition(() => cctvShow(cams));
     }
 
     function cctvScheduleNext() {
