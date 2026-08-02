@@ -26,6 +26,7 @@ from app.game_engine import (
     MULTIPLAYER_DEFAULT_ROUNDS
 )
 from app import sound_config
+from app import video_config
 
 import socket
 from urllib.parse import quote, unquote
@@ -205,6 +206,11 @@ undo_stack: list[GameState] = []
 connected_clients: dict[str, list[WebSocket]] = {}  # "dealer" or player_id -> [ws]
 dealer_ws_list: list[WebSocket] = []
 showscreen_ws_list: list[WebSocket] = []
+tv_ws_list: list[WebSocket] = []  # TV video overlay WebSocket connections
+
+# ── TV Video state ──
+# Current video command being broadcast to all TV screens.
+tv_video_state: dict = {"action": "idle", "video": None, "loop": False}
 
 async def notify_showscreen(message: str, player_name: str, item: str):
     if not showscreen_ws_list:
@@ -265,6 +271,8 @@ app = FastAPI(
     ],
 )
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+os.makedirs(str(video_config.VIDEOS_DIR), exist_ok=True)
+app.mount("/videos", StaticFiles(directory=str(video_config.VIDEOS_DIR)), name="videos")
 templates = Jinja2Templates(directory=str(TEMPLATE_DIR))
 
 
@@ -571,9 +579,43 @@ async def join_page(request: Request):
     return templates.TemplateResponse("join.html", {"request": request, "error": None, "saved_name": saved_name})
 
 
+@app.get("/telejoin", response_class=HTMLResponse, tags=["Pages"], summary="Форма присоединения (TV режим)", include_in_schema=False)
+async def telejoin_page(request: Request):
+    """Форма входа для TV-режима: открывается на компьютере и транслируется на
+    кинескопный телевизор. Вместо /player/ перенаправляет на /teleplayer/."""
+    known = _known_player_from_cookie(request)
+    if known:
+        return RedirectResponse(f"/teleplayer/{known.id}", status_code=303)
+    saved_name = _get_cookie_name(request)
+    return templates.TemplateResponse("telejoin.html", {"request": request, "error": None, "saved_name": saved_name})
+
+
+@app.get("/teleplayer/{player_id}", response_class=HTMLResponse, tags=["Pages"], summary="Экран игрока (TV режим)", include_in_schema=False)
+async def teleplayer_page(request: Request, player_id: str):
+    """Экран игрока для TV: без fullscreen-gate и wake lock (не нужны на
+    компьютере). Использует тот же WebSocket /ws/player/{id}."""
+    if game and player_id in game.players:
+        p = game.players[player_id]
+        resp = templates.TemplateResponse("teleplayer.html", {"request": request, "player": p})
+        _set_player_cookies(resp, p.id, p.name)
+        return resp
+
+    known = _known_player_from_cookie(request)
+    if known:
+        return RedirectResponse(f"/teleplayer/{known.id}", status_code=303)
+
+    saved_name = _get_cookie_name(request)
+    return templates.TemplateResponse("telejoin.html", {
+        "request": request,
+        "error": "Игра не найдена или вы не зарегистрированы",
+        "saved_name": saved_name,
+    })
+
+
 @app.get("/showscreen", response_class=HTMLResponse, tags=["Pages"], summary="Экран показа скрытых сообщений", include_in_schema=False)
 async def showscreen_page(request: Request):
     return templates.TemplateResponse("showscreen.html", {"request": request})
+
 
 
 # ── API: Game Management ──
@@ -654,6 +696,46 @@ async def join_game(request: Request, name: str = Form(..., description="Ото�
             "saved_name": name,
         })
 
+
+@app.post(
+    "/api/telejoin",
+    tags=["Game Management"],
+    summary="Присоединиться к игре (TV режим)",
+    description=(
+        "Аналог `/api/join` для TV-режима: при успехе редиректит на `/teleplayer/{player_id}` "
+        "вместо `/player/{player_id}`. Регистрирует того же игрока в той же игре."
+    ),
+    response_class=HTMLResponse,
+)
+async def telejoin_game(request: Request, name: str = Form(..., description="Отображаемое имя игрока")):
+    global game
+    if not game:
+        return templates.TemplateResponse("telejoin.html", {
+            "request": request,
+            "error": "Игра не создана. Подождите, пока дилер создаст игру.",
+            "saved_name": name,
+        })
+
+    known = _known_player_from_cookie(request)
+    if known:
+        known.connected = True
+        await broadcast_state()
+        resp = RedirectResponse(f"/teleplayer/{known.id}", status_code=303)
+        _set_player_cookies(resp, known.id, known.name)
+        return resp
+
+    try:
+        player = game.add_player(name)
+        await broadcast_state()
+        resp = RedirectResponse(f"/teleplayer/{player.id}", status_code=303)
+        _set_player_cookies(resp, player.id, player.name)
+        return resp
+    except ValueError as e:
+        return templates.TemplateResponse("telejoin.html", {
+            "request": request,
+            "error": str(e),
+            "saved_name": name,
+        })
 
 @app.post(
     "/api/start_game",
@@ -1247,6 +1329,124 @@ async def esp_shoot():
     return result
 
 
+# ── TV Video API ──
+
+async def broadcast_tv(msg: dict):
+    """Send a video command to all connected TV screens."""
+    data = json.dumps(msg, ensure_ascii=False)
+    dead = []
+    for ws in tv_ws_list:
+        try:
+            await ws.send_text(data)
+        except Exception:
+            dead.append(ws)
+    for ws in dead:
+        tv_ws_list.remove(ws)
+
+
+@app.get("/api/tv/videos", tags=["TV"], summary="Список доступных видеофайлов", include_in_schema=False)
+async def tv_list_videos():
+    return {"videos": video_config.list_videos()}
+
+
+@app.get("/api/tv/config", tags=["TV"], summary="Конфигурация видео-слотов", include_in_schema=False)
+async def tv_get_config():
+    cfg = video_config.load_config()
+    return {
+        "config": cfg,
+        "videos": video_config.list_videos(),
+        "slot_labels": video_config.SLOT_LABELS,
+    }
+
+
+@app.post("/api/tv/config/save", tags=["TV"], summary="Сохранить конфигурацию видео", include_in_schema=False)
+async def tv_save_config(request: Request):
+    data = await request.json()
+    cfg = video_config.load_config()
+    if "videos" in data:
+        cfg["videos"].update(data["videos"])
+    if "auto_play" in data:
+        cfg["auto_play"].update(data["auto_play"])
+    if "loop" in data:
+        cfg.setdefault("loop", {}).update(data["loop"])
+    if "settings" in data:
+        cfg.setdefault("settings", {}).update(data["settings"])
+    video_config.save_config(cfg)
+    return {"ok": True}
+
+
+@app.post("/api/tv/volume", tags=["TV"], summary="Изменить громкость TV", include_in_schema=False)
+async def tv_set_volume(request: Request):
+    """Set volume for TV videos. Body: {"volume": 100}"""
+    data = await request.json()
+    vol = data.get("volume", 100)
+    
+    # Save to config
+    cfg = video_config.load_config()
+    cfg.setdefault("settings", {})["volume"] = vol
+    video_config.save_config(cfg)
+    
+    # Broadcast to TVs
+    await broadcast_tv({"action": "set_volume", "volume": vol})
+    return {"ok": True}
+
+
+@app.post("/api/tv/play", tags=["TV"], summary="Воспроизвести видео на TV", include_in_schema=False)
+async def tv_play(request: Request):
+    """Play a video on all connected TV screens.
+    Body: {"video": "filename.mp4", "loop": false} or {"slot": "intro"}"""
+    global tv_video_state
+    data = await request.json()
+    slot = data.get("slot")
+    video = data.get("video")
+    loop = data.get("loop", False)
+    if slot and not video:
+        cfg = video_config.load_config()
+        video = cfg["videos"].get(slot)
+    if not video:
+        raise HTTPException(400, "Не указан видеофайл")
+        
+    cfg = video_config.load_config()
+    vol = cfg.get("settings", {}).get("volume", 100)
+    
+    # Get file modification time for smart cache busting
+    filepath = video_config.VIDEOS_DIR / video
+    mtime = int(os.path.getmtime(filepath)) if filepath.exists() else 0
+    
+    tv_video_state = {"action": "play", "video": video, "loop": loop, "volume": vol, "mtime": mtime}
+    await broadcast_tv(tv_video_state)
+    return {"ok": True, "video": video}
+
+
+@app.post("/api/tv/pause", tags=["TV"], summary="Поставить видео на паузу", include_in_schema=False)
+async def tv_pause():
+    global tv_video_state
+    tv_video_state["action"] = "pause"
+    await broadcast_tv({"action": "pause"})
+    return {"ok": True}
+
+
+@app.post("/api/tv/resume", tags=["TV"], summary="Снять видео с паузы", include_in_schema=False)
+async def tv_resume():
+    global tv_video_state
+    tv_video_state["action"] = "play"
+    await broadcast_tv({"action": "resume"})
+    return {"ok": True}
+
+
+@app.post("/api/tv/stop", tags=["TV"], summary="Остановить видео", include_in_schema=False)
+async def tv_stop():
+    global tv_video_state
+    tv_video_state = {"action": "idle", "video": None, "loop": False}
+    await broadcast_tv({"action": "stop"})
+    return {"ok": True}
+
+
+@app.get("/api/tv/state", tags=["TV"], summary="Текущее состояние видео", include_in_schema=False)
+async def tv_state():
+    return tv_video_state
+
+
 # ── WebSockets ──
 #
 # WebSocket-эндпоинты не отображаются в OpenAPI/Swagger (спецификация OpenAPI 3.0
@@ -1261,6 +1461,11 @@ async def esp_shoot():
 #   Помечает игрока подключённым (`connected=true`) на время жизни сокета.
 #   При подключении и на каждое изменение состояния сервер шлёт JSON-сообщение —
 #   тот же формат, что и `GET /api/player_state/{player_id}`.
+#
+# GET/WS /ws/tv
+#   Подключение TV-экрана для получения видео-команд.
+#   Сервер шлёт: {"action": "play"|"pause"|"resume"|"stop", "video": "...", "loop": bool}
+#   Клиент шлёт: {"event": "ended"} — видео закончилось.
 
 @app.websocket("/ws/dealer")
 async def ws_dealer(ws: WebSocket):
@@ -1312,6 +1517,32 @@ async def ws_player(ws: WebSocket, player_id: str):
     finally:
         if player_id in connected_clients and ws in connected_clients[player_id]:
             connected_clients[player_id].remove(ws)
+
+
+@app.websocket("/ws/tv")
+async def ws_tv(ws: WebSocket):
+    """WebSocket for TV video overlay. Server pushes video commands;
+    client sends {"event": "ended"} when video finishes."""
+    await ws.accept()
+    tv_ws_list.append(ws)
+    try:
+        # Send current video state on connect
+        if tv_video_state["action"] != "idle":
+            await ws.send_text(json.dumps(tv_video_state, ensure_ascii=False))
+        while True:
+            msg = await ws.receive_text()
+            try:
+                data = json.loads(msg)
+                if data.get("event") == "ended":
+                    # Video finished — notify dealer via broadcast_state
+                    pass  # Future: auto-play next video logic
+            except Exception:
+                pass
+    except WebSocketDisconnect:
+        pass
+    finally:
+        if ws in tv_ws_list:
+            tv_ws_list.remove(ws)
 
 
 # ── Run ──
