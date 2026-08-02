@@ -258,8 +258,8 @@
         }
 
         // Dead
-        if (data.game_mode === 'solo' || data.game_mode === 'story') {
-            // In solo mode, show game over screen if either dies (no dead screen)
+        if (data.game_mode === 'solo' || data.game_mode === 'story' || data.game_mode === 'story_one_round') {
+            // In solo/story-like 1v1 mode, show game over screen if either dies.
             if (!data.my_alive || (data.opponent_alive !== undefined && !data.opponent_alive)) {
                 // If it's not game_over phase yet, it will be soon. Just wait.
                 if (data.phase !== 'game_over') return;
@@ -274,8 +274,8 @@
         // In game — show lightning bolts
         document.getElementById('state-game').style.display = 'flex';
 
-        // Solo Mode adjustments
-        if (data.game_mode === 'solo' || data.game_mode === 'story') {
+        // Solo / story-like 1v1 adjustments
+        if (data.game_mode === 'solo' || data.game_mode === 'story' || data.game_mode === 'story_one_round') {
             document.getElementById('mp-layout').style.display = 'none';
             document.getElementById('solo-layout').style.display = 'flex';
             
