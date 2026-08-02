@@ -21,10 +21,10 @@
   },
   "cctv": {
     "auto_enabled": true,
-    "min_time": 5,
-    "max_time": 7,
-    "min_show": 25,
-    "max_show": 30,
+    "min_time": 20,
+    "max_time": 40,
+    "min_show": 5,
+    "max_show": 10,
     "mode": "random",
     "cameras": [
       "cam1",
@@ -40,7 +40,7 @@
     },
     "degrade": {
       "enabled": true,
-      "level": 90,
+      "level": 76,
       "dynamic": true,
       "min_level": 10,
       "max_level": 85,

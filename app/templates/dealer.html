@@ -2286,7 +2286,27 @@ function renderSidebar(s) {
             ${p.skip_next_turn ? '<span class="sp-cuff">НАРУЧНИКИ</span>' : ''}
         </div>
     `).join('');
-    els.forEach(el => el.innerHTML = html);
+
+    // Прогноз предстоящих предметов
+    let forecastHtml = '';
+    if (s.upcoming_items && Object.keys(s.upcoming_items).length > 0) {
+        let itemsExist = false;
+        let fc = `<div class="sidebar-forecast" style="margin-top: 12px; padding-top: 10px; border-top: 1px dashed #3a2a1f;">
+            <div style="font-size: 10px; color: var(--orange); margin-bottom: 6px; text-transform: uppercase; letter-spacing: 1px; opacity: 0.8;">Прогноз на следующую выдачу:</div>`;
+        s.players.forEach(p => {
+            const items = s.upcoming_items[p.id];
+            if (items && items.length > 0) {
+                itemsExist = true;
+                fc += `<div style="font-size: 11px; margin-bottom: 4px; line-height: 1.3;">
+                    <span style="color:var(--text-dim)">#${p.number} ${p.name}:</span> <span style="color:#d4c4a8">${items.join(', ')}</span>
+                </div>`;
+            }
+        });
+        fc += `</div>`;
+        if (itemsExist) forecastHtml = fc;
+    }
+
+    els.forEach(el => el.innerHTML = html + forecastHtml);
 }
 
 function renderLog(log) {

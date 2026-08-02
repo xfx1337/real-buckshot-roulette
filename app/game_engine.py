@@ -196,6 +196,7 @@ class GameState:
         # Капсюли в игрушечном револьвере (физический реквизит). Тратятся при
         # каждом боевом выстреле; когда 0 — нужно физически перезарядить.
         self.revolver_ammo: int = self.config.revolver_capacity
+        self.upcoming_items: dict[str, list[ItemType]] = {}
 
 
     def _log(self, msg: str, event_type: str = "info"):
@@ -290,6 +291,7 @@ class GameState:
             else:
                 self.current_turn_idx = 0
 
+        self.upcoming_items = self._generate_items_for_count(rc["items_per_player"])
         self._start_new_load()
 
     def _generate_shells(self):
@@ -512,10 +514,29 @@ class GameState:
             return
 
         self.phase = GamePhase.DEALER_ITEMS
+        if not self.upcoming_items:
+            self.upcoming_items = self._generate_items_for_count(items_count)
+
+        for p in self.get_alive_players():
+            items_to_give = self.upcoming_items.get(p.id, [])
+            slots_free = self.config.max_items_per_player - len(p.items)
+            items_to_give = items_to_give[:slots_free]
+            
+            p.items.extend(items_to_give)
+            self.dealt_items[p.id] = items_to_give
+            names = ", ".join(ITEM_LABELS[i][0] for i in items_to_give)
+            if names:
+                self._log(f"Игроку #{p.number} «{p.name}» выданы: {names}", "item")
+                
+        # Generate the next upcoming items immediately so they can be viewed in advance
+        self.upcoming_items = self._generate_items_for_count(items_count)
+
+    def _generate_items_for_count(self, items_count: int) -> dict[str, list[ItemType]]:
+        result = {}
+        if items_count <= 0:
+            return result
         
-        # Build available pool (medicine pre-generated as vodka/water at deal time)
         if self.config.game_mode in ("story", "story_one_round"):
-            # Story mode: только базовые предметы из оригинального сюжетного режима
             base_pool = [
                 ItemType.BEER, ItemType.HANDSAW, ItemType.HANDCUFFS,
                 ItemType.MAGNIFYING_GLASS, ItemType.CIGARETTES
@@ -529,7 +550,6 @@ class GameState:
             final_chosen = []
             
             for _ in range(count):
-                # Count current items on table globally
                 table_counts = {item: 0 for item in base_pool}
                 for alive_p in self.get_alive_players():
                     for i in alive_p.items:
@@ -539,7 +559,6 @@ class GameState:
                     if i in table_counts:
                         table_counts[i] += 1
                 
-                # Filter pool by global and personal limits
                 current_pool = []
                 for item in base_pool:
                     g_limit = self.config.item_limits_global.get(item, 0)
@@ -554,21 +573,17 @@ class GameState:
                         current_pool.append(item)
                 
                 if not current_pool:
-                    break  # Cannot add more items due to limits
+                    break
                     
                 chosen = random.choice(current_pool)
-                # Pre-generate medicine outcome (so dealer knows what to pour)
                 if chosen == ItemType.EXPIRED_MEDICINE:
                     if random.random() < 0.5:
                         chosen = ItemType.MEDICINE_VODKA
                     else:
                         chosen = ItemType.MEDICINE_WATER
                 final_chosen.append(chosen)
-
-            p.items.extend(final_chosen)
-            self.dealt_items[p.id] = final_chosen
-            names = ", ".join(ITEM_LABELS[i][0] for i in final_chosen)
-            self._log(f"Игроку #{p.number} «{p.name}» выданы: {names}", "item")
+            result[p.id] = final_chosen
+        return result
 
     def confirm_shells_loaded(self):
         """Dealer confirms they physically loaded the shells."""
@@ -1070,6 +1085,10 @@ class GameState:
                 pid: [ITEM_LABELS[ItemType(i)][0] for i in items]
                 for pid, items in self.dealt_items.items()
             } if self.dealt_items else {}
+            data["upcoming_items"] = {
+                pid: [ITEM_LABELS[ItemType(i)][0] for i in items]
+                for pid, items in self.upcoming_items.items()
+            } if self.upcoming_items else {}
             data["last_burner_result"] = self.last_burner_result
             data["last_medicine_result"] = self.last_medicine_result
             data["last_magnify_result"] = self.last_magnify_result
