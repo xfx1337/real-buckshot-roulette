@@ -21,7 +21,7 @@
     "player_lose": false
   },
   "cctv": {
-    "auto_enabled": true,
+    "auto_enabled": false,
     "min_time": 10,
     "max_time": 60,
     "min_show": 5,
