@@ -412,6 +412,9 @@
         tvWs.onopen = () => {
             tvIndicator.classList.add('connected');
             clearTimeout(tvReconnectTimer);
+            tvWs.pingInterval = setInterval(() => {
+                if (tvWs.readyState === WebSocket.OPEN) tvWs.send(JSON.stringify({ping: 1}));
+            }, 10000);
         };
 
         tvWs.onmessage = (e) => {
@@ -425,6 +428,7 @@
 
         tvWs.onclose = () => {
             tvIndicator.classList.remove('connected');
+            clearInterval(tvWs.pingInterval);
             tvReconnectTimer = setTimeout(connectTV, 2000);
         };
     }
@@ -449,7 +453,20 @@
             case 'play':
                 if (cmd.video) {
                     const cacheBuster = cmd.mtime ? '?t=' + cmd.mtime : '';
-                    videoEl.src = '/videos/' + cmd.video + cacheBuster;
+                    const newSrc = '/videos/' + cmd.video + cacheBuster;
+                    
+                    if (videoEl.dataset.currentSrc === newSrc && videoOverlay.classList.contains('active')) {
+                        videoEl.loop = !!cmd.loop;
+                        tvMutesGameSound = !!cmd.mute_game_sound;
+                        if (cmd.volume !== undefined) {
+                            videoEl.volume = Math.max(0, Math.min(100, cmd.volume)) / 100.0;
+                        }
+                        if (videoEl.paused) playVideoOnSelectedSink(err => console.warn('Video play error', err));
+                        break;
+                    }
+
+                    videoEl.dataset.currentSrc = newSrc;
+                    videoEl.src = newSrc;
                     videoEl.loop = !!cmd.loop;
                     tvMutesGameSound = !!cmd.mute_game_sound;
                     if (cmd.volume !== undefined) {
@@ -1109,14 +1126,19 @@
     const playerId = document.getElementById('player-app').dataset.playerId;
     let ws;
     let reconnectTimer;
+    let showConnectingTimer;
 
     function connect() {
         const proto = location.protocol === 'https:' ? 'wss' : 'ws';
         ws = new WebSocket(`${proto}://${location.host}/ws/player/${playerId}`);
 
         ws.onopen = () => {
+            clearTimeout(showConnectingTimer);
             document.getElementById('connecting').style.display = 'none';
             clearTimeout(reconnectTimer);
+            ws.pingInterval = setInterval(() => {
+                if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ping: 1}));
+            }, 10000);
         };
 
         ws.onmessage = (e) => {
@@ -1125,7 +1147,10 @@
         };
 
         ws.onclose = () => {
-            document.getElementById('connecting').style.display = 'flex';
+            clearInterval(ws.pingInterval);
+            showConnectingTimer = setTimeout(() => {
+                document.getElementById('connecting').style.display = 'flex';
+            }, 3000);
             reconnectTimer = setTimeout(connect, 2000);
         };
     }
@@ -1136,7 +1161,10 @@
 
     function updateUI(data) {
         if (data.error) {
-            window.location.href = '/telejoin';
+            const screens = ['state-game', 'state-dead', 'state-gameover', 'state-roundover', 'state-loading'];
+            screens.forEach(s => document.getElementById(s).style.display = 'none');
+            document.getElementById('state-lobby').style.display = 'flex';
+            document.getElementById('lobby-status').textContent = 'СЕАНС ЗАВЕРШЁН (ИГРОК НЕ НАЙДЕН)';
             return;
         }
 
@@ -1162,11 +1190,6 @@
             } else {
                 document.getElementById('gameover-text').textContent = 'конец игры';
                 document.getElementById('gameover-winner').textContent = '';
-            }
-            if (!gameOverTimeout) {
-                gameOverTimeout = setTimeout(() => {
-                    window.location.href = '/telejoin';
-                }, 8000);
             }
             return;
         } else {
