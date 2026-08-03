@@ -1537,28 +1537,49 @@ body{ cursor:default; }
                     <input type="checkbox" id="aud-ducking" onchange="onDuckingChange(this.checked)" style="width:16px; height:16px; margin:0; cursor:pointer;">
                     <label for="aud-ducking" style="cursor:pointer; user-select:none; margin:0; font-size:13px;">Приглушать музыку при выстреле</label>
                 </div>
-                <!-- Раздельный вывод: звук игры и звук видео на разные колонки. -->
+                <!-- Серверный звук: PortAudio из Python, минуя браузер. -->
+                <div class="aud-outs" id="aud-server-box">
+                    <div class="aud-outs-head">
+                        <span>СЕРВЕРНЫЙ ЗВУК (PYTHON)</span>
+                        <button class="btn btn-small btn-tiny" onclick="restartServerAudio()" title="Переоткрыть устройства (наушники подключили/отключили)">⟲</button>
+                    </div>
+                    <div class="scfg-row" style="margin-bottom:10px; align-items:center; justify-content:flex-start; gap:8px;">
+                        <input type="checkbox" id="aud-server-mode" onchange="onSoundModeChange(this.checked)" style="width:16px; height:16px; margin:0; cursor:pointer;">
+                        <label for="aud-server-mode" style="cursor:pointer; user-select:none; margin:0; font-size:13px;">Играть звук из Python, а не в браузере</label>
+                    </div>
+                    <div class="scfg-row aud-out-row">
+                        <label for="aud-srv-game">Игра и эффекты</label>
+                        <select id="aud-srv-game" onchange="onServerDeviceChange('game', this)">
+                            <option value="">Системное по умолчанию</option>
+                        </select>
+                        <button class="btn btn-small btn-tiny" onclick="testServerAudio('game')" title="Проверить вывод">▶</button>
+                    </div>
+                    <p class="scfg-note" id="aud-server-note">Загрузка…</p>
+                </div>
+                <!-- Раздельный вывод: эффекты в наушники, видеоролики в динамики. -->
                 <div class="aud-outs">
                     <div class="aud-outs-head">
-                        <span>УСТРОЙСТВА ВЫВОДА</span>
+                        <span>УСТРОЙСТВА ВЫВОДА (БРАУЗЕР)</span>
                         <button class="btn btn-small btn-tiny" onclick="refreshAudioOutputs(true)" title="Обновить список устройств">⟲</button>
                     </div>
                     <div class="scfg-row aud-out-row">
-                        <label for="aud-out-game">Звуки игры</label>
+                        <label for="aud-out-game">Игра и эффекты</label>
                         <select id="aud-out-game" onchange="onAudioOutputChange('game', this)">
                             <option value="">Системное по умолчанию</option>
                         </select>
-                        <button class="btn btn-small btn-tiny" onclick="testAudioOutput('game')" title="Проверить вывод">▶</button>
+                        <button class="btn btn-small btn-tiny" onclick="testAudioOutput('game')" title="Проверить вывод здесь">▶</button>
+                        <button class="btn btn-small btn-tiny" onclick="testAudioOutput('game', true)" title="Проверить вывод на экране игрока">▶TV</button>
                     </div>
                     <div class="scfg-row aud-out-row">
-                        <label for="aud-out-video">Звук видео (ТВ)</label>
+                        <label for="aud-out-video">Видеоролики</label>
                         <select id="aud-out-video" onchange="onAudioOutputChange('video', this)">
                             <option value="">Системное по умолчанию</option>
                         </select>
                         <button class="btn btn-small btn-tiny" onclick="testAudioOutput('video')" title="Проверить вывод на экране игрока">▶</button>
                     </div>
                     <p class="scfg-note" id="aud-out-note">
-                        Звуки игры звучат на этой странице, звук видео — на экране игрока (/teleplayer).
+                        Канал «Игра и эффекты» — наушники: звуки этой панели плюс шум CCTV-перехода
+                        на экране игрока. Канал «Видеоролики» — динамики: звук видео на /teleplayer.
                         Живые CCTV-потоки идут через встроенный плеер камер и на выбор устройства не реагируют.
                     </p>
                 </div>
@@ -1743,8 +1764,11 @@ function renderLobby(s) {
     `).join('') || '<p class="hint">---</p>';
 
     if (s.game_mode === 'solo' || s.game_mode === 'story' || s.game_mode === 'story_one_round') {
-        document.getElementById('btn-start').disabled = s.players.length !== 1;
-        document.getElementById('lobby-hint').textContent = `Игроков: ${s.players.length}/1 (Только один игрок должен зайти с телефона)`;
+        const n = s.players.length;
+        document.getElementById('btn-start').disabled = (n < 1 || n > 2);
+        document.getElementById('lobby-hint').textContent = n === 2
+            ? `Игроков: 2/2 (второй игрок — за дилера)`
+            : `Игроков: ${n}/2 (при 1 игроке DEALER добавится автоматически)`;
     } else {
         document.getElementById('btn-start').disabled = s.players.length < 2;
         document.getElementById('lobby-hint').textContent = `Игроков: ${s.players.length}/4 (мин. 2, макс. 4)`;
@@ -2782,23 +2806,158 @@ function openAudioConfig() {
     }
     loadAudioConfig();
     refreshAudioOutputs();
+    refreshServerAudio();
 }
 function closeAudioConfig() {
     document.getElementById('audio-config-modal').style.display = 'none';
     if (window.SoundEngine) SoundEngine.play('ui_settings_close');
 }
+// Громкость и приглушение правим в обоих движках: браузерный помнит их в
+// localStorage, серверный — в своём процессе. Так переключение режима не
+// сбрасывает настройку на другую.
 function onVolumeChange(v) {
     document.getElementById('aud-volume-val').textContent = v + '%';
     if (window.SoundEngine) SoundEngine.setVolume(parseInt(v)/100);
+    serverMix({ volume: parseInt(v)/100 });
 }
 function onDuckingChange(checked) {
     if (window.SoundEngine) SoundEngine.setDucking(checked);
+    serverMix({ ducking: checked });
+}
+
+// Отправка микса на серверный движок. Ошибки глушим: серверный звук
+// необязателен, а ползунок громкости не должен ругаться, когда его нет.
+function serverMix(patch) {
+    const fd = new FormData();
+    if (patch.volume !== undefined) fd.append('volume', patch.volume);
+    if (patch.ducking !== undefined) fd.append('ducking', patch.ducking ? 'true' : 'false');
+    fetch('/api/audio/server/mix', { method: 'POST', body: fd }).catch(() => {});
+}
+
+// ── Серверный звук (PortAudio) ──
+// Python играет звук сам, минуя браузер: не нужен ни secure context, ни
+// разрешение на медиа, ни жест для автоплея, а устройство выбирается по имени.
+// Браузерный тракт остаётся рабочим — переключатель возвращает его в любой момент.
+async function refreshServerAudio() {
+    const note = document.getElementById('aud-server-note');
+    const box = document.getElementById('aud-server-box');
+    const sel = document.getElementById('aud-srv-game');
+    const chk = document.getElementById('aud-server-mode');
+    if (!note || !sel || !chk) return;
+    let d;
+    try {
+        const r = await fetch('/api/audio/server?t=' + Date.now());
+        d = await r.json();
+    } catch (e) {
+        box.classList.add('unsupported');
+        note.textContent = '✗ Не удалось получить состояние серверного звука: ' + e.message;
+        return;
+    }
+
+    const eng = (d.director && d.director.engine) || {};
+    // Библиотек нет — предлагать переключение бессмысленно.
+    if (eng.error) {
+        box.classList.add('unsupported');
+        chk.disabled = true; sel.disabled = true;
+        note.textContent = 'Серверный звук недоступен: ' + eng.error
+            + '. Установите зависимости: pip install sounddevice soundfile';
+        return;
+    }
+    box.classList.remove('unsupported');
+    chk.disabled = false;
+    chk.checked = d.mode === 'server';
+
+    const devices = d.devices || [];
+    const want = (d.outputs && d.outputs.game) || '';
+    sel.innerHTML = '<option value="">Системное по умолчанию</option>'
+        + devices.map(x => `<option value="${x.name}">${x.name}</option>`).join('');
+    // Устройство могло исчезнуть (наушники отключили) — показываем это явно,
+    // иначе select молча съедет на «по умолчанию» и выбор будет потерян.
+    if (want && !devices.some(x => x.name === want)) {
+        sel.innerHTML += `<option value="${want}">⚠ ${want} (недоступно)</option>`;
+    }
+    sel.value = want;
+    sel.disabled = false;
+
+    const gameCh = (eng.channels && eng.channels.game) || {};
+    let msg;
+    if (d.mode === 'server') {
+        msg = gameCh.open
+            ? '▶ Звук играет Python на устройстве: ' + (gameCh.device || 'системное по умолчанию')
+              + '. Браузерный движок молчит.'
+            : '✗ Канал не открылся' + (gameCh.error ? ': ' + gameCh.error : '') + ' — звука не будет.';
+    } else {
+        msg = 'Звук играет браузер. Включите галку, чтобы отдать его Python: '
+            + 'не нужны ни разрешения браузера, ни клик для автоплея. '
+            + 'Видеоролики в любом случае остаются в браузере.';
+    }
+    note.textContent = msg;
+}
+
+async function onSoundModeChange(useServer) {
+    const fd = new FormData();
+    fd.append('mode', useServer ? 'server' : 'browser');
+    try {
+        const r = await fetch('/api/audio/server/mode', { method: 'POST', body: fd });
+        if (!r.ok) {
+            const err = await r.json().catch(() => ({}));
+            throw new Error(err.detail || ('HTTP ' + r.status));
+        }
+        audioMsg('✓ Звук: ' + (useServer ? 'Python (сервер)' : 'браузер'), true);
+    } catch (e) {
+        audioMsg('✗ ' + e.message, false);
+        document.getElementById('aud-server-mode').checked = !useServer;
+    }
+    refreshServerAudio();
+}
+
+async function onServerDeviceChange(channel, sel) {
+    const fd = new FormData();
+    fd.append('channel', channel);
+    fd.append('device', sel.value);
+    try {
+        const r = await fetch('/api/audio/server/device', { method: 'POST', body: fd });
+        if (!r.ok) {
+            const err = await r.json().catch(() => ({}));
+            throw new Error(err.detail || ('HTTP ' + r.status));
+        }
+        audioMsg('✓ Серверный звук → ' + (sel.value || 'системное по умолчанию'), true);
+    } catch (e) {
+        audioMsg('✗ ' + e.message, false);
+    }
+    refreshServerAudio();
+}
+
+async function testServerAudio(channel) {
+    const fd = new FormData();
+    fd.append('channel', channel);
+    try {
+        const r = await fetch('/api/audio/server/test', { method: 'POST', body: fd });
+        if (!r.ok) {
+            const err = await r.json().catch(() => ({}));
+            throw new Error(err.detail || ('HTTP ' + r.status));
+        }
+        audioMsg('▶ Проверка серверного звука', true);
+    } catch (e) {
+        audioMsg('✗ ' + e.message, false);
+    }
+}
+
+async function restartServerAudio() {
+    try {
+        await fetch('/api/audio/server/restart', { method: 'POST' });
+        audioMsg('✓ Устройства переоткрыты', true);
+    } catch (e) {
+        audioMsg('✗ ' + e.message, false);
+    }
+    refreshServerAudio();
 }
 
 // ── Раздельный вывод звука (игра / видео) ──
-// Оператор направляет звуки игры на одну колонку, звук видеоконтента — на ТВ.
-// Канал 'game' звучит в этой вкладке, канал 'video' — на экране /teleplayer,
-// поэтому выбор для него уходит на сервер и рассылается по WebSocket.
+// Оператор направляет игровые звуки и эффекты в наушники, а звук видеороликов —
+// в динамики. Канал 'game' звучит и в этой вкладке (SoundEngine), и на экране
+// /teleplayer (шум CCTV-перехода); канал 'video' — только на /teleplayer.
+// Выбор по обоим каналам уходит на сервер и рассылается TV по WebSocket.
 async function refreshAudioOutputs(userInitiated) {
     const box = document.querySelector('.aud-outs');
     const note = document.getElementById('aud-out-note');
@@ -2826,8 +2985,9 @@ async function refreshAudioOutputs(userInitiated) {
         note.textContent = '✗ ' + e.message;
         return;
     }
-    note.textContent = 'Звуки игры звучат на этой странице, звук видео — на экране игрока '
-        + '(/teleplayer). Живые CCTV-потоки идут через встроенный плеер камер и на выбор '
+    note.textContent = 'Канал «Игра и эффекты» — наушники: звуки этой панели плюс шум '
+        + 'CCTV-перехода на экране игрока. Канал «Видеоролики» — динамики: звук видео '
+        + 'на /teleplayer. Живые CCTV-потоки идут через встроенный плеер камер и на выбор '
         + 'устройства не реагируют.';
     // Выбор сервера — источник правды: он же применён на экране игрока.
     let saved = { game: { deviceId: '' }, video: { deviceId: '' } };
@@ -2872,16 +3032,18 @@ async function onAudioOutputChange(channel, sel) {
     }
 }
 
-async function testAudioOutput(channel) {
-    if (channel === 'game') {
+// onTv=true — проверить канал на экране игрока, иначе в этой вкладке.
+// Канал 'game' звучит в обоих местах, поэтому у него доступны обе проверки.
+async function testAudioOutput(channel, onTv) {
+    if (channel === 'game' && !onTv) {
         // Звучит здесь же — SoundEngine уже привязан к каналу 'game'.
         if (window.SoundEngine) SoundEngine.play('ui_click');
-        audioMsg('▶ Проверка: звуки игры', true);
+        audioMsg('▶ Проверка: игра и эффекты (эта панель)', true);
         return;
     }
-    // Канал видео звучит на экране игрока — просим TV проиграть тестовый звук.
+    // Просим TV проиграть тестовый звук через нужный канал.
     try {
-        await fetch('/api/tv/audio_test', { method: 'POST' });
+        await fetch('/api/tv/audio_test?channel=' + encodeURIComponent(channel), { method: 'POST' });
         audioMsg('▶ Проверка отправлена на экран игрока', true);
     } catch (e) {
         audioMsg('✗ ' + e.message, false);

@@ -9,6 +9,7 @@ import json
 import os
 import copy
 import platform
+import queue
 import re
 import sys
 import time
@@ -36,6 +37,8 @@ from app.game_engine import (
 )
 from app import sound_config
 from app import video_config
+from app import audio_engine
+from app.sound_director import director as sound_director
 
 import socket
 from urllib.parse import quote, unquote, urlparse
@@ -255,7 +258,20 @@ TEMPLATE_DIR = Path(__file__).parent / "templates"
 async def lifespan(app: FastAPI):
     os.makedirs(STATIC_DIR, exist_ok=True)
     os.makedirs(TEMPLATE_DIR, exist_ok=True)
-    yield
+    # Серверный звук (PortAudio). Поднимаем каналы всегда: открытый поток сам по
+    # себе молчит, зато панель дилера сразу видит, какие устройства доступны и
+    # открылись ли они. Играть начнём только если режим звука — 'server'.
+    if audio_engine.import_error() is None:
+        try:
+            audio_engine.start(sound_config.get_server_outputs())
+        except Exception as e:
+            print(f"[audio] серверный звук не поднялся: {e}")
+    mode = sound_config.get_sound_mode()
+    sound_director.set_enabled(mode == "server")
+    try:
+        yield
+    finally:
+        audio_engine.stop()
 
 app = FastAPI(
     title="Buckshot Roulette IRL",
@@ -285,6 +301,40 @@ app.mount("/videos", StaticFiles(directory=str(video_config.VIDEOS_DIR)), name="
 templates = Jinja2Templates(directory=str(TEMPLATE_DIR))
 
 
+# ── Серверная озвучка ──
+# Детект событий сравнивает снапшот с предыдущим, поэтому порядок обработки
+# важен: два состояния, разобранные не в том порядке, дадут пропущенные или
+# лишние звуки. Отсюда один рабочий поток с очередью, а не задача на каждый
+# снапшот. Поток отдельный, потому что движок читает настройки с диска и
+# декодирует аудио при первом проигрывании — в event loop это тормозило бы
+# рассылку состояния всем клиентам.
+_sound_queue: "queue.Queue[dict]" = queue.Queue(maxsize=64)
+
+
+def _sound_worker():
+    while True:
+        state = _sound_queue.get()
+        try:
+            sound_director.on_state(state)
+        except Exception as e:
+            print(f"[audio] ошибка озвучки: {e}")
+        finally:
+            _sound_queue.task_done()
+
+
+threading.Thread(target=_sound_worker, daemon=True, name="sound-director").start()
+
+
+def _queue_sound_state(state: dict):
+    try:
+        _sound_queue.put_nowait(state)
+    except queue.Full:
+        # Очередь забита — значит движок не успевает за потоком состояний.
+        # Пропустить снапшот безопаснее, чем копить отставание: следующий
+        # всё равно принесёт актуальную картину.
+        pass
+
+
 # ── Broadcast ──
 
 async def broadcast_state():
@@ -294,6 +344,14 @@ async def broadcast_state():
     # Dealer
     dealer_dict = game.to_dict(for_dealer=True)
     dealer_dict["can_undo"] = len(undo_stack) > 0
+
+    # Серверная озвучка смотрит на тот же снапшот, что уходит дилеру.
+    if sound_director.enabled:
+        _queue_sound_state(dealer_dict)
+    # Браузерный движок молчит, пока звук играет сервер, — иначе одно событие
+    # прозвучит дважды. Флаг едет в снапшоте, чтобы это работало и во вкладках,
+    # из которых режим не переключали.
+    dealer_dict["server_sound"] = sound_director.enabled
     dealer_data = json.dumps(dealer_dict, ensure_ascii=False)
     dead_ws = []
     for ws in dealer_ws_list:
@@ -1241,6 +1299,101 @@ async def audio_upload(key: str = Form(...), file: UploadFile = File(...)):
     return {"ok": True, "key": key, "filename": saved}
 
 
+# ── Серверный звук (PortAudio) ─────────────────────────────────────────────
+
+@app.get("/api/audio/server", tags=["Game Management"], summary="Состояние серверного звука", include_in_schema=False)
+async def audio_server_status():
+    """Режим звука, доступные устройства PortAudio и что реально открылось."""
+    return {
+        "mode": sound_config.get_sound_mode(),
+        "devices": audio_engine.list_devices(),
+        "outputs": sound_config.get_server_outputs(),
+        "director": sound_director.status(),
+    }
+
+
+@app.post("/api/audio/server/mode", tags=["Game Management"], summary="Переключить браузерный/серверный звук", include_in_schema=False)
+async def audio_server_mode(mode: str = Form(..., description="browser — звук в браузере, server — звук из Python")):
+    try:
+        sound_config.set_sound_mode(mode)
+    except KeyError:
+        raise HTTPException(404, f"Неизвестный режим: {mode}")
+    if mode == "server" and not audio_engine.available():
+        # Каналы не открылись — молча «включить» серверный звук значило бы
+        # оставить оператора вообще без озвучки.
+        raise HTTPException(409, "Серверный звук недоступен: "
+                                 + (audio_engine.import_error() or "устройство не открылось"))
+    sound_director.set_enabled(mode == "server")
+    # Режим уезжает в снапшот состояния (broadcast_state), поэтому вкладки
+    # дилера узнают о нём сами и глушат браузерный движок без отдельной рассылки.
+    await broadcast_state()
+    return {"ok": True, "mode": mode, "director": sound_director.status()}
+
+
+@app.post("/api/audio/server/device", tags=["Game Management"], summary="Устройство канала для серверного звука", include_in_schema=False)
+async def audio_server_device(
+    channel: str = Form(..., description="game — эффекты, video — видеоконтент"),
+    device: str = Form("", description="Имя устройства PortAudio; пусто — системное по умолчанию"),
+):
+    if channel not in sound_config.OUTPUT_CHANNELS:
+        raise HTTPException(404, f"Неизвестный канал: {channel}")
+    # Сначала открываем, и только потом сохраняем: иначе неоткрывшееся имя
+    # осядет в конфиге и подхватится при следующем старте сервера.
+    result = audio_engine.set_device(channel, device)
+    if not result.get("ok"):
+        raise HTTPException(409, f"Не удалось открыть устройство: {result.get('error')}")
+    sound_config.set_server_output(channel, device)
+    # Поток переоткрыт — фоновая музыка на нём оборвалась. Возвращаем её,
+    # иначе тишина продержится до следующей смены фазы.
+    if channel == "game" and sound_director.enabled:
+        want = sound_director.loop_key
+        sound_director.loop_key = None
+        sound_director.set_loop(want)
+    return {"ok": True, "channel": channel, "device": device, "director": sound_director.status()}
+
+
+@app.post("/api/audio/server/test", tags=["Game Management"], summary="Проверить серверный звук", include_in_schema=False)
+async def audio_server_test(
+    channel: str = Form("game", description="Канал для проверки"),
+    key: str = Form("ui_click", description="Ключ события для проверочного звука"),
+):
+    """Проиграть звук через выбранный канал, не глядя на вкл/выкл события —
+    оператору нужно услышать, на какое устройство он реально попадает."""
+    if channel not in sound_config.OUTPUT_CHANNELS:
+        raise HTTPException(404, f"Неизвестный канал: {channel}")
+    path = sound_config.resolve_file(key)
+    if path is None:
+        raise HTTPException(404, f"Нет файла для события: {key}")
+    ok = audio_engine.play(path, channel, sound_director.master_volume, f"__test_{channel}__")
+    if not ok:
+        raise HTTPException(409, "Канал закрыт или файл не читается")
+    return {"ok": True, "channel": channel, "key": key}
+
+
+@app.post("/api/audio/server/mix", tags=["Game Management"], summary="Громкость и приглушение серверного звука", include_in_schema=False)
+async def audio_server_mix(
+    volume: Optional[float] = Form(None, description="Общая громкость 0..1"),
+    ducking: Optional[bool] = Form(None, description="Приглушать музыку при выстреле"),
+):
+    """В серверном режиме ползунок громкости и галка приглушения правят движок
+    здесь, а не в браузере — там звука уже нет."""
+    if volume is not None:
+        sound_director.set_volume(volume)
+    if ducking is not None:
+        sound_director.set_ducking(ducking)
+    return {"ok": True, "director": sound_director.status()}
+
+
+@app.post("/api/audio/server/restart", tags=["Game Management"], summary="Перезапустить серверный звук", include_in_schema=False)
+async def audio_server_restart():
+    """Переоткрыть каналы: нужно, когда устройство подключили или отключили
+    уже после старта сервера (наушники сели, колонку воткнули)."""
+    audio_engine.start(sound_config.get_server_outputs())
+    if sound_director.enabled:
+        sound_director.reset()
+    return {"ok": True, "director": sound_director.status()}
+
+
 @app.get("/api/audio/outputs", tags=["Game Management"], summary="Выбранные устройства вывода звука", include_in_schema=False)
 async def audio_outputs():
     return {"outputs": sound_config.get_outputs()}
@@ -1256,9 +1409,10 @@ async def audio_set_output(
         sound_config.set_output(channel, device_id, label)
     except KeyError:
         raise HTTPException(404, f"Неизвестный канал: {channel}")
-    # Канал video звучит на TV-экране — сообщаем ему о смене устройства сразу.
-    if channel == "video":
-        await broadcast_tv({"action": "audio_output", "device_id": device_id})
+    # На TV-экране звучат оба канала: видеоролики идут в 'video' (динамики),
+    # шум CCTV-перехода — в 'game' (наушники). Поэтому шлём смену любого канала,
+    # указывая, какой именно менялся.
+    await broadcast_tv({"action": "audio_output", "channel": channel, "device_id": device_id})
     return {"ok": True, "channel": channel, "device_id": device_id}
 
 
@@ -1485,13 +1639,16 @@ async def tv_play(request: Request):
     return {"ok": True, "video": video}
 
 @app.post("/api/tv/audio_test", tags=["TV"], summary="Проверить устройство вывода звука на TV", include_in_schema=False)
-async def tv_audio_test():
-    """Проиграть на TV-экране короткий звук через канал вывода видео.
+async def tv_audio_test(channel: str = "video"):
+    """Проиграть на TV-экране короткий звук через указанный канал вывода.
 
-    Нужно оператору, чтобы убедиться: звук видеоконтента уходит на телевизор,
-    а не на колонку с озвучкой игры."""
-    await broadcast_tv({"action": "audio_test"})
-    return {"ok": True}
+    На TV-экране звучат оба канала: 'video' — видеоролики, 'game' — эффекты
+    (шум CCTV-перехода). Оператору нужно проверить каждый по отдельности,
+    чтобы убедиться, что они разошлись по разным устройствам."""
+    if channel not in sound_config.OUTPUT_CHANNELS:
+        raise HTTPException(404, f"Неизвестный канал: {channel}")
+    await broadcast_tv({"action": "audio_test", "channel": channel})
+    return {"ok": True, "channel": channel}
 
 
 @app.post("/api/tv/cctv", tags=["TV"], summary="Включить/выключить CCTV", include_in_schema=False)
