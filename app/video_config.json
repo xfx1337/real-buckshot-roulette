@@ -8,7 +8,8 @@
   "auto_play": {
     "static_on_create": true,
     "intro_after_static": true,
-    "result_on_game_over": true
+    "result_on_game_over": true,
+    "mute_game_sound": true
   },
   "settings": {
     "volume": 52

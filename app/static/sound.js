@@ -166,7 +166,7 @@
     }
     try {
       var vol = (engine.cfg[key] && engine.cfg[key].volume !== undefined) ? engine.cfg[key].volume : 1.0;
-      var target = engine.masterVolume * vol;
+      var target = engine.muted ? 0 : (engine.masterVolume * vol);
       var a = makeAudio(key);
       if (target > 1.0 && gainPathSafe()) {
         // Усиление через WebAudio gain (например, «звук из рая» +40%).
@@ -199,7 +199,7 @@
     if (!engine.loopAudio) return;
     var key = engine.loopKey;
     var vol = (engine.cfg[key] && engine.cfg[key].volume !== undefined) ? engine.cfg[key].volume : 1.0;
-    var base = engine.masterVolume * 0.55 * vol;
+    var base = engine.muted ? 0 : (engine.masterVolume * 0.55 * vol);
     engine.loopAudio.volume = Math.min(1.0, engine.ducked ? base * 0.1 : base);
   }
 
@@ -360,6 +360,11 @@
     var phase = s.phase || 'no_game';
     var curPlayerId = s.current_player ? s.current_player.id : null;
 
+    if (s.global_mute !== undefined && !!s.global_mute !== engine.muted) {
+      engine.muted = !!s.global_mute;
+      updateLoopVolume();
+    }
+
     var fresh = newEntries(engine.prevLog, s.log || []);
     if (fresh.length) log('new log entries:', fresh.length);
     fresh.forEach(function (e) {
@@ -443,6 +448,10 @@
       updateLoopVolume();
     },
     getVolume: function () { return engine.masterVolume; },
+    setMuted: function (m) {
+      engine.muted = !!m;
+      updateLoopVolume();
+    },
     setDucking: function (enabled) {
       engine.duckingEnabled = !!enabled;
       localStorage.setItem('bsr_sound_ducking', String(engine.duckingEnabled));

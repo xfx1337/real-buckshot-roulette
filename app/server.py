@@ -224,6 +224,9 @@ tv_ws_list: list[WebSocket] = []  # TV video overlay WebSocket connections
 # Current video command being broadcast to all TV screens.
 tv_video_state: dict = {"action": "idle", "video": None, "loop": False}
 
+def _is_tv_muting():
+    return bool(tv_video_state.get("action") == "play" and tv_video_state.get("mute_game_sound", False))
+
 async def notify_showscreen(message: str, player_name: str, item: str):
     if not showscreen_ws_list:
         return
@@ -344,6 +347,7 @@ async def broadcast_state():
     # Dealer
     dealer_dict = game.to_dict(for_dealer=True)
     dealer_dict["can_undo"] = len(undo_stack) > 0
+    dealer_dict["global_mute"] = _is_tv_muting()
 
     # Серверная озвучка смотрит на тот же снапшот, что уходит дилеру.
     if sound_director.enabled:
@@ -366,7 +370,9 @@ async def broadcast_state():
     for pid, ws_list in list(connected_clients.items()):
         if pid == "dealer":
             continue
-        player_data = json.dumps(game.player_view(pid), ensure_ascii=False)
+        pd = game.player_view(pid)
+        pd["global_mute"] = _is_tv_muting()
+        player_data = json.dumps(pd, ensure_ascii=False)
         dead = []
         for ws in ws_list:
             try:
@@ -1446,8 +1452,11 @@ async def get_state(dealer: bool = False) -> GameStateResponse | dict:
     if dealer:
         data = game.to_dict(for_dealer=True)
         data["can_undo"] = len(undo_stack) > 0
+        data["global_mute"] = _is_tv_muting()
         return data
-    return game.to_dict(for_dealer=False)
+    d = game.to_dict(for_dealer=False)
+    d["global_mute"] = _is_tv_muting()
+    return d
 
 
 @app.get(
@@ -1464,7 +1473,9 @@ async def get_state(dealer: bool = False) -> GameStateResponse | dict:
 async def get_player_state(player_id: str) -> PlayerStateResponse | dict:
     if not game:
         return {"phase": "no_game"}
-    return game.player_view(player_id)
+    d = game.player_view(player_id)
+    d["global_mute"] = _is_tv_muting()
+    return d
 
 
 # ── API: ESP32 physical trigger ──
@@ -1629,13 +1640,15 @@ async def tv_play(request: Request):
         
     cfg = video_config.load_config()
     vol = cfg.get("settings", {}).get("volume", 100)
+    mute = cfg.get("auto_play", {}).get("mute_game_sound", False)
     
     # Get file modification time for smart cache busting
     filepath = video_config.VIDEOS_DIR / video
     mtime = int(os.path.getmtime(filepath)) if filepath.exists() else 0
     
-    tv_video_state = {"action": "play", "video": video, "loop": loop, "volume": vol, "mtime": mtime}
+    tv_video_state = {"action": "play", "video": video, "loop": loop, "volume": vol, "mtime": mtime, "mute_game_sound": mute}
     await broadcast_tv(tv_video_state)
+    await broadcast_state()
     return {"ok": True, "video": video}
 
 @app.post("/api/tv/audio_test", tags=["TV"], summary="Проверить устройство вывода звука на TV", include_in_schema=False)
@@ -2133,6 +2146,7 @@ async def tv_pause():
     global tv_video_state
     tv_video_state["action"] = "pause"
     await broadcast_tv({"action": "pause"})
+    await broadcast_state()
     return {"ok": True}
 
 
@@ -2141,6 +2155,7 @@ async def tv_resume():
     global tv_video_state
     tv_video_state["action"] = "play"
     await broadcast_tv({"action": "resume"})
+    await broadcast_state()
     return {"ok": True}
 
 
@@ -2149,6 +2164,7 @@ async def tv_stop():
     global tv_video_state
     tv_video_state = {"action": "idle", "video": None, "loop": False}
     await broadcast_tv({"action": "stop"})
+    await broadcast_state()
     return {"ok": True}
 
 
@@ -2249,7 +2265,9 @@ async def ws_tv(ws: WebSocket):
                 data = json.loads(msg)
                 if data.get("event") == "ended":
                     # Video finished — notify dealer via broadcast_state
-                    pass  # Future: auto-play next video logic
+                    if tv_video_state.get("action") == "play":
+                        tv_video_state["action"] = "idle"
+                        await broadcast_state()
             except Exception:
                 pass
     except WebSocketDisconnect:

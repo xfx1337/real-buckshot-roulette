@@ -403,6 +403,7 @@
     }
     let tvWs;
     let tvReconnectTimer;
+    let tvMutesGameSound = false;
 
     function connectTV() {
         const proto = location.protocol === 'https:' ? 'wss' : 'ws';
@@ -450,6 +451,7 @@
                     const cacheBuster = cmd.mtime ? '?t=' + cmd.mtime : '';
                     videoEl.src = '/videos/' + cmd.video + cacheBuster;
                     videoEl.loop = !!cmd.loop;
+                    tvMutesGameSound = !!cmd.mute_game_sound;
                     if (cmd.volume !== undefined) {
                         videoEl.volume = Math.max(0, Math.min(100, cmd.volume)) / 100.0;
                     }
@@ -501,10 +503,19 @@
         }
     }
 
-    // Notify server when video ends
+    // Notify server when video ends, and manage game sound muting
+    videoEl.addEventListener('play', () => {
+        if (tvMutesGameSound && window.SoundEngine) window.SoundEngine.setMuted(true);
+    });
+    
+    videoEl.addEventListener('pause', () => {
+        if (window.SoundEngine) window.SoundEngine.setMuted(false);
+    });
+
     videoEl.addEventListener('ended', () => {
         if (!videoEl.loop) {
             videoOverlay.classList.remove('active');
+            if (window.SoundEngine) window.SoundEngine.setMuted(false);
             if (tvWs && tvWs.readyState === WebSocket.OPEN) {
                 tvWs.send(JSON.stringify({ event: 'ended' }));
             }

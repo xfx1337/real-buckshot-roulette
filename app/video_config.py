@@ -24,6 +24,7 @@ DEFAULT_CONFIG = {
         "static_on_create": True,
         "intro_after_static": False,
         "result_on_game_over": True,
+        "mute_game_sound": False,
     },
     "loop": {
         "static_noise": True,

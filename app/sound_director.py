@@ -156,6 +156,7 @@ class SoundDirector:
         self.enabled = False          # серверный звук выключен по умолчанию
         self.master_volume = 0.8
         self.ducking_enabled = True
+        self.global_mute = False
         self._ducked_until = 0.0
         self._lock = threading.Lock()
         self.reset()
@@ -173,6 +174,7 @@ class SoundDirector:
 
     # ── Проигрывание ───────────────────────────────────────────────────────
     def _gain_for(self, key: str) -> float:
+        if self.global_mute: return 0.0
         return self.master_volume * sound_config.get_volume(key)
 
     def play(self, key: str, force: bool = False) -> bool:
@@ -190,6 +192,7 @@ class SoundDirector:
         return audio_engine.play(path, "game", self._gain_for(key), key)
 
     def _loop_gain(self, key: str) -> float:
+        if self.global_mute: return 0.0
         base = self.master_volume * _LOOP_BASE * sound_config.get_volume(key)
         if self.ducking_enabled and time.monotonic() < self._ducked_until:
             base *= _DUCK_FACTOR
@@ -255,6 +258,12 @@ class SoundDirector:
         if not state or not self.enabled or not audio_engine.available():
             return
         with self._lock:
+            mute = state.get("global_mute", False)
+            if self.global_mute != mute:
+                self.global_mute = mute
+                if self.loop_key:
+                    audio_engine.set_gain("game", _LOOP_VOICE, self._loop_gain(self.loop_key))
+
             phase = state.get("phase") or "no_game"
             cur_player = state.get("current_player") or {}
             cur_player_id = cur_player.get("id") if cur_player else None
