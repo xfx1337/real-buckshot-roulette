@@ -3223,6 +3223,7 @@ function renderTvConfig(data) {
         static_on_create: 'Помехи при создании игры',
         intro_after_static: 'Вступление после подтверждения помех',
         result_on_game_over: 'Ролик победы/поражения в конце игры',
+        mute_game_sound: 'Глушить звуки игры во время видео',
     };
     autoEl.innerHTML = Object.entries(autoLabels).map(([key, label]) => {
         const checked = config.auto_play[key] ? 'checked' : '';
