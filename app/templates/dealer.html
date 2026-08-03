@@ -613,6 +613,14 @@ label{ font-family:var(--font-mono); font-size:12px; letter-spacing:1px; color:v
              inset 0 -2px 4px rgba(0,0,0,.3), 0 2px 4px rgba(0,0,0,.55);
 }
 .btn-plate.plate-yellow:hover{ border-color:#9a7620; box-shadow:0 0 24px rgba(229,188,62,.55), inset 0 1px 0 rgba(255,235,170,.8), inset 0 -2px 4px rgba(0,0,0,.25), 0 2px 4px rgba(0,0,0,.5); }
+/* красный плафон — активное «опасное» состояние (режим камер включён) */
+.btn-plate.plate-red{
+  background:linear-gradient(180deg,#e07a5f 0%,#c8543a 55%,#9c3a24 100%);
+  border-color:#7a2e1c; border-bottom-color:#551d10; color:#1d0703;
+  box-shadow:0 0 16px rgba(224,122,95,.45), inset 0 1px 0 rgba(255,215,195,.7),
+             inset 0 -2px 4px rgba(0,0,0,.3), 0 2px 4px rgba(0,0,0,.55);
+}
+.btn-plate.plate-red:hover{ border-color:#9c4227; box-shadow:0 0 26px rgba(224,122,95,.65), inset 0 1px 0 rgba(255,215,195,.8), inset 0 -2px 4px rgba(0,0,0,.25), 0 2px 4px rgba(0,0,0,.5); }
 /* бирюзово-зелёный плафон (штатные операции) */
 .btn-plate.plate-teal{
   background:linear-gradient(180deg,#5c9180 0%,#487564 55%,#33574a 100%);
@@ -734,6 +742,18 @@ input[type="checkbox"]{ accent-color:var(--green); cursor:crosshair; }
 .aud-cat:first-child{ margin-top:0; }
 .aud-row input[type=checkbox]{ width:15px; height:15px; accent-color:var(--green,#3fef6a); flex:0 0 auto; }
 .aud-loop-tag{ flex:0 0 auto; font-size:9px; color:var(--text-faint,#6e5f52); border:1px solid #2a2018; padding:0 4px; border-radius:2px; }
+
+/* ── audio output routing (игра / видео на разные колонки) ── */
+.aud-outs{ border:1px solid var(--border-light,#322217); padding:10px 12px; margin-bottom:16px; background:#120e0d; }
+.aud-outs-head{ display:flex; align-items:center; justify-content:space-between; gap:8px;
+   color:var(--green,#3fef6a); font-size:12px; letter-spacing:.06em; margin-bottom:8px; }
+.aud-out-row{ margin-bottom:8px; gap:8px; align-items:center; }
+.aud-out-row label{ flex:0 0 120px; font-size:12px; color:var(--text-dim,#8f8073); }
+.aud-out-row select{ flex:1 1 auto; min-width:0; background:#1a1512; color:var(--text-bright,#d8ccc0);
+   border:1px solid var(--border-light,#322217); padding:5px 7px; font-family:var(--font-mono,monospace);
+   font-size:12px; cursor:pointer; }
+.aud-outs.unsupported{ opacity:.55; }
+#aud-out-note{ margin:6px 0 0; }
 
 /* ── shells ── */
 .loading-actions{ display:flex; flex-wrap:wrap; gap:12px; align-items:center; }
@@ -1254,9 +1274,54 @@ body{ cursor:default; }
                         <h4 style="margin-top:0;">▸ БЫСТРЫЙ ЗАПУСК ПО СЛОТУ</h4>
                         <div class="tv-btns" id="tv-slot-btns"></div>
                         <div class="tv-btns" style="margin-top: 12px; margin-bottom: 22px; display:flex; gap:8px;">
-                            <button class="btn btn-plate" onclick="tvToggleCCTV()" id="btn-cctv-toggle" style="flex:1; border-color:var(--text-dim); color:white;">📷 РЕЖИМ КАМЕР (CCTV) : ВЫКЛ</button>
-                            <button class="btn btn-plate" onclick="startCctvServer(this)" style="flex:0 0 auto; border-color:var(--text-dim); padding:12px 14px;" title="Скачать и запустить MediaMTX">ЗАПУСТИТЬ СЕРВЕР</button>
-                            <button class="btn btn-plate" onclick="window.open('/cams','_blank')" style="flex:0 0 auto; border-color:var(--text-dim); padding:12px 14px;" title="Открыть камеры в отдельной вкладке (для дилера)">🖥 КАМЕРЫ (ДИЛЕР)</button>
+                            <button class="btn btn-plate" onclick="tvToggleCCTV()" id="btn-cctv-toggle" style="flex:1; padding:13px 16px; font-size:13px;">📷 РЕЖИМ КАМЕР (CCTV) : ВЫКЛ</button>
+                            <button class="btn btn-plate plate-yellow" onclick="startCctvServer(this)" style="flex:0 0 auto; padding:13px 16px; font-size:13px;" title="Скачать и запустить MediaMTX">ЗАПУСТИТЬ СЕРВЕР</button>
+                            <button class="btn btn-plate" onclick="window.open('/cams','_blank')" style="flex:0 0 auto; padding:13px 16px; font-size:13px;" title="Открыть камеры в отдельной вкладке (для дилера)">🖥 КАМЕРЫ (ДИЛЕР)</button>
+                        </div>
+
+                        <!-- Состояние камер: запись, заряд, температура. Обновляется
+                             само, пока открыта вкладка дилера. -->
+                        <h4>▸ СОСТОЯНИЕ КАМЕР</h4>
+                        <div id="cam-status-list" style="margin-bottom:6px;">
+                            <div style="font-size:12px; color:var(--text-dim);">загрузка…</div>
+                        </div>
+                        <div id="cam-status-note" style="font-size:11px; color:var(--text-dim); margin-bottom:10px; line-height:1.4;">
+                            заряд и нагрев присылает само устройство; «н/д» — оно их не сообщает.
+                            Точных градусов не даёт ни один браузер, поэтому вместо них уровень
+                            нагрева: норма / тёплый / горячий / ПЕРЕГРЕВ.
+                        </div>
+
+                        <!-- IRL Pro наружу телеметрию не отдаёт, но грузит любой веб-оверлей
+                             в Android WebView — а там Battery API работает. Даём готовый адрес. -->
+                        <div style="font-size:11px; color:var(--text-dim); margin-bottom:18px; line-height:1.5;
+                                    border-left:2px solid var(--text-dim); padding-left:8px;">
+                            <b style="color:var(--text);">Заряд из IRL Pro:</b> добавьте в приложении
+                            <i>Web Overlay</i> с адресом (по одному на камеру):
+                            <div style="margin-top:4px;">
+                                <code id="irlpro-url" style="font-size:11px; color:var(--green); word-break:break-all;">—</code>
+                                <button class="btn btn-plate btn-small" onclick="copyIrlproUrl(this)"
+                                        style="padding:2px 8px; font-size:10px; margin-left:6px;">копировать</button>
+                            </div>
+                            <span style="color:var(--orange);">camera=</span> замените на имя нужной камеры.
+                        </div>
+
+                        <!-- Диагностика: логи MediaMTX и адрес для IRL Pro. -->
+                        <div class="rd-load-actions" style="margin-top:10px;">
+                            <button class="btn btn-plate" id="cam-log-btn" onclick="camLogToggle(this)" style="flex:0 0 auto; padding:13px 16px; font-size:13px;" title="Показать логи MediaMTX и статус камер">📋 ЛОГИ КАМЕР</button>
+                        </div>
+                        <div id="cam-log-box" style="display:none; margin-top:10px; border:1px solid var(--text-dim); padding:10px; background:rgba(0,0,0,.35);">
+                            <div style="font-size:12px; margin-bottom:6px;">
+                                состояние: <span id="cam-log-state" style="font-family:var(--font-mono);">…</span>
+                            </div>
+                            <div id="cam-log-notes" style="display:none; font-size:12px; margin-bottom:6px; color:var(--orange); line-height:1.4;"></div>
+                            <div style="font-size:12px; margin-bottom:6px;">
+                                адрес для IRL Pro:
+                                <code id="cam-log-url" style="font-size:11px; color:var(--green); word-break:break-all;">—</code>
+                            </div>
+                            <div style="font-size:12px; margin-bottom:6px;">
+                                активные потоки: <span id="cam-log-paths" style="font-family:var(--font-mono); font-size:11px;">—</span>
+                            </div>
+                            <div id="cam-log-lines" style="max-height:260px; overflow-y:auto; font-family:var(--font-mono); font-size:11px; line-height:1.4; border-top:1px solid var(--text-dim); padding-top:6px; white-space:pre-wrap; word-break:break-word;"></div>
                         </div>
 
                         <h4>▸ ПОКАЗАТЬ ИГРОКУ КОНКРЕТНУЮ КАМЕРУ</h4>
@@ -1367,6 +1432,62 @@ body{ cursor:default; }
                         <div class="tv-slot-row" style="margin-top:8px;"><label>Смена значения, сек</label>
                             <input type="number" id="cctv-dg-interval" min="1" style="width:70px;"></div>
 
+                        <h4 style="margin-top:16px;">▸ РЕАКЦИЯ ТЕЛЕВИЗОРА НА ИГРУ</h4>
+                        <div style="font-size:11px; color:var(--text-dim); margin-bottom:10px;">
+                            Телевизор отзывается на события партии. Тумблер включает эффект,
+                            ползунок ниже задаёт его силу (0% — эффект включён, но не виден).
+                        </div>
+
+                        <label style="display:flex; align-items:center; gap:8px; margin-bottom:6px;">
+                            <input type="checkbox" id="fx-shot-enabled">
+                            <span>Всплеск помех при выстреле</span>
+                        </label>
+                        <div style="display:flex; align-items:center; gap:10px; margin-bottom:12px;">
+                            <span style="font-size:11px; color:var(--text-dim);">сила</span>
+                            <input type="range" id="fx-shot-level" min="0" max="100" value="70" oninput="document.getElementById('fx-shot-val').textContent=this.value+'%'" style="flex:1;">
+                            <span id="fx-shot-val" style="font-family:var(--font-mono); font-size:12px; color:var(--green); width:38px; text-align:right;">70%</span>
+                        </div>
+
+                        <label style="display:flex; align-items:center; gap:8px; margin-bottom:6px;">
+                            <input type="checkbox" id="fx-hp-enabled">
+                            <span>Помехи усиливаются при низком HP</span>
+                        </label>
+                        <div style="display:flex; align-items:center; gap:10px; margin-bottom:12px;">
+                            <span style="font-size:11px; color:var(--text-dim);">сила</span>
+                            <input type="range" id="fx-hp-level" min="0" max="100" value="60" oninput="document.getElementById('fx-hp-val').textContent=this.value+'%'" style="flex:1;">
+                            <span id="fx-hp-val" style="font-family:var(--font-mono); font-size:12px; color:var(--green); width:38px; text-align:right;">60%</span>
+                        </div>
+
+                        <label style="display:flex; align-items:center; gap:8px; margin-bottom:6px;">
+                            <input type="checkbox" id="fx-death-enabled">
+                            <span>Срыв кадра при выбывании игрока</span>
+                        </label>
+                        <div style="display:flex; align-items:center; gap:10px; margin-bottom:12px;">
+                            <span style="font-size:11px; color:var(--text-dim);">сила</span>
+                            <input type="range" id="fx-death-level" min="0" max="100" value="80" oninput="document.getElementById('fx-death-val').textContent=this.value+'%'" style="flex:1;">
+                            <span id="fx-death-val" style="font-family:var(--font-mono); font-size:12px; color:var(--green); width:38px; text-align:right;">80%</span>
+                        </div>
+
+                        <label style="display:flex; align-items:center; gap:8px; margin-bottom:6px;">
+                            <input type="checkbox" id="fx-pending-enabled">
+                            <span>Дрожание, пока выбирается цель</span>
+                        </label>
+                        <div style="display:flex; align-items:center; gap:10px; margin-bottom:12px;">
+                            <span style="font-size:11px; color:var(--text-dim);">сила</span>
+                            <input type="range" id="fx-pending-level" min="0" max="100" value="45" oninput="document.getElementById('fx-pending-val').textContent=this.value+'%'" style="flex:1;">
+                            <span id="fx-pending-val" style="font-family:var(--font-mono); font-size:12px; color:var(--green); width:38px; text-align:right;">45%</span>
+                        </div>
+
+                        <label style="display:flex; align-items:center; gap:8px; margin-bottom:6px;">
+                            <input type="checkbox" id="fx-afterglow-enabled">
+                            <span>Послесвечение люминофора</span>
+                        </label>
+                        <div style="display:flex; align-items:center; gap:10px; margin-bottom:4px;">
+                            <span style="font-size:11px; color:var(--text-dim);">сила</span>
+                            <input type="range" id="fx-afterglow-level" min="0" max="100" value="50" oninput="document.getElementById('fx-afterglow-val').textContent=this.value+'%'" style="flex:1;">
+                            <span id="fx-afterglow-val" style="font-family:var(--font-mono); font-size:12px; color:var(--green); width:38px; text-align:right;">50%</span>
+                        </div>
+
                         <div class="rd-load-actions" style="margin-top:14px;">
                             <button class="btn btn-dealer" onclick="cctvSaveConfig()">СОХРАНИТЬ И ПРИМЕНИТЬ</button>
                         </div>
@@ -1416,6 +1537,31 @@ body{ cursor:default; }
                     <input type="checkbox" id="aud-ducking" onchange="onDuckingChange(this.checked)" style="width:16px; height:16px; margin:0; cursor:pointer;">
                     <label for="aud-ducking" style="cursor:pointer; user-select:none; margin:0; font-size:13px;">Приглушать музыку при выстреле</label>
                 </div>
+                <!-- Раздельный вывод: звук игры и звук видео на разные колонки. -->
+                <div class="aud-outs">
+                    <div class="aud-outs-head">
+                        <span>УСТРОЙСТВА ВЫВОДА</span>
+                        <button class="btn btn-small btn-tiny" onclick="refreshAudioOutputs(true)" title="Обновить список устройств">⟲</button>
+                    </div>
+                    <div class="scfg-row aud-out-row">
+                        <label for="aud-out-game">Звуки игры</label>
+                        <select id="aud-out-game" onchange="onAudioOutputChange('game', this)">
+                            <option value="">Системное по умолчанию</option>
+                        </select>
+                        <button class="btn btn-small btn-tiny" onclick="testAudioOutput('game')" title="Проверить вывод">▶</button>
+                    </div>
+                    <div class="scfg-row aud-out-row">
+                        <label for="aud-out-video">Звук видео (ТВ)</label>
+                        <select id="aud-out-video" onchange="onAudioOutputChange('video', this)">
+                            <option value="">Системное по умолчанию</option>
+                        </select>
+                        <button class="btn btn-small btn-tiny" onclick="testAudioOutput('video')" title="Проверить вывод на экране игрока">▶</button>
+                    </div>
+                    <p class="scfg-note" id="aud-out-note">
+                        Звуки игры звучат на этой странице, звук видео — на экране игрока (/teleplayer).
+                        Живые CCTV-потоки идут через встроенный плеер камер и на выбор устройства не реагируют.
+                    </p>
+                </div>
                 <div id="audio-config-body"><p class="hint">Загрузка…</p></div>
             </div>
             <div class="scfg-foot">
@@ -1442,7 +1588,8 @@ body{ cursor:default; }
 
 </div>
 </div>
-<script src="/static/sound.js?v=3"></script>
+<script src="/static/audio_output.js?v=1"></script>
+<script src="/static/sound.js?v=4"></script>
 <script>
 let ws;
 let gameState = null;
@@ -2634,6 +2781,7 @@ function openAudioConfig() {
         if (checkbox) checkbox.checked = SoundEngine.isDuckingEnabled();
     }
     loadAudioConfig();
+    refreshAudioOutputs();
 }
 function closeAudioConfig() {
     document.getElementById('audio-config-modal').style.display = 'none';
@@ -2645,6 +2793,99 @@ function onVolumeChange(v) {
 }
 function onDuckingChange(checked) {
     if (window.SoundEngine) SoundEngine.setDucking(checked);
+}
+
+// ── Раздельный вывод звука (игра / видео) ──
+// Оператор направляет звуки игры на одну колонку, звук видеоконтента — на ТВ.
+// Канал 'game' звучит в этой вкладке, канал 'video' — на экране /teleplayer,
+// поэтому выбор для него уходит на сервер и рассылается по WebSocket.
+async function refreshAudioOutputs(userInitiated) {
+    const box = document.querySelector('.aud-outs');
+    const note = document.getElementById('aud-out-note');
+    if (!box || !window.AudioOutput) return;
+
+    // Причины недоступности разные: не тот браузер, или страница открыта по
+    // LAN-адресу (тогда браузер вообще прячет устройства). Показываем какая.
+    const blocked = window.AudioOutput.unavailableReason();
+    if (blocked) {
+        box.classList.add('unsupported');
+        ['game', 'video'].forEach(ch => {
+            const sel = document.getElementById('aud-out-' + ch);
+            if (sel) sel.disabled = true;
+        });
+        note.textContent = blocked.message;
+        return;
+    }
+    box.classList.remove('unsupported');
+
+    let devices = [];
+    try {
+        devices = await window.AudioOutput.listDevices();
+    } catch (e) {
+        box.classList.add('unsupported');
+        note.textContent = '✗ ' + e.message;
+        return;
+    }
+    note.textContent = 'Звуки игры звучат на этой странице, звук видео — на экране игрока '
+        + '(/teleplayer). Живые CCTV-потоки идут через встроенный плеер камер и на выбор '
+        + 'устройства не реагируют.';
+    // Выбор сервера — источник правды: он же применён на экране игрока.
+    let saved = { game: { deviceId: '' }, video: { deviceId: '' } };
+    try {
+        const r = await fetch('/api/audio/outputs?t=' + Date.now());
+        const d = await r.json();
+        if (d && d.outputs) saved = d.outputs;
+    } catch (e) { /* остаёмся на дефолте */ }
+
+    ['game', 'video'].forEach(ch => {
+        const sel = document.getElementById('aud-out-' + ch);
+        if (!sel) return;
+        const want = (saved[ch] && saved[ch].deviceId) || '';
+        sel.innerHTML = '<option value="">Системное по умолчанию</option>'
+            + devices.map(d => `<option value="${d.deviceId}">${d.label}</option>`).join('');
+        // Устройство могло исчезнуть (колонку выключили) — показываем это явно.
+        if (want && !devices.some(d => d.deviceId === want)) {
+            const label = (saved[ch] && saved[ch].label) || 'устройство';
+            sel.innerHTML += `<option value="${want}">⚠ ${label} (недоступно)</option>`;
+        }
+        sel.value = want;
+        sel.disabled = false;
+    });
+
+    // Локальный канал игры применяем сразу — экран игрока получил свой по WS.
+    window.AudioOutput.setSink('game', (saved.game && saved.game.deviceId) || '');
+    if (window.SoundEngine && SoundEngine.onOutputChanged) SoundEngine.onOutputChanged();
+
+    if (userInitiated) audioMsg('✓ Список устройств обновлён', true);
+}
+
+async function onAudioOutputChange(channel, sel) {
+    const label = sel.options[sel.selectedIndex] ? sel.options[sel.selectedIndex].text : '';
+    try {
+        await window.AudioOutput.saveSink(channel, sel.value, label);
+        if (channel === 'game' && window.SoundEngine && SoundEngine.onOutputChanged) {
+            SoundEngine.onOutputChanged();
+        }
+        audioMsg('✓ ' + (channel === 'game' ? 'Звуки игры' : 'Звук видео') + ' → ' + label, true);
+    } catch (e) {
+        audioMsg('✗ ' + e.message, false);
+    }
+}
+
+async function testAudioOutput(channel) {
+    if (channel === 'game') {
+        // Звучит здесь же — SoundEngine уже привязан к каналу 'game'.
+        if (window.SoundEngine) SoundEngine.play('ui_click');
+        audioMsg('▶ Проверка: звуки игры', true);
+        return;
+    }
+    // Канал видео звучит на экране игрока — просим TV проиграть тестовый звук.
+    try {
+        await fetch('/api/tv/audio_test', { method: 'POST' });
+        audioMsg('▶ Проверка отправлена на экран игрока', true);
+    } catch (e) {
+        audioMsg('✗ ' + e.message, false);
+    }
 }
 
 async function loadAudioConfig() {
@@ -2834,6 +3075,8 @@ function renderTvConfig(data) {
 
     // CCTV auto-mode settings
     renderCctvConfig(config.cctv || {});
+    document.getElementById('irlpro-url').textContent = irlproUrl();
+    startCamStatus();
 
     // Status
     updateTvStatus();
@@ -2865,6 +3108,21 @@ function renderCctvConfig(c) {
     set('cctv-dg-min', dg.min_level ?? 10);
     set('cctv-dg-max', dg.max_level ?? 85);
     set('cctv-dg-interval', dg.interval ?? 6);
+
+    // Реактивные эффекты: тумблер + ползунок силы на каждый эффект.
+    const rx = c.reactive || {};
+    const fxRow = (key, defOn, defLevel) => {
+        chk(`fx-${key}-enabled`, rx[`${key}_enabled`] ?? defOn);
+        const lvl = rx[`${key}_level`] ?? defLevel;
+        set(`fx-${key}-level`, lvl);
+        const out = document.getElementById(`fx-${key}-val`);
+        if (out) out.textContent = lvl + '%';
+    };
+    fxRow('shot', true, 70);
+    fxRow('hp', true, 60);
+    fxRow('death', true, 80);
+    fxRow('pending', true, 45);
+    fxRow('afterglow', false, 50);
 
     // Keep the "show one camera to the player" picker in sync with the pool.
     const pick = document.getElementById('cctv-pick-cam');
@@ -2901,6 +3159,198 @@ async function cctvShowToPlayer() {
     }
 }
 
+// ── Логи камер (MediaMTX) ─────────────────────────────────────────────────
+// Вывод MediaMTX перехватывает сервер (stdout процесса) и отдаёт через
+// /api/cctv/log. Здесь показываем его оператору вместе с адресом для IRL Pro
+// и списком реально публикующихся потоков.
+// Адрес веб-оверлея для IRL Pro. Берём хост из текущей страницы: телефон
+// должен идти на тот же LAN-адрес, по которому открыта панель дилера.
+function irlproUrl() {
+    return `${location.origin}/irlpro?camera=cam1`;
+}
+
+function copyIrlproUrl(btn) {
+    const url = irlproUrl();
+    // clipboard API есть не везде по http, поэтому есть запасной путь.
+    const done = () => { const t = btn.textContent; btn.textContent = '✓ скопировано';
+                         setTimeout(() => btn.textContent = t, 1500); };
+    if (navigator.clipboard) {
+        navigator.clipboard.writeText(url).then(done).catch(() => prompt('Скопируйте адрес:', url));
+    } else {
+        prompt('Скопируйте адрес:', url);
+    }
+}
+
+// ── Состояние камер: запись, заряд, температура ──
+//
+// Факт записи берём с сервера (MediaMTX видит, идут ли по потоку байты), а
+// заряд и температуру присылает само устройство-камера. Если оно молчит —
+// показываем «н/д», а не последние известные цифры: протухшая телеметрия
+// хуже её отсутствия, оператор по ней примет неверное решение.
+let camStatusTimer = null;
+
+function startCamStatus() {
+    if (camStatusTimer) return;
+    camStatusPoll();
+    camStatusTimer = setInterval(camStatusPoll, 5000);
+}
+
+// Заряд: краснеем на явно опасном уровне, желтеем на «пора менять».
+function batteryColor(pct) {
+    if (pct <= 15) return 'var(--red)';
+    if (pct <= 35) return 'var(--orange)';
+    return 'var(--green)';
+}
+
+// Телефон под нагрузкой стрима греется; выше ~45 °C начинается троттлинг и
+// падение битрейта, поэтому предупреждаем заранее.
+function tempColor(c) {
+    if (c >= 45) return 'var(--red)';
+    if (c >= 38) return 'var(--orange)';
+    return 'var(--green)';
+}
+
+// Когда настоящего датчика нет, температуру заменяет уровень нагрева от
+// Compute Pressure API. Это не градусы, а состояние: critical по спецификации
+// означает «устройство перегрето и требует охлаждения» — то есть скоро
+// начнётся троттлинг и битрейт просядет.
+const PRESSURE_UI = {
+    nominal:  { text: 'норма',    color: 'var(--green)'  },
+    fair:     { text: 'тёплый',   color: 'var(--green)'  },
+    serious:  { text: 'горячий',  color: 'var(--orange)' },
+    critical: { text: 'ПЕРЕГРЕВ', color: 'var(--red)'    },
+};
+
+function renderCamStatus(cams, apiError) {
+    const box = document.getElementById('cam-status-list');
+    if (apiError) {
+        box.innerHTML = `<div style="font-size:12px; color:var(--red);">MediaMTX API недоступен: ${apiError}</div>`;
+        return;
+    }
+    if (!cams || !cams.length) {
+        box.innerHTML = '<div style="font-size:12px; color:var(--text-dim);">камеры не заданы в конфиге</div>';
+        return;
+    }
+
+    box.innerHTML = cams.map(c => {
+        const rec = c.recording
+            ? '<span style="color:var(--red);">● ЗАПИСЬ</span>'
+            : (c.online ? '<span style="color:var(--orange);">◌ нет потока</span>'
+                        : '<span style="color:var(--text-dim);">○ офлайн</span>');
+
+        // «⚡» — на зарядке, «🔋» — от батареи. Если заряда нет, показываем
+        // причину: она подсказывает оператору, чинить https или сменить браузер.
+        const bat = c.battery === null || c.battery === undefined
+            ? `<span style="color:var(--text-dim);" title="${c.battery_unavailable || 'устройство не сообщает заряд'}">заряд н/д</span>`
+            : `<span style="color:${batteryColor(c.battery)};">${c.charging ? '⚡' : '🔋'} ${Math.round(c.battery)}%${c.charging ? ' (зарядка)' : ''}</span>`;
+
+        // Приоритет у настоящих градусов; браузер их не даёт, поэтому обычно
+        // здесь окажется уровень нагрева от Compute Pressure API.
+        let temp;
+        if (c.temperature !== null && c.temperature !== undefined) {
+            temp = `<span style="color:${tempColor(c.temperature)};">🌡 ${c.temperature.toFixed(1)}°C</span>`;
+        } else if (c.pressure && PRESSURE_UI[c.pressure]) {
+            const p = PRESSURE_UI[c.pressure];
+            const src = c.pressure_source === 'cpu' ? 'по нагрузке CPU' : 'по датчику нагрева';
+            temp = `<span style="color:${p.color};" title="Compute Pressure API, ${src} — точных градусов браузер не даёт">🌡 ${p.text}</span>`;
+        } else {
+            temp = '<span style="color:var(--text-dim);" title="ни датчика, ни Compute Pressure API">темп. н/д</span>';
+        }
+
+        // Молчащее устройство помечаем явно: цифры могли быть, но устарели.
+        const stale = c.telemetry_stale
+            ? ` <span style="color:var(--orange);">(нет связи ${Math.round(c.telemetry_age)}с)</span>` : '';
+
+        return `<div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;
+                            font-family:var(--font-mono); font-size:12px;
+                            padding:5px 0; border-bottom:1px solid rgba(255,255,255,.07);">
+            <span style="min-width:58px; color:var(--text);">${c.name.toUpperCase()}</span>
+            <span style="min-width:96px;">${rec}</span>
+            <span style="min-width:120px;">${bat}</span>
+            <span style="min-width:110px;">${temp}</span>
+            ${stale}
+        </div>`;
+    }).join('');
+}
+
+async function camStatusPoll() {
+    try {
+        const r = await fetch('/api/cctv/status');
+        const d = await r.json();
+        renderCamStatus(d.cameras, d.api_error);
+    } catch (e) {
+        document.getElementById('cam-status-list').innerHTML =
+            '<div style="font-size:12px; color:var(--red);">ошибка запроса состояния камер</div>';
+    }
+}
+
+let camLogOn = false, camLogSince = 0, camLogTimer = null;
+
+function camLogToggle(btn) {
+    camLogOn = !camLogOn;
+    document.getElementById('cam-log-box').style.display = camLogOn ? 'block' : 'none';
+    // Активное состояние — жёлтый плафон, как у прочих «включённых» действий.
+    if (btn) btn.classList.toggle('plate-yellow', camLogOn);
+    if (camLogOn) {
+        camLogPoll();
+        camLogTimer = setInterval(camLogPoll, 2000);
+    } else {
+        clearInterval(camLogTimer);
+        camLogTimer = null;
+    }
+}
+
+async function camLogPoll() {
+    try {
+        const r = await fetch(`/api/cctv/log?since=${camLogSince}`);
+        const d = await r.json();
+        camLogSince = d.now || camLogSince;
+
+        const st = document.getElementById('cam-log-state');
+        st.textContent = d.running ? (d.external ? 'ЗАПУЩЕН ИЗВНЕ' : 'ЗАПУЩЕН') : 'НЕ ЗАПУЩЕН';
+        st.style.color = !d.running ? 'var(--red)' : (d.external ? 'var(--orange)' : 'var(--green)');
+
+        // Подсказки: почему лог пуст, что нажать. Без них «запущен, но логов
+        // нет» выглядит как поломка.
+        const notes = document.getElementById('cam-log-notes');
+        if (d.notes && d.notes.length) {
+            notes.style.display = 'block';
+            notes.textContent = '⚠ ' + d.notes.join(' ');
+        } else {
+            notes.style.display = 'none';
+        }
+
+        document.getElementById('cam-log-url').textContent = d.srt_url || '—';
+
+        const paths = document.getElementById('cam-log-paths');
+        if (d.api_error) {
+            paths.textContent = 'API недоступен: ' + d.api_error;
+            paths.style.color = 'var(--red)';
+        } else if (!d.paths || !d.paths.length) {
+            paths.textContent = 'нет активных потоков';
+            paths.style.color = 'var(--red)';
+        } else {
+            paths.textContent = d.paths.map(p => p.name + (p.ready ? '' : ' (не готов)')).join(', ');
+            paths.style.color = 'var(--green)';
+        }
+
+        const box = document.getElementById('cam-log-lines');
+        (d.lines || []).forEach(e => {
+            const row = document.createElement('div');
+            row.textContent = e.line;
+            row.style.color = e.level === 'error' ? 'var(--red)'
+                            : e.level === 'warn' ? 'var(--orange)' : 'var(--text-dim)';
+            box.appendChild(row);
+        });
+        while (box.childElementCount > 200) box.removeChild(box.firstChild);
+        if (d.lines && d.lines.length) box.scrollTop = box.scrollHeight;
+    } catch (e) {
+        const st = document.getElementById('cam-log-state');
+        st.textContent = 'ОШИБКА ЗАПРОСА';
+        st.style.color = 'var(--red)';
+    }
+}
+
 async function cctvSaveConfig() {
     const numById = (id, d) => { const v = parseFloat(document.getElementById(id).value); return isNaN(v) ? d : v; };
     const cameras = document.getElementById('cctv-cameras').value
@@ -2929,6 +3379,18 @@ async function cctvSaveConfig() {
             min_level: numById('cctv-dg-min', 10),
             max_level: numById('cctv-dg-max', 85),
             interval: numById('cctv-dg-interval', 6),
+        },
+        reactive: {
+            shot_enabled: document.getElementById('fx-shot-enabled').checked,
+            shot_level: numById('fx-shot-level', 70),
+            hp_enabled: document.getElementById('fx-hp-enabled').checked,
+            hp_level: numById('fx-hp-level', 60),
+            death_enabled: document.getElementById('fx-death-enabled').checked,
+            death_level: numById('fx-death-level', 80),
+            pending_enabled: document.getElementById('fx-pending-enabled').checked,
+            pending_level: numById('fx-pending-level', 45),
+            afterglow_enabled: document.getElementById('fx-afterglow-enabled').checked,
+            afterglow_level: numById('fx-afterglow-level', 50),
         }
     };
     const st = document.getElementById('cctv-cfg-status');
@@ -2998,15 +3460,12 @@ let cctvActive = false;
 function updateCctvButton() {
     const btn = document.getElementById('btn-cctv-toggle');
     if (!btn) return;
-    if (cctvActive) {
-        btn.textContent = '📷 РЕЖИМ КАМЕР (CCTV) : ВКЛ';
-        btn.style.borderColor = 'var(--red)';
-        btn.style.background = 'rgba(255,0,0,0.2)';
-    } else {
-        btn.textContent = '📷 РЕЖИМ КАМЕР (CCTV) : ВЫКЛ';
-        btn.style.borderColor = 'var(--text-dim)';
-        btn.style.background = 'transparent';
-    }
+    // Состояние переключаем классом-плафоном: инлайновые background/borderColor
+    // затирали градиент .btn-plate и делали кнопку тусклой и нечитаемой.
+    btn.textContent = cctvActive
+        ? '📷 РЕЖИМ КАМЕР (CCTV) : ВКЛ'
+        : '📷 РЕЖИМ КАМЕР (CCTV) : ВЫКЛ';
+    btn.classList.toggle('plate-red', cctvActive);
 }
 
 async function tvToggleCCTV(forceState = null) {

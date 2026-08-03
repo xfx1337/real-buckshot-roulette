@@ -1147,6 +1147,10 @@ class GameState:
             "live_count": sum(1 for s in self.shells if s == ShellType.LIVE),
             "blank_count": sum(1 for s in self.shells if s == ShellType.BLANK),
             "saw_active": self.saw_active,
+            # Курок физически нажат, дилер ещё выбирает цель. Экран игрока/TV
+            # использует это для «нервной» реакции ожидания; содержимого
+            # патрона флаг не раскрывает.
+            "pending_shot": self.pending_shot,
             "current_player_name": current.name if current else None,
             "current_player_number": current.number if current else None,
             "players_summary": [

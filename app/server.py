@@ -8,9 +8,14 @@ import asyncio
 import json
 import os
 import copy
+import platform
+import re
+import sys
 import time
 import logging
 import subprocess
+import tarfile
+import threading
 import urllib.request
 import zipfile
 from pathlib import Path
@@ -18,7 +23,7 @@ from contextlib import asynccontextmanager
 
 from typing import Optional
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request, Form, HTTPException, UploadFile, File
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request, Response, Form, HTTPException, UploadFile, File
 from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -33,7 +38,7 @@ from app import sound_config
 from app import video_config
 
 import socket
-from urllib.parse import quote, unquote
+from urllib.parse import quote, unquote, urlparse
 from app import config as app_config
 
 # ── Идентичность игрока через cookie ──────────────────────────────────────
@@ -369,6 +374,20 @@ def _detect_lan_ip() -> str:
     env_ip = os.environ.get("HOST_LAN_IP", "").strip()
     if env_ip:
         return env_ip
+
+    # В Docker сокет-определение ниже вернёт внутренний адрес контейнера
+    # (172.x), бесполезный для телефона и платы. Если HOST_LAN_IP не передали
+    # (например, compose подняли без start.sh), берём адрес из server_base_url
+    # в config.json — его оператор уже задал в мастере настройки.
+    if os.path.exists("/.dockerenv"):
+        try:
+            base = app_config.load_config().get("esp", {}).get("server_base_url", "")
+            host = urlparse(base).hostname
+            if host:
+                return host
+        except Exception:
+            pass
+
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     try:
         s.connect(("8.8.8.8", 80))
@@ -628,6 +647,18 @@ async def cams_page(request: Request):
     cctv = video_config.load_config().get("cctv", {})
     cameras = cctv.get("cameras") or ["cam1", "cam2", "cam3", "cam4"]
     return templates.TemplateResponse("cams.html", {"request": request, "cameras": cameras})
+
+
+@app.get("/irlpro", response_class=HTMLResponse, tags=["Pages"], summary="Веб-оверлей телеметрии для IRL Pro", include_in_schema=False)
+async def irlpro_overlay(request: Request):
+    """Страница-мост для IRL Pro. Само приложение наружу заряд и температуру не
+    отдаёт, но умеет грузить произвольный веб-оверлей поверх видео — а это
+    системный Android WebView, где работает Battery Status API. Оверлей
+    забирает данные там и пересылает нам на /api/cctv/telemetry.
+
+    Адрес добавляется в IRL Pro как web overlay, имя камеры — в query:
+    http://<ip>:<порт>/irlpro?camera=cam1"""
+    return templates.TemplateResponse("irlpro_overlay.html", {"request": request})
 
 
 
@@ -1210,6 +1241,27 @@ async def audio_upload(key: str = Form(...), file: UploadFile = File(...)):
     return {"ok": True, "key": key, "filename": saved}
 
 
+@app.get("/api/audio/outputs", tags=["Game Management"], summary="Выбранные устройства вывода звука", include_in_schema=False)
+async def audio_outputs():
+    return {"outputs": sound_config.get_outputs()}
+
+
+@app.post("/api/audio/outputs", tags=["Game Management"], summary="Назначить устройство вывода каналу", include_in_schema=False)
+async def audio_set_output(
+    channel: str = Form(..., description="game — звуки игры, video — звук видеоконтента"),
+    device_id: str = Form("", description="deviceId из enumerateDevices(); пусто — системное по умолчанию"),
+    label: str = Form("", description="Подпись устройства для панели оператора"),
+):
+    try:
+        sound_config.set_output(channel, device_id, label)
+    except KeyError:
+        raise HTTPException(404, f"Неизвестный канал: {channel}")
+    # Канал video звучит на TV-экране — сообщаем ему о смене устройства сразу.
+    if channel == "video":
+        await broadcast_tv({"action": "audio_output", "device_id": device_id})
+    return {"ok": True, "channel": channel, "device_id": device_id}
+
+
 @app.get("/api/audio/file/{key}", tags=["Game Management"], summary="Стрим эффективного звука события", include_in_schema=False)
 async def audio_file(key: str, preview: bool = False):
     # preview=1 — прослушивание из настроек: играем даже если событие выключено.
@@ -1432,6 +1484,16 @@ async def tv_play(request: Request):
     await broadcast_tv(tv_video_state)
     return {"ok": True, "video": video}
 
+@app.post("/api/tv/audio_test", tags=["TV"], summary="Проверить устройство вывода звука на TV", include_in_schema=False)
+async def tv_audio_test():
+    """Проиграть на TV-экране короткий звук через канал вывода видео.
+
+    Нужно оператору, чтобы убедиться: звук видеоконтента уходит на телевизор,
+    а не на колонку с озвучкой игры."""
+    await broadcast_tv({"action": "audio_test"})
+    return {"ok": True}
+
+
 @app.post("/api/tv/cctv", tags=["TV"], summary="Включить/выключить CCTV", include_in_schema=False)
 async def tv_cctv_toggle(request: Request):
     """Toggle CCTV mode on the TV. Body: {"active": true}"""
@@ -1470,6 +1532,8 @@ async def tv_cctv_config(request: Request):
         cctv.setdefault("fake_error", {}).update(data["fake_error"])
     if "degrade" in data and isinstance(data["degrade"], dict):
         cctv.setdefault("degrade", {}).update(data["degrade"])
+    if "reactive" in data and isinstance(data["reactive"], dict):
+        cctv.setdefault("reactive", {}).update(data["reactive"])
     video_config.save_config(cfg)
     await broadcast_tv({"action": "cctv_config", "cctv": cctv})
     return {"ok": True, "cctv": cctv}
@@ -1490,44 +1554,421 @@ async def list_cctv_errors():
 
 mediamtx_process = None
 
+MEDIAMTX_VERSION = "v1.9.3"
+MEDIAMTX_DIR = Path(__file__).parent.parent / "mediamtx"
+
+# Кольцевой буфер логов MediaMTX. Процесс пишет диагностику в stdout, а он у
+# subprocess.Popen по умолчанию уходит в никуда — поэтому перехватываем поток
+# в фоновом треде и держим последние строки в памяти, чтобы оператор видел их
+# в браузере (публикация потока, отказы SRT, ошибки портов).
+mediamtx_log: list[dict] = []
+MEDIAMTX_LOG_MAX = 400
+_mediamtx_log_thread = None
+
+
+def _mediamtx_log_add(line: str) -> None:
+    """Кладёт строку лога в кольцевой буфер, помечая уровень для подсветки."""
+    low = line.lower()
+    if "err" in low or "fail" in low or "unable" in low:
+        level = "error"
+    elif "warn" in low:
+        level = "warn"
+    else:
+        level = "info"
+    mediamtx_log.append({"t": time.time(), "line": line, "level": level})
+    if len(mediamtx_log) > MEDIAMTX_LOG_MAX:
+        del mediamtx_log[:-MEDIAMTX_LOG_MAX]
+
+
+def _mediamtx_pump(proc: subprocess.Popen) -> None:
+    """Читает stdout процесса до его завершения (выполняется в отдельном треде —
+    readline() блокирующий и не должен трогать event loop)."""
+    try:
+        for raw in iter(proc.stdout.readline, ""):
+            if not raw:
+                break
+            _mediamtx_log_add(raw.rstrip("\n"))
+    except Exception as e:
+        _mediamtx_log_add(f"[сервер] чтение лога прервано: {e}")
+    finally:
+        code = proc.poll()
+        _mediamtx_log_add(f"[сервер] процесс MediaMTX завершился (код {code})")
+
+
+def _mediamtx_asset() -> str:
+    """Имя релизного архива MediaMTX под текущую ОС/архитектуру.
+
+    Windows отдаётся .zip, macOS/Linux — .tar.gz (см. список ассетов релиза).
+    Имя бинаря внутри архива тоже различается: mediamtx.exe против mediamtx."""
+    machine = platform.machine().lower()
+    if sys.platform == "win32":
+        return f"mediamtx_{MEDIAMTX_VERSION}_windows_amd64.zip"
+    if sys.platform == "darwin":
+        # Apple Silicon (arm64/aarch64) против Intel (x86_64).
+        arch = "arm64" if machine in ("arm64", "aarch64") else "amd64"
+        return f"mediamtx_{MEDIAMTX_VERSION}_darwin_{arch}.tar.gz"
+    # Linux: у ARM своя схема имён (armv6/armv7/arm64v8), у x86 — amd64.
+    if machine in ("aarch64", "arm64"):
+        arch = "arm64v8"
+    elif machine.startswith("armv7"):
+        arch = "armv7"
+    elif machine.startswith("armv6") or machine.startswith("arm"):
+        arch = "armv6"
+    else:
+        arch = "amd64"
+    return f"mediamtx_{MEDIAMTX_VERSION}_linux_{arch}.tar.gz"
+
+
+def _mediamtx_binary() -> Path:
+    """Путь к исполняемому файлу MediaMTX для текущей ОС."""
+    return MEDIAMTX_DIR / ("mediamtx.exe" if sys.platform == "win32" else "mediamtx")
+
+
+def _download_mediamtx() -> None:
+    """Скачивает и распаковывает релиз MediaMTX под текущую платформу.
+    Бросает исключение — вызывающий превращает его в {"ok": false, "error": ...}."""
+    asset = _mediamtx_asset()
+    url = f"https://github.com/bluenviron/mediamtx/releases/download/{MEDIAMTX_VERSION}/{asset}"
+    os.makedirs(MEDIAMTX_DIR, exist_ok=True)
+    archive = MEDIAMTX_DIR / asset
+    try:
+        urllib.request.urlretrieve(url, archive)
+        if asset.endswith(".zip"):
+            with zipfile.ZipFile(archive, "r") as zf:
+                zf.extractall(MEDIAMTX_DIR)
+        else:
+            # filter="data" отбрасывает абсолютные пути и ../ из архива.
+            with tarfile.open(archive, "r:gz") as tf:
+                tf.extractall(MEDIAMTX_DIR, filter="data")
+    finally:
+        if archive.exists():
+            os.remove(archive)
+
+    # В tar.gz бит исполняемости обычно сохранён, но после распаковки под
+    # некоторыми umask его может не быть — выставляем явно.
+    binary = _mediamtx_binary()
+    if binary.exists() and sys.platform != "win32":
+        binary.chmod(binary.stat().st_mode | 0o755)
+
+    _ensure_mediamtx_api_enabled()
+
+
+def _ensure_mediamtx_api_enabled() -> None:
+    """Включает Control API в mediamtx.yml рядом с бинарём.
+
+    В релизном архиве по умолчанию стоит `api: no`, а телевизор и панель дилера
+    опрашивают /v3/paths/list, чтобы знать, какие камеры публикуются. Правки
+    файла в репозитории тут не помогают: в Docker папка mediamtx/ в образ не
+    копируется, и распакованный архив приносит свой конфиг со значением по
+    умолчанию. Поэтому чиним ровно тот файл, который прочитает процесс."""
+    cfg_path = MEDIAMTX_DIR / "mediamtx.yml"
+    if not cfg_path.exists():
+        return
+    try:
+        text = cfg_path.read_text(encoding="utf-8")
+        patched = re.sub(r"(?m)^api:\s*no\s*$", "api: yes", text)
+
+        # WebRTC отдаёт браузеру ICE-кандидаты — адреса, по которым к нему
+        # подключаться за медиапотоком. Внутри Docker автоопределение находит
+        # только внутренние адреса контейнера (172.x), недостижимые для
+        # телевизора и телефона: страница камеры открывается, а картинка
+        # «грузится» вечно. Поэтому явно подставляем LAN-адрес хоста.
+        lan_ip = _detect_lan_ip()
+        if lan_ip and not lan_ip.startswith("127."):
+            patched = re.sub(
+                r"(?m)^webrtcAdditionalHosts:\s*\[\]\s*$",
+                f"webrtcAdditionalHosts: [{lan_ip}]",
+                patched,
+            )
+
+        if patched != text:
+            cfg_path.write_text(patched, encoding="utf-8")
+            _mediamtx_log_add(
+                f"[сервер] mediamtx.yml обновлён: Control API включён, "
+                f"WebRTC анонсирует адрес {lan_ip}"
+            )
+    except Exception as e:
+        _mediamtx_log_add(f"[сервер] не удалось обновить mediamtx.yml: {e}")
+
+
 @app.post("/api/cctv/start_server", tags=["TV"], summary="Скачать и запустить MediaMTX", include_in_schema=False)
 async def start_cctv_server():
     global mediamtx_process
-    
-    mediamtx_dir = Path(__file__).parent.parent / "mediamtx"
-    mediamtx_exe = mediamtx_dir / "mediamtx.exe"
-    
-    # Download if not exists
-    if not mediamtx_exe.exists():
-        os.makedirs(mediamtx_dir, exist_ok=True)
-        url = "https://github.com/bluenviron/mediamtx/releases/download/v1.9.3/mediamtx_v1.9.3_windows_amd64.zip"
-        zip_path = mediamtx_dir / "mediamtx.zip"
-        
+
+    binary = _mediamtx_binary()
+
+    if not binary.exists():
         try:
-            urllib.request.urlretrieve(url, zip_path)
-            with zipfile.ZipFile(zip_path, 'r') as zip_ref:
-                zip_ref.extractall(mediamtx_dir)
-            if zip_path.exists():
-                os.remove(zip_path)
+            await asyncio.to_thread(_download_mediamtx)
         except Exception as e:
             return {"ok": False, "error": f"Ошибка скачивания: {e}"}
+        if not binary.exists():
+            return {"ok": False, "error": f"Бинарь MediaMTX не найден после распаковки: {binary.name}"}
 
     # Start process if not running
     if mediamtx_process is None or mediamtx_process.poll() is not None:
+        # MediaMTX мог остаться с прошлой сессии сервера или быть запущен
+        # руками. Второй экземпляр не поднимет занятые порты и сразу умрёт,
+        # поэтому не плодим процесс, а честно сообщаем, что делать.
+        _, api_err = _mediamtx_api_paths()
+        if api_err is None:
+            return {
+                "ok": False,
+                "error": ("MediaMTX уже запущен (не этой сессией сервера) — его логи "
+                          "перехватить нельзя. Остановите процесс mediamtx и нажмите "
+                          "кнопку ещё раз, чтобы видеть логи камер."),
+            }
         try:
-            creationflags = 0
-            if os.name == 'nt':
-                creationflags = subprocess.CREATE_NEW_CONSOLE
-                
+            mediamtx_log.clear()
+            # Бинарь мог быть скачан раньше — с конфигом, где api выключен.
+            # Проверяем перед каждым стартом, а не только после распаковки.
+            _ensure_mediamtx_api_enabled()
+            _mediamtx_log_add(f"[сервер] запуск {binary.name}…")
             mediamtx_process = subprocess.Popen(
-                [str(mediamtx_exe)],
-                cwd=str(mediamtx_dir),
-                creationflags=creationflags
+                [str(binary)],
+                cwd=str(MEDIAMTX_DIR),
+                # Перехватываем вывод, чтобы показать его оператору в браузере.
+                # stderr сливаем в stdout — MediaMTX пишет диагностику в оба.
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                bufsize=1,           # построчная буферизация: логи идут сразу
+                encoding="utf-8",
+                errors="replace",
             )
         except Exception as e:
             return {"ok": False, "error": f"Ошибка запуска: {e}"}
-            
+
+        global _mediamtx_log_thread
+        _mediamtx_log_thread = threading.Thread(
+            target=_mediamtx_pump, args=(mediamtx_process,), daemon=True
+        )
+        _mediamtx_log_thread.start()
+
     return {"ok": True}
+
+
+def _mediamtx_api_paths() -> tuple[list, Optional[str]]:
+    """Список публикуемых сейчас путей через Control API MediaMTX.
+    Спрашиваем с сервера (127.0.0.1), а не из браузера — так работает, даже
+    если API не открыт наружу. Второй элемент — текст ошибки либо None."""
+    try:
+        with urllib.request.urlopen("http://127.0.0.1:9997/v3/paths/list", timeout=1.5) as r:
+            data = json.loads(r.read().decode("utf-8"))
+        return [
+            {"name": it.get("name"), "ready": bool(it.get("ready")),
+             "source": (it.get("source") or {}).get("type"),
+             "bytes_received": it.get("bytesReceived") or 0,
+             "readers": len(it.get("readers") or [])}
+            for it in data.get("items", [])
+        ], None
+    except Exception as e:
+        return [], f"{type(e).__name__}: {e}"
+
+
+# ── Телеметрия камер ──
+#
+# MediaMTX знает только про сам поток: идёт он или нет, сколько байт пришло.
+# Заряд батареи и температуру он знать не может — это состояние устройства,
+# которое снимает. Поэтому телефон/энкодер сам присылает их сюда через
+# POST /api/cctv/telemetry, а мы держим последний отчёт по каждой камере в
+# памяти и отдаём дилеру. Данные живут только в текущем процессе: пропали —
+# значит камера давно не отчитывалась, и это честнее, чем показывать стухшие
+# цифры с прошлого запуска.
+cctv_telemetry: dict[str, dict] = {}
+
+# Через сколько секунд молчания отчёт считаем протухшим и заряд/температуру
+# больше не показываем как актуальные.
+TELEMETRY_STALE_AFTER = 30.0
+
+# Предыдущий замер счётчика байт по каждой камере: (время, байты). Разница
+# между двумя опросами показывает, реально ли сейчас льётся видео. Флага
+# «ready» недостаточно — путь остаётся ready ещё какое-то время после того,
+# как публикующий отвалился, и дилер видит «идёт запись» у мёртвой камеры.
+_cctv_bytes_seen: dict[str, tuple[float, int]] = {}
+
+
+class CctvTelemetryIn(BaseModel):
+    """Отчёт устройства о себе. Всё, кроме имени камеры, необязательно:
+    браузер отдаёт заряд и уровень нагрузки, но не градусы, а внешний энкодер
+    (Termux, IRL Pro, ESP) — наоборот, у него есть настоящий датчик."""
+    camera: str
+    battery: Optional[float] = None      # проценты, 0–100
+    charging: Optional[bool] = None
+    temperature: Optional[float] = None  # градусы Цельсия, если датчик доступен
+    recording: Optional[bool] = None     # пишет ли устройство локально
+    label: Optional[str] = None          # что за устройство, для оператора
+    # Compute Pressure API: nominal | fair | serious | critical. Это не градусы,
+    # а уровень нагрева/нагрузки — единственное, что отдаёт браузер.
+    pressure: Optional[str] = None
+    pressure_source: Optional[str] = None  # cpu | thermals
+    # Почему заряд не пришёл: 'нужен https' либо 'браузер не поддерживает'.
+    battery_unavailable: Optional[str] = None
+
+
+@app.options("/api/cctv/telemetry", tags=["TV"], include_in_schema=False)
+async def cctv_telemetry_preflight():
+    """CORS-preflight: оверлей IRL Pro может быть открыт с другого адреса
+    (например, отдан с чужого хоста, а сюда шлёт через ?api=). Телеметрия —
+    единственная ручка, которую пускаем cross-origin: она только принимает
+    заряд и нагрев, ничего не отдаёт и не меняет ход игры."""
+    return JSONResponse({"ok": True}, headers={
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Methods": "POST, OPTIONS",
+        "Access-Control-Allow-Headers": "Content-Type",
+        "Access-Control-Max-Age": "600",
+    })
+
+
+@app.post("/api/cctv/telemetry", tags=["TV"], summary="Отчёт камеры о заряде и температуре", include_in_schema=False)
+async def cctv_telemetry_push(body: CctvTelemetryIn, response: Response):
+    """Принимает отчёт от устройства-камеры. Вызывается самим телефоном
+    периодически, пока он стримит."""
+    response.headers["Access-Control-Allow-Origin"] = "*"
+    cam = (body.camera or "").strip()
+    if not cam:
+        raise HTTPException(status_code=400, detail="не указана камера")
+
+    prev = cctv_telemetry.get(cam, {})
+    entry = {"t": time.time()}
+    # Устройство может прислать частичный отчёт (например, только заряд).
+    # Тогда сохраняем прошлые значения остальных полей, а не затираем их None.
+    for field in ("battery", "charging", "temperature", "recording", "label",
+                  "pressure", "pressure_source", "battery_unavailable"):
+        value = getattr(body, field)
+        entry[field] = prev.get(field) if value is None else value
+    cctv_telemetry[cam] = entry
+    return {"ok": True}
+
+
+def _cctv_stream_flow(paths: list) -> dict[str, bool]:
+    """Для каждого пути решает, течёт ли сейчас видео: сравнивает счётчик байт
+    с прошлым опросом. На первом опросе разницы ещё нет — тогда доверяем
+    флагу `ready`, иначе первые пару секунд всё выглядело бы мёртвым."""
+    now = time.time()
+    flowing: dict[str, bool] = {}
+    for p in paths:
+        name = p.get("name")
+        if not name:
+            continue
+        current = int(p.get("bytes_received") or 0)
+        before = _cctv_bytes_seen.get(name)
+        # Учитываем замер только если между опросами прошло заметное время:
+        # два вызова подряд дали бы нулевую дельту у живого потока.
+        if before is None:
+            flowing[name] = bool(p.get("ready"))
+        elif now - before[0] < 0.5:
+            flowing[name] = bool(p.get("ready")) and current >= before[1]
+        else:
+            flowing[name] = current > before[1]
+        _cctv_bytes_seen[name] = (now, current)
+    return flowing
+
+
+def _cctv_status(cameras: list[str], paths: list) -> list[dict]:
+    """Сводка по каждой камере из конфига: идёт ли запись (по данным MediaMTX)
+    плюс последний отчёт устройства о заряде и температуре.
+
+    Список путей передаётся снаружи, а не запрашивается тут: иначе один вызов
+    /api/cctv/status дёргал бы Control API дважды."""
+    by_name = {p["name"]: p for p in paths if p.get("name")}
+    flowing = _cctv_stream_flow(paths)
+    now = time.time()
+
+    out = []
+    for cam in cameras:
+        path = by_name.get(cam)
+        tel = cctv_telemetry.get(cam)
+        age = (now - tel["t"]) if tel else None
+        fresh = age is not None and age < TELEMETRY_STALE_AFTER
+
+        out.append({
+            "name": cam,
+            # online — поток вообще зарегистрирован в MediaMTX;
+            # recording — по нему прямо сейчас идут байты.
+            "online": path is not None,
+            "ready": bool(path.get("ready")) if path else False,
+            "recording": bool(flowing.get(cam)),
+            "source": path.get("source") if path else None,
+            "readers": path.get("readers", 0) if path else 0,
+            "battery": tel.get("battery") if fresh else None,
+            "charging": tel.get("charging") if fresh else None,
+            "temperature": tel.get("temperature") if fresh else None,
+            # Уровень нагрева от Compute Pressure API — замена градусам, когда
+            # настоящего датчика нет (то есть в любом браузере).
+            "pressure": tel.get("pressure") if fresh else None,
+            "pressure_source": tel.get("pressure_source") if fresh else None,
+            "battery_unavailable": tel.get("battery_unavailable") if fresh else None,
+            "device_recording": tel.get("recording") if fresh else None,
+            "label": tel.get("label") if tel else None,
+            # Возраст отчёта нужен дилеру, чтобы отличить «нет данных никогда»
+            # от «телефон замолчал минуту назад».
+            "telemetry_age": round(age, 1) if age is not None else None,
+            "telemetry_stale": tel is not None and not fresh,
+        })
+    return out
+
+
+@app.get("/api/cctv/status", tags=["TV"], summary="Состояние камер: запись, заряд, температура", include_in_schema=False)
+async def cctv_status():
+    """Состояние всех камер из конфига CCTV — для меню камер у дилера.
+
+    Опрос Control API — синхронный сетевой вызов с таймаутом, поэтому уводим
+    его в отдельный поток: страницу дилера и /cams опрашивают раз в 5 секунд,
+    и если MediaMTX отвечает медленно (а не отказом сразу), прямой вызов
+    заблокировал бы event loop и подвесил бы всё остальное — включая раздачу
+    самих камер."""
+    cfg = video_config.load_config().get("cctv", {})
+    cameras = cfg.get("cameras") or ["cam1", "cam2", "cam3", "cam4"]
+    paths, api_error = await asyncio.to_thread(_mediamtx_api_paths)
+    return {
+        "cameras": _cctv_status(cameras, paths),
+        "api_error": api_error,
+        "now": time.time(),
+    }
+
+
+@app.get("/api/cctv/log", tags=["TV"], summary="Логи MediaMTX и статус камер", include_in_schema=False)
+async def cctv_log(since: float = 0.0):
+    """Диагностика камер для оператора: строки лога MediaMTX (новее `since`),
+    состояние процесса и список публикуемых сейчас потоков.
+
+    `since` — метка времени последней полученной строки, чтобы клиент дозабирал
+    только новое, а не перекачивал весь буфер на каждый опрос."""
+    owned = mediamtx_process is not None and mediamtx_process.poll() is None
+
+    # MediaMTX может работать и не будучи запущенным этим сервером: его подняли
+    # прошлым процессом uvicorn, руками из терминала или он пережил перезапуск.
+    # Тогда объекта процесса у нас нет и stdout перехватить уже нельзя — но
+    # факт работы виден по живому Control API. Показываем это честно, иначе
+    # оператор видит «НЕ ЗАПУЩЕН» у работающего сервера и пустой лог.
+    paths, api_error = await asyncio.to_thread(_mediamtx_api_paths)
+    external = (not owned) and api_error is None
+
+    notes = []
+    if external:
+        notes.append(
+            "MediaMTX работает, но запущен не этой сессией сервера — "
+            "перехват его логов невозможен. Чтобы видеть логи, остановите "
+            "процесс mediamtx и нажмите «ЗАПУСТИТЬ СЕРВЕР» заново."
+        )
+    if owned and api_error:
+        notes.append(
+            f"Control API MediaMTX не отвечает ({api_error}). Проверьте, что в "
+            "mediamtx/mediamtx.yml стоит «api: yes»."
+        )
+
+    return {
+        "running": owned or external,
+        "owned": owned,
+        "external": external,
+        "notes": notes,
+        "srt_url": f"srt://{_detect_lan_ip()}:8890?streamid=publish:cam1",
+        "paths": paths,
+        "api_error": api_error,
+        "lines": [e for e in mediamtx_log if e["t"] > since],
+        "now": time.time(),
+    }
 
 
 @app.post("/api/tv/pause", tags=["TV"], summary="Поставить видео на паузу", include_in_schema=False)

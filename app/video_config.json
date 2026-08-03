@@ -21,8 +21,8 @@
   },
   "cctv": {
     "auto_enabled": true,
-    "min_time": 20,
-    "max_time": 40,
+    "min_time": 10,
+    "max_time": 60,
     "min_show": 5,
     "max_show": 10,
     "mode": "random",
@@ -40,7 +40,7 @@
     },
     "degrade": {
       "enabled": true,
-      "level": 76,
+      "level": 100,
       "dynamic": true,
       "min_level": 10,
       "max_level": 85,
@@ -48,6 +48,18 @@
       "hq": true,
       "ui": true
     },
-    "panning": true
+    "panning": true,
+    "reactive": {
+      "shot_enabled": true,
+      "shot_level": 70,
+      "hp_enabled": true,
+      "hp_level": 60,
+      "death_enabled": true,
+      "death_level": 80,
+      "pending_enabled": true,
+      "pending_level": 45,
+      "afterglow_enabled": true,
+      "afterglow_level": 50
+    }
   }
 }

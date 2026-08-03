@@ -139,6 +139,112 @@
             pointer-events: none;
             border: 1px solid rgba(255,255,255,0.2);
         }
+
+        /* ── Реактивные ЭЛТ-эффекты ────────────────────────────────────────
+           Телевизор реагирует на партию: вздрагивает на выстреле, шумит тем
+           сильнее, чем меньше HP, срывает кадр на смерти. Каждый слой живёт в
+           своём элементе и управляется одной CSS-переменной силы (0..1), чтобы
+           регулятор оператора работал без пересборки стилей.
+
+           #fx-reactive — общий контейнер поверх интерфейса, но НИЖЕ CCTV
+           (z-index 91-95), чтобы камеры оставались читаемыми. */
+        #fx-reactive {
+            position: fixed; inset: 0; z-index: 8900;
+            pointer-events: none; overflow: hidden;
+        }
+        /* Всплеск помех выстрела: --burst спадает к нулю по таймеру в JS. */
+        #fx-burst {
+            position: absolute; inset: 0; opacity: var(--burst, 0);
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='b'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.75' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23b)'/%3E%3C/svg%3E");
+            background-size: 200px 200px;
+            mix-blend-mode: screen;
+            transition: opacity .22s ease-out;
+        }
+        /* Постоянный шум от низкого HP — меняется плавно, без рывков. */
+        #fx-hp {
+            position: absolute; inset: 0; opacity: var(--hp-fx, 0);
+            background: repeating-linear-gradient(0deg, rgba(0,0,0,.5) 0 1px, transparent 1px 3px);
+            mix-blend-mode: multiply;
+            transition: opacity 1.6s linear;
+        }
+        /* Белая вспышка кадра — общий «удар» для выстрела и смерти. */
+        #fx-flash {
+            position: absolute; inset: 0; opacity: var(--flash, 0);
+            background: #fff;
+            transition: opacity .3s ease-out;
+        }
+
+        /* Тремор картинки, пока дилер выбирает цель. Амплитуда — из --tremor. */
+        @keyframes fx-tremor-anim {
+            0%, 100% { transform: translate(0, 0); }
+            20% { transform: translate(calc(var(--tremor, 0) * -2px), calc(var(--tremor, 0) * 1px)); }
+            40% { transform: translate(calc(var(--tremor, 0) * 2px), calc(var(--tremor, 0) * -1px)); }
+            60% { transform: translate(calc(var(--tremor, 0) * -1px), calc(var(--tremor, 0) * 2px)); }
+            80% { transform: translate(calc(var(--tremor, 0) * 1px), calc(var(--tremor, 0) * -2px)); }
+        }
+        body.fx-tremor #player-app {
+            animation: fx-tremor-anim .16s infinite steps(2, end);
+        }
+
+        /* Срыв вертикальной синхронизации: кадр уезжает вверх, как на ЭЛТ,
+           потерявшем строчную развёртку. Проигрывается один раз на смерти. */
+        @keyframes fx-rollout-anim {
+            0%   { transform: translateY(0) scaleY(1); filter: none; }
+            30%  { transform: translateY(-14%) scaleY(1.03); filter: brightness(1.5) contrast(1.4); }
+            55%  { transform: translateY(22%) scaleY(.9); filter: brightness(2) contrast(2); }
+            75%  { transform: translateY(-6%) scaleY(.2); filter: brightness(4) contrast(3); }
+            90%  { transform: translateY(0) scaleY(.02); filter: brightness(6); }
+            100% { transform: translateY(0) scaleY(1); filter: none; }
+        }
+        body.fx-rollout #player-app {
+            animation: fx-rollout-anim var(--rollout-dur, .9s) ease-in both;
+        }
+
+        /* ── Панель диагностики камер ──────────────────────────────────────
+           Служебный оверлей для оператора: логи MediaMTX на самом телевизоре.
+           Поверх всего (в том числе CCTV), но скрыт, пока не нажали «L». */
+        #cam-diag {
+            display: none;
+            position: fixed; left: 2vh; top: 2vh; bottom: 2vh; width: min(46vw, 620px);
+            z-index: 9500; pointer-events: none;
+            background: rgba(0, 0, 0, .88);
+            border: 1px solid rgba(120, 255, 160, .35);
+            padding: 12px 14px;
+            font-family: var(--font-mono); font-size: 13px; line-height: 1.45;
+            color: #cfe8d4; overflow: hidden;
+            flex-direction: column;
+        }
+        body.cam-diag-on #cam-diag { display: flex; }
+        .cam-diag-head {
+            display: flex; justify-content: space-between; align-items: center;
+            font-size: 14px; letter-spacing: .08em; color: #8effb0;
+            border-bottom: 1px solid rgba(120,255,160,.25);
+            padding-bottom: 6px; margin-bottom: 8px;
+        }
+        .cam-diag-sub { font-size: 12px; color: #9fb8a6; margin-bottom: 4px; word-break: break-all; }
+        .cam-diag-sub b { color: #cfe8d4; font-weight: normal; }
+        #cam-diag-log {
+            flex: 1; overflow-y: auto; margin-top: 8px;
+            border-top: 1px solid rgba(120,255,160,.18); padding-top: 8px;
+            font-size: 12px; white-space: pre-wrap; word-break: break-word;
+        }
+        #cam-diag-log div { margin-bottom: 2px; }
+        #cam-diag-log .lv-error { color: #ff8a7a; }
+        #cam-diag-log .lv-warn  { color: #ffd479; }
+        #cam-diag-log .lv-info  { color: #9fb8a6; }
+        .cam-diag-hint { font-size: 11px; color: #5d7364; margin-top: 6px; }
+        .cam-diag-ok   { color: #8effb0; }
+        .cam-diag-bad  { color: #ff8a7a; }
+
+        /* Послесвечение люминофора: слабый след за уходящей картинкой. */
+        body.fx-afterglow #player-app {
+            /* Значение силы приходит из --glow (0..1). */
+            text-shadow: 0 0 calc(var(--glow, 0) * 14px) rgba(120, 255, 160, calc(var(--glow, 0) * .55));
+        }
+        body.fx-afterglow .lightning-container img,
+        body.fx-afterglow .solo-bolts img {
+            filter: drop-shadow(0 0 calc(var(--glow, 0) * 10px) rgba(140, 255, 180, calc(var(--glow, 0) * .6)));
+        }
     </style>
 </head>
 <body class="page-player">
@@ -151,6 +257,32 @@
     
     <div id="tv-ui-noise" class="cctv-grain" style="position:fixed; inset:0; z-index:9000; mix-blend-mode:screen !important;"></div>
     <div id="tv-ui-scan" class="cctv-scan" style="position:fixed; inset:0; z-index:9001;"></div>
+
+    <!-- Слои реактивных эффектов (реакция ЭЛТ на ход партии). Пустые и
+         невидимые, пока JS не выставит силу в CSS-переменных. -->
+    <div id="fx-reactive">
+        <div id="fx-hp"></div>
+        <div id="fx-burst"></div>
+        <div id="fx-flash"></div>
+    </div>
+
+    <!-- Диагностика камер: логи MediaMTX прямо на экране TV. Скрыта по
+         умолчанию (игроки не должны её видеть) — открывается клавишей «L». -->
+    <div id="cam-diag">
+        <div class="cam-diag-head">
+            <span>ДИАГНОСТИКА КАМЕР</span>
+            <span id="cam-diag-state">…</span>
+        </div>
+        <div id="cam-diag-notes" style="display:none; font-size:12px; color:#ffd479; margin-bottom:6px; line-height:1.4;"></div>
+        <div class="cam-diag-sub">
+            SRT: <span id="cam-diag-url">—</span>
+        </div>
+        <div class="cam-diag-sub">
+            потоки: <span id="cam-diag-paths">—</span>
+        </div>
+        <div id="cam-diag-log"></div>
+        <div class="cam-diag-hint">L — скрыть</div>
+    </div>
 
     <!-- Video overlay -->
     <div id="tv-video-overlay">
@@ -237,12 +369,25 @@
 
     <!-- TV mode: no fullscreen gate, no wake lock -->
 
+    <!-- Маршрутизация звука видео на выбранное оператором устройство (ТВ). -->
+    <script src="/static/audio_output.js?v=1"></script>
+
     <script>
     // ── TV Video WebSocket ──
     // Separate connection for video overlay commands from dealer.
     const videoOverlay = document.getElementById('tv-video-overlay');
     const videoEl = document.getElementById('tv-video');
     const tvIndicator = document.getElementById('tv-ws-indicator');
+
+    // Канал 'video': звук видеоконтента идёт на устройство, выбранное оператором
+    // (обычно телевизор), независимо от звуков игры. Ставим на плеер и на
+    // видео-переход CCTV. Живые CCTV-потоки — iframe MediaMTX, их вывод
+    // браузер маршрутизировать не даёт, поэтому они здесь не участвуют.
+    if (window.AudioOutput) {
+        window.AudioOutput.register(videoEl, 'video');
+        const transitionEl = document.getElementById('tv-cctv-transition');
+        if (transitionEl) window.AudioOutput.register(transitionEl, 'video');
+    }
     let tvWs;
     let tvReconnectTimer;
 
@@ -268,6 +413,18 @@
             tvIndicator.classList.remove('connected');
             tvReconnectTimer = setTimeout(connectTV, 2000);
         };
+    }
+
+    // Проверочный звук для канала видео: берём готовый звук озвучки (preview=1
+    // играет даже если событие выключено) и гоним его через тот же sink, что и
+    // видеоплеер, — оператор слышит, куда реально уходит звук видеоконтента.
+    function playVideoChannelTest() {
+        try {
+            const a = new Audio('/api/audio/file/ui_click?preview=1&t=' + Date.now());
+            a.volume = 1.0;
+            if (window.AudioOutput) window.AudioOutput.register(a, 'video');
+            a.play().catch(err => console.warn('audio test play error', err));
+        } catch (e) { console.warn('audio test failed', e); }
     }
 
     function handleVideoCommand(cmd) {
@@ -300,6 +457,14 @@
                 if (cmd.volume !== undefined) {
                     videoEl.volume = Math.max(0, Math.min(100, cmd.volume)) / 100.0;
                 }
+                break;
+            case 'audio_output':
+                // Dealer picked a different speaker for video sound.
+                if (window.AudioOutput) window.AudioOutput.setSink('video', cmd.device_id || '');
+                break;
+            case 'audio_test':
+                // Dealer is checking that video sound lands on the TV speakers.
+                playVideoChannelTest();
                 break;
             case 'cctv':
                 // Manual toggle from the dealer button — force CCTV on/off now.
@@ -671,10 +836,213 @@
     }
 
     // Apply a settings push from the dealer and (re)start the auto loop.
+    // ── Диагностика камер на экране TV ────────────────────────────────────
+    // MediaMTX пишет диагностику в stdout, который раньше уходил в никуда.
+    // Сервер перехватывает его и отдаёт через /api/cctv/log; здесь показываем
+    // на самом телевизоре, чтобы настраивать камеры, не отходя к ноутбуку.
+    // Скрыто по умолчанию — игрокам служебный лог видеть незачем.
+    let camDiagOn = false;
+    let camDiagSince = 0;
+    let camDiagTimer = null;
+
+    function camDiagToggle() {
+        camDiagOn = !camDiagOn;
+        document.body.classList.toggle('cam-diag-on', camDiagOn);
+        if (camDiagOn) {
+            camDiagPoll();
+            camDiagTimer = setInterval(camDiagPoll, 2000);
+        } else {
+            clearInterval(camDiagTimer);
+            camDiagTimer = null;
+        }
+    }
+
+    async function camDiagPoll() {
+        try {
+            const r = await fetch(`/api/cctv/log?since=${camDiagSince}`);
+            const d = await r.json();
+            camDiagSince = d.now || camDiagSince;
+
+            const st = document.getElementById('cam-diag-state');
+            st.textContent = d.running ? (d.external ? 'ЗАПУЩЕН ИЗВНЕ' : 'ЗАПУЩЕН') : 'НЕ ЗАПУЩЕН';
+            st.className = d.running && !d.external ? 'cam-diag-ok' : 'cam-diag-bad';
+
+            const notes = document.getElementById('cam-diag-notes');
+            notes.textContent = (d.notes && d.notes.length) ? '⚠ ' + d.notes.join(' ') : '';
+            notes.style.display = (d.notes && d.notes.length) ? 'block' : 'none';
+
+            document.getElementById('cam-diag-url').textContent = d.srt_url || '—';
+
+            const pathsEl = document.getElementById('cam-diag-paths');
+            if (d.api_error) {
+                pathsEl.innerHTML = `<span class="cam-diag-bad">API недоступен: ${d.api_error}</span>`;
+            } else if (!d.paths || !d.paths.length) {
+                pathsEl.innerHTML = '<span class="cam-diag-bad">нет активных потоков</span>';
+            } else {
+                pathsEl.innerHTML = d.paths.map(p =>
+                    `<span class="${p.ready ? 'cam-diag-ok' : 'cam-diag-bad'}">${p.name}${p.ready ? '' : ' (не готов)'}</span>`
+                ).join(', ');
+            }
+
+            const logEl = document.getElementById('cam-diag-log');
+            (d.lines || []).forEach(e => {
+                const row = document.createElement('div');
+                row.className = 'lv-' + e.level;
+                row.textContent = e.line;
+                logEl.appendChild(row);
+            });
+            // Держим в DOM только хвост, иначе за вечер накопится тысячи строк.
+            while (logEl.childElementCount > 200) logEl.removeChild(logEl.firstChild);
+            if (d.lines && d.lines.length) logEl.scrollTop = logEl.scrollHeight;
+        } catch (e) {
+            const st = document.getElementById('cam-diag-state');
+            st.textContent = 'СЕРВЕР НЕДОСТУПЕН';
+            st.className = 'cam-diag-bad';
+        }
+    }
+
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'l' || e.key === 'L' || e.key === 'д' || e.key === 'Д') camDiagToggle();
+    });
+
+    // ── Реактивные ЭЛТ-эффекты ────────────────────────────────────────────
+    // Телевизор реагирует на события партии. Сложность в том, что по WebSocket
+    // приходит СНИМОК состояния, а не события: чтобы понять «выстрелили», надо
+    // сравнить новый снимок с предыдущим. fxOnState() делает этот diff и
+    // дёргает нужные эффекты.
+    //
+    // Каждый эффект = тумблер (enabled) + степень 0..100 (level). Степень —
+    // множитель силы: 0 означает «включён, но не виден», что позволяет
+    // оператору убавлять эффект во время игры, не выключая его совсем.
+    const FX_DEFAULTS = {
+        shot_enabled: true,  shot_level: 70,
+        hp_enabled: true,    hp_level: 60,
+        death_enabled: true, death_level: 80,
+        pending_enabled: true, pending_level: 45,
+        afterglow_enabled: false, afterglow_level: 50,
+    };
+    let fxCfg = Object.assign({}, FX_DEFAULTS);
+
+    const fxRoot = document.getElementById('fx-reactive');
+    const fxHpEl = document.getElementById('fx-hp');
+    const fxBurstEl = document.getElementById('fx-burst');
+    const fxFlashEl = document.getElementById('fx-flash');
+
+    // Предыдущий снимок — база для diff. null до первого сообщения, чтобы
+    // подключение к идущей партии не выглядело как «всех только что убили».
+    let fxPrev = null;
+    let fxBurstTimer = null, fxFlashTimer = null, fxRolloutTimer = null;
+
+    // Степень 0..100 -> множитель 0..1.
+    const fxAmt = (level) => Math.max(0, Math.min(100, Number(level ?? 0))) / 100;
+
+    function fxSetConfig(cfg) {
+        fxCfg = Object.assign({}, fxCfg, cfg || {});
+        // Тумблеры, влияющие на постоянные слои, применяем сразу — оператор
+        // должен видеть результат, не дожидаясь следующего события.
+        if (!fxCfg.hp_enabled) fxHpEl.style.setProperty('--hp-fx', 0);
+        if (!fxCfg.pending_enabled) fxSetTremor(false);
+        fxApplyAfterglow();
+        if (fxPrev) fxApplyHpNoise(fxPrev);
+    }
+
+    // Послесвечение люминофора — постоянный слой, зависит только от настроек.
+    function fxApplyAfterglow() {
+        const on = !!fxCfg.afterglow_enabled;
+        document.body.classList.toggle('fx-afterglow', on);
+        document.body.style.setProperty('--glow', on ? fxAmt(fxCfg.afterglow_level).toFixed(3) : 0);
+    }
+
+    // Шум тем сильнее, чем ниже HP: полное здоровье — чистая картинка,
+    // 1 HP — телевизор еле держит сигнал. Показываем ТОЛЬКО своё HP.
+    function fxApplyHpNoise(data) {
+        if (!fxCfg.hp_enabled || !data || !data.my_alive) {
+            if (!fxCfg.hp_enabled) fxHpEl.style.setProperty('--hp-fx', 0);
+            return;
+        }
+        const hp = Number(data.my_hp ?? 0), max = Number(data.my_max_hp ?? 0);
+        if (!(max > 0) || hp <= 0) return;
+        // Доля потерянного здоровья, возведённая в квадрат: пока HP высокое,
+        // картинка почти чистая, а у последнего деления шум резко нарастает.
+        const lost = 1 - (hp / max);
+        fxHpEl.style.setProperty('--hp-fx', (lost * lost * fxAmt(fxCfg.hp_level) * 0.85).toFixed(3));
+    }
+
+    // Всплеск помех + вспышка кадра. Используется выстрелом и смертью.
+    function fxBurst(level, withFlash) {
+        const amt = fxAmt(level);
+        if (amt <= 0) return;
+        fxBurstEl.style.setProperty('--burst', (amt * 0.9).toFixed(3));
+        clearTimeout(fxBurstTimer);
+        fxBurstTimer = setTimeout(() => fxBurstEl.style.setProperty('--burst', 0), 260);
+
+        if (withFlash) {
+            fxFlashEl.style.setProperty('--flash', (amt * 0.55).toFixed(3));
+            clearTimeout(fxFlashTimer);
+            fxFlashTimer = setTimeout(() => fxFlashEl.style.setProperty('--flash', 0), 90);
+        }
+    }
+
+    // Срыв вертикальной синхронизации — кадр уезжает и схлопывается в полосу.
+    function fxRollout(level) {
+        const amt = fxAmt(level);
+        if (amt <= 0) return;
+        // Чем выше степень, тем дольше и заметнее срыв (0.45s..1.15s).
+        document.body.style.setProperty('--rollout-dur', (0.45 + amt * 0.7).toFixed(2) + 's');
+        document.body.classList.remove('fx-rollout');
+        void document.body.offsetWidth;  // рестарт анимации
+        document.body.classList.add('fx-rollout');
+        clearTimeout(fxRolloutTimer);
+        fxRolloutTimer = setTimeout(() => document.body.classList.remove('fx-rollout'), 1300);
+    }
+
+    function fxSetTremor(on) {
+        document.body.classList.toggle('fx-tremor', on);
+        if (on) document.body.style.setProperty('--tremor', fxAmt(fxCfg.pending_level).toFixed(3));
+    }
+
+    // Diff снимков состояния: превращает «состояние изменилось» в события.
+    function fxOnState(data) {
+        if (!data || data.error) return;
+        const prev = fxPrev;
+        fxPrev = data;
+
+        fxApplyHpNoise(data);
+
+        // Первый снимок — только базовые уровни, без «событий»: иначе вход в
+        // идущую партию сыграл бы смерть и выстрел разом.
+        if (!prev) return;
+
+        // Дрожание, пока дилер выбирает цель после физического выстрела.
+        if (fxCfg.pending_enabled) fxSetTremor(!!data.pending_shot);
+        else fxSetTremor(false);
+
+        // Смерть игрока — приоритетнее выстрела: если оба совпали, играем срыв.
+        const justDied = prev.my_alive && !data.my_alive;
+        if (justDied) {
+            if (fxCfg.death_enabled) { fxRollout(fxCfg.death_level); fxBurst(fxCfg.death_level, true); }
+            return;
+        }
+
+        // Выстрел определяем по расходу патрона — так эффект срабатывает и
+        // когда стреляли не в нас (по столу всё равно бьёт звук и вспышка).
+        const shellsBefore = Number(prev.shells_remaining ?? 0);
+        const shellsNow = Number(data.shells_remaining ?? 0);
+        const hpDropped = Number(data.my_hp ?? 0) < Number(prev.my_hp ?? 0);
+        const shellSpent = shellsNow === shellsBefore - 1 && prev.phase === 'player_turn';
+
+        if (fxCfg.shot_enabled && (hpDropped || shellSpent)) {
+            // Попадание по нам бьёт сильнее, чем чужой выстрел.
+            const scale = hpDropped ? 1 : 0.55;
+            fxBurst(Number(fxCfg.shot_level) * scale, hpDropped);
+        }
+    }
+
     function cctvSetConfig(cfg) {
         cctvCfg = Object.assign({}, cctvCfg, cfg);
         if (cfg.fake_error) cctvCfg.fake_error = Object.assign({}, cctvCfg.fake_error, cfg.fake_error);
         if (cfg.degrade) cctvCfg.degrade = Object.assign({}, cctvCfg.degrade, cfg.degrade);
+        if (cfg.reactive) fxSetConfig(cfg.reactive);
         cctvInitFrames();
         cctvApplyDegrade();
         if (cctvShown && cctvCfg.fake_error && cctvCfg.fake_error.enabled) cctvStartFaults();
@@ -723,6 +1091,9 @@
             window.location.href = '/';
             return;
         }
+
+        // Реакция ЭЛТ на изменения состояния (выстрел, потеря HP, смерть).
+        fxOnState(data);
 
         // Gate camera auto-cycle to in-game / round-waiting phases.
         if (typeof cctvSetPhase === 'function') cctvSetPhase(data.phase);
