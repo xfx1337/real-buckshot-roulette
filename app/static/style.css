@@ -476,8 +476,8 @@ body {
 }
 
 .lightning-bolt.dead img {
-    filter: brightness(0) saturate(100%) invert(9%);
-    opacity: 0.5;
+    visibility: hidden;
+    opacity: 0;
 }
 
 .lightning-bolt.alive.critical img {
@@ -491,8 +491,8 @@ body {
 }
 
 .lightning-bolt.faded-charge-dead img {
-    filter: brightness(0) saturate(100%) invert(7%) sepia(0.5);
-    opacity: 0.4;
+    visibility: hidden;
+    opacity: 0;
 }
 
 /* Solo Mode Layout */
