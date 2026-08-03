@@ -345,6 +345,18 @@
 
   function onState(s) {
     if (!s) return;
+    // Звук играет сервер (PortAudio, см. app/audio_engine.py) — здесь молчим,
+    // иначе каждое событие прозвучит дважды. Историю всё равно ведём, чтобы
+    // возврат в браузерный режим не выстрелил пачкой пропущенных событий.
+    if (s.server_sound) {
+      if (engine.loopAudio) setLoop(null);
+      engine.initialized = true;
+      engine.prevPhase = s.phase || 'no_game';
+      engine.prevPlayerId = s.current_player ? s.current_player.id : null;
+      engine.prevLog = s.log || [];
+      if (s.show_shells_to_players !== undefined) engine.prevShowShells = s.show_shells_to_players;
+      return;
+    }
     var phase = s.phase || 'no_game';
     var curPlayerId = s.current_player ? s.current_player.id : null;
 

@@ -244,8 +244,11 @@ def reset_custom(key: str) -> None:
     data[key] = entry
     _save_overrides(data)
     # Удаляем осиротевший файл, если на него больше никто не ссылается.
+    # Служебные ключи (__outputs__, __sound_mode__ и т.п.) хранят не настройки
+    # события, а строку или свой словарь — на кастомные файлы они не ссылаются.
     if old:
-        still_used = any(v.get("custom") == old for v in data.values())
+        still_used = any(isinstance(v, dict) and v.get("custom") == old
+                         for k, v in data.items() if not k.startswith("__"))
         if not still_used:
             p = _custom_path(old)
             try:
@@ -315,4 +318,52 @@ def set_output(channel: str, device_id: str, label: str = "") -> None:
     outputs = data.get(_OUTPUTS_KEY, {})
     outputs[channel] = {"deviceId": device_id or "", "label": label or ""}
     data[_OUTPUTS_KEY] = outputs
+    _save_overrides(data)
+
+
+# ── Устройства серверного звука (PortAudio) ────────────────────────────────
+# Отдельно от браузерных: там deviceId — непрозрачный хеш из enumerateDevices(),
+# здесь — человекочитаемое имя устройства PortAudio ("WH-1000XM4"). Одно из
+# другого не выводится, поэтому выбор хранится своим ключом.
+#
+# Имя, а не индекс: индексы PortAudio съезжают, стоит подключить или отключить
+# любое другое аудиоустройство, а имя переживает перезапуск.
+_SERVER_OUTPUTS_KEY = "__server_outputs__"
+
+
+def get_server_outputs() -> dict:
+    """Устройства серверного звука по каналам: {channel: "<имя>"}."""
+    stored = _load_overrides().get(_SERVER_OUTPUTS_KEY, {})
+    return {ch: stored.get(ch, "") for ch in OUTPUT_CHANNELS}
+
+
+def set_server_output(channel: str, device_name: str) -> None:
+    """Назначить каналу устройство серверного звука. Пусто — системное по умолчанию."""
+    if channel not in OUTPUT_CHANNELS:
+        raise KeyError(channel)
+    data = _load_overrides()
+    outputs = data.get(_SERVER_OUTPUTS_KEY, {})
+    outputs[channel] = device_name or ""
+    data[_SERVER_OUTPUTS_KEY] = outputs
+    _save_overrides(data)
+
+
+# ── Режим звука: браузер или сервер ────────────────────────────────────────
+# 'browser' — исторический тракт (static/sound.js + setSinkId);
+# 'server'  — PortAudio из Python (app/audio_engine.py).
+# Хранится здесь же, чтобы выбор пережил перезапуск сервера.
+_MODE_KEY = "__sound_mode__"
+SOUND_MODES = ("browser", "server")
+
+
+def get_sound_mode() -> str:
+    mode = _load_overrides().get(_MODE_KEY, "browser")
+    return mode if mode in SOUND_MODES else "browser"
+
+
+def set_sound_mode(mode: str) -> None:
+    if mode not in SOUND_MODES:
+        raise KeyError(mode)
+    data = _load_overrides()
+    data[_MODE_KEY] = mode
     _save_overrides(data)

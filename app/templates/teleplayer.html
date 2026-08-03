@@ -253,7 +253,10 @@
 
     <!-- CCTV Overlay (frames injected by JS from the pushed camera config) -->
     <div id="tv-cctv-overlay"></div>
-    <video id="tv-cctv-transition" src="/videos/noize.mp4" playsinline muted style="position:fixed; inset:0; width:100%; height:100%; object-fit:cover; z-index:91; display:none; pointer-events:none;"></video>
+    <!-- Шум перехода — звуковой эффект, идёт в канал 'game' (наушники). Без
+         muted автозапуск возможен только после жеста пользователя на странице;
+         playCctvTransition это учитывает и глушит видео, пока жеста не было. -->
+    <video id="tv-cctv-transition" src="/videos/noize.mp4" playsinline style="position:fixed; inset:0; width:100%; height:100%; object-fit:cover; z-index:91; display:none; pointer-events:none;"></video>
     
     <div id="tv-ui-noise" class="cctv-grain" style="position:fixed; inset:0; z-index:9000; mix-blend-mode:screen !important;"></div>
     <div id="tv-ui-scan" class="cctv-scan" style="position:fixed; inset:0; z-index:9001;"></div>
@@ -379,14 +382,24 @@
     const videoEl = document.getElementById('tv-video');
     const tvIndicator = document.getElementById('tv-ws-indicator');
 
-    // Канал 'video': звук видеоконтента идёт на устройство, выбранное оператором
-    // (обычно телевизор), независимо от звуков игры. Ставим на плеер и на
-    // видео-переход CCTV. Живые CCTV-потоки — iframe MediaMTX, их вывод
-    // браузер маршрутизировать не даёт, поэтому они здесь не участвуют.
+    // На этом экране звучат оба канала вывода, каждый на своём устройстве:
+    //   'video' — видеоролики (динамики ноутбука);
+    //   'game'  — звуковые эффекты, включая шум CCTV-перехода (наушники).
+    // Живые CCTV-потоки — iframe MediaMTX, их вывод браузер маршрутизировать
+    // не даёт, поэтому они ни в одном канале не участвуют.
+    // *SinkReady резолвится, когда выбранный выход применён к элементу. Медиа,
+    // запущенное раньше, ушло бы на устройство по умолчанию.
+    let videoSinkReady = Promise.resolve();
+    let cctvSinkReady = Promise.resolve();
+    const transitionEl = document.getElementById('tv-cctv-transition');
     if (window.AudioOutput) {
-        window.AudioOutput.register(videoEl, 'video');
-        const transitionEl = document.getElementById('tv-cctv-transition');
-        if (transitionEl) window.AudioOutput.register(transitionEl, 'video');
+        videoSinkReady = window.AudioOutput.register(videoEl, 'video');
+        if (transitionEl) cctvSinkReady = window.AudioOutput.register(transitionEl, 'game');
+    }
+    // Запуск видео строго после применения sink.
+    function playVideoOnSelectedSink(onError) {
+        const go = () => videoEl.play().catch(onError || (() => {}));
+        videoSinkReady.then(go, go);
     }
     let tvWs;
     let tvReconnectTimer;
@@ -415,15 +428,18 @@
         };
     }
 
-    // Проверочный звук для канала видео: берём готовый звук озвучки (preview=1
-    // играет даже если событие выключено) и гоним его через тот же sink, что и
-    // видеоплеер, — оператор слышит, куда реально уходит звук видеоконтента.
-    function playVideoChannelTest() {
+    // Проверочный звук канала: берём готовый звук озвучки (preview=1 играет даже
+    // если событие выключено) и гоним его через тот же sink, что и медиа этого
+    // канала, — оператор слышит, куда реально уходит звук с этого экрана.
+    function playChannelTest(channel) {
+        const ch = channel === 'game' ? 'game' : 'video';
         try {
             const a = new Audio('/api/audio/file/ui_click?preview=1&t=' + Date.now());
             a.volume = 1.0;
-            if (window.AudioOutput) window.AudioOutput.register(a, 'video');
-            a.play().catch(err => console.warn('audio test play error', err));
+            const start = () => a.play().catch(err => console.warn('audio test play error', err));
+            // Ждём применения sink: play() до него уходит на устройство по умолчанию.
+            if (window.AudioOutput) window.AudioOutput.register(a, ch).then(start, start);
+            else start();
         } catch (e) { console.warn('audio test failed', e); }
     }
 
@@ -438,14 +454,14 @@
                         videoEl.volume = Math.max(0, Math.min(100, cmd.volume)) / 100.0;
                     }
                     videoOverlay.classList.add('active');
-                    videoEl.play().catch(err => console.warn('Video play error', err));
+                    playVideoOnSelectedSink(err => console.warn('Video play error', err));
                 }
                 break;
             case 'pause':
                 videoEl.pause();
                 break;
             case 'resume':
-                videoEl.play().catch(() => {});
+                playVideoOnSelectedSink();
                 break;
             case 'stop':
                 videoEl.pause();
@@ -459,12 +475,16 @@
                 }
                 break;
             case 'audio_output':
-                // Dealer picked a different speaker for video sound.
-                if (window.AudioOutput) window.AudioOutput.setSink('video', cmd.device_id || '');
+                // Оператор сменил устройство одного из каналов. Старые сообщения
+                // канал не указывали — считаем их за 'video'.
+                if (window.AudioOutput) {
+                    window.AudioOutput.setSink(cmd.channel || 'video', cmd.device_id || '');
+                }
                 break;
             case 'audio_test':
-                // Dealer is checking that video sound lands on the TV speakers.
-                playVideoChannelTest();
+                // Оператор проверяет, на какое устройство уходит канал с этого
+                // экрана: 'video' — динамики, 'game' — наушники.
+                playChannelTest(cmd.channel || 'video');
                 break;
             case 'cctv':
                 // Manual toggle from the dealer button — force CCTV on/off now.
@@ -757,16 +777,33 @@
     // Transition noise effect
     let cctvTransitionTimer1 = null;
     let cctvTransitionTimer2 = null;
+    // Со звуком автозапуск запрещён, пока на странице не было жеста. Экран TV
+    // обычно никто не трогает, поэтому до первого жеста играем беззвучно —
+    // картинка перехода важнее звука и пропадать не должна.
+    let cctvAudioUnlocked = false;
+    ['pointerdown', 'keydown', 'touchstart'].forEach(function (ev) {
+        window.addEventListener(ev, function () { cctvAudioUnlocked = true; }, { once: true });
+    });
     function playCctvTransition(callback) {
         const vid = document.getElementById('tv-cctv-transition');
         clearTimeout(cctvTransitionTimer1);
         clearTimeout(cctvTransitionTimer2);
-        
+
         vid.style.display = 'block';
         vid.currentTime = 0;
-        const p = vid.play();
-        if (p) p.catch(() => {});
-        
+        vid.muted = !cctvAudioUnlocked;
+        // Картинку показываем сразу, а старт откладываем до применения sink,
+        // иначе первые кадры шума прозвучат на устройстве по умолчанию.
+        // Если sink не применился, всё равно играем — визуал важнее.
+        const go = () => {
+            const p = vid.play();
+            if (p) p.catch(() => {
+                // Браузер отказал из-за звука — доигрываем беззвучно.
+                if (!vid.muted) { vid.muted = true; const r = vid.play(); if (r) r.catch(() => {}); }
+            });
+        };
+        cctvSinkReady.then(go, go);
+
         // At 300ms, execute the switch (show/hide CCTV) underneath the static
         cctvTransitionTimer1 = setTimeout(() => {
             callback();
@@ -1088,7 +1125,7 @@
 
     function updateUI(data) {
         if (data.error) {
-            window.location.href = '/';
+            window.location.href = '/telejoin';
             return;
         }
 
@@ -1117,7 +1154,7 @@
             }
             if (!gameOverTimeout) {
                 gameOverTimeout = setTimeout(() => {
-                    window.location.href = '/';
+                    window.location.href = '/telejoin';
                 }, 8000);
             }
             return;
