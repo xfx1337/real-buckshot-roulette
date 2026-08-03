@@ -14,6 +14,9 @@
  * заранее — пробуем проиграть, а при отказе (NotAllowedError) показываем баннер
  * «нажмите для звука». Любой клик/нажатие снимает блок.
  *
+ * Вывод: все звуки идут в канал 'game' модуля AudioOutput (static/audio_output.js) —
+ * оператор может направить их на отдельную колонку, оставив звук видео на ТВ.
+ *
  * Ключи совпадают с app/sound_config.py / docs/SOUND_EVENTS.md.
  */
 (function () {
@@ -52,6 +55,15 @@
 
   function src(key) { return '/api/audio/file/' + encodeURIComponent(key) + '?v=' + engine.ver; }
 
+  // Новый Audio, привязанный к каналу вывода 'game' (см. static/audio_output.js).
+  // Промис применения sink кладём на сам элемент: attempt() дожидается его перед
+  // play(), иначе звук стартует на устройстве по умолчанию (setSinkId — async).
+  function makeAudio(key) {
+    var a = new Audio(src(key));
+    if (window.AudioOutput) a._sinkReady = window.AudioOutput.register(a, 'game');
+    return a;
+  }
+
   var savedVol = parseFloat(localStorage.getItem('bsr_sound_volume'));
   if (!isNaN(savedVol)) engine.masterVolume = savedVol;
   var savedDucking = localStorage.getItem('bsr_sound_ducking');
@@ -81,29 +93,70 @@
   }
 
   // Пытаемся проиграть; при блокировке автоплея показываем баннер.
+  // Стартуем только после того, как элементу применён выбранный выход, иначе
+  // первые звуки уходят на устройство по умолчанию.
   function attempt(audio, key) {
-    var p = audio.play();
-    if (p && p.catch) {
-      p.then(function () { engine.blocked = false; hideBanner(); })
-       .catch(function (err) {
-         if (err && err.name === 'NotAllowedError') {
-           engine.blocked = true; showBanner();
-           log('autoplay BLOCKED on', key, '- нужен жест');
-         } else {
-           log('play error on', key, err && err.name);
-         }
-       });
+    function start() {
+      var p = audio.play();
+      if (p && p.catch) {
+        p.then(function () { engine.blocked = false; hideBanner(); })
+         .catch(function (err) {
+           if (err && err.name === 'NotAllowedError') {
+             engine.blocked = true; showBanner();
+             log('autoplay BLOCKED on', key, '- нужен жест');
+           } else {
+             log('play error on', key, err && err.name);
+           }
+         });
+      }
     }
+    if (audio._sinkReady && audio._sinkReady.then) audio._sinkReady.then(start, start);
+    else start();
   }
 
   // WebAudio-контекст для усиления >1.0 (HTMLAudio.volume режется на 1.0).
+  //
+  // Внимание: звук, пропущенный через WebAudio, выходит из ctx.destination и
+  // ИГНОРИРУЕТ setSinkId самого элемента. Поэтому контекст сам направляется на
+  // выбранный канал 'game' через AudioContext.setSinkId (Chrome 110+). Если
+  // браузер этого не умеет, а оператор выбрал НЕ дефолтное устройство — путь с
+  // усилением отключаем, иначе громкий звук улетит не на ту колонку.
   var audioCtx = null;
+  var ctxSink = null;   // sinkId, применённый к контексту
   function getCtx() {
-    if (audioCtx) return audioCtx;
+    if (audioCtx) { syncCtxSink(); return audioCtx; }
     var AC = window.AudioContext || window.webkitAudioContext;
     if (!AC) return null;
     try { audioCtx = new AC(); } catch (e) { audioCtx = null; }
+    syncCtxSink();
     return audioCtx;
+  }
+
+  function wantedSink() {
+    return window.AudioOutput ? window.AudioOutput.getSink('game') : '';
+  }
+
+  function ctxCanRoute() {
+    var AC = window.AudioContext || window.webkitAudioContext;
+    return !!(AC && AC.prototype && typeof AC.prototype.setSinkId === 'function');
+  }
+
+  function syncCtxSink() {
+    if (!audioCtx || !ctxCanRoute()) return;
+    var want = wantedSink();
+    if (ctxSink === want) return;
+    ctxSink = want;
+    try {
+      var p = audioCtx.setSinkId(want);
+      if (p && p.catch) p.catch(function (e) { log('ctx setSinkId failed', e && e.name); });
+    } catch (e) { log('ctx setSinkId throw', e); }
+  }
+
+  // Можно ли безопасно применять усиление через WebAudio для текущего вывода.
+  function gainPathSafe() {
+    var want = wantedSink();
+    if (!want) return true;             // дефолтное устройство — маршрут неважен
+    return ctxCanRoute();
   }
 
   function play(key) {
@@ -114,8 +167,8 @@
     try {
       var vol = (engine.cfg[key] && engine.cfg[key].volume !== undefined) ? engine.cfg[key].volume : 1.0;
       var target = engine.masterVolume * vol;
-      var a = new Audio(src(key));
-      if (target > 1.0) {
+      var a = makeAudio(key);
+      if (target > 1.0 && gainPathSafe()) {
         // Усиление через WebAudio gain (например, «звук из рая» +40%).
         var ctx = getCtx();
         if (ctx) {
@@ -132,7 +185,10 @@
         }
         a.volume = 1.0;   // фолбэк: без WebAudio выше 1.0 не поднять
       } else {
-        a.volume = target;
+        // Потолок 1.0: HTMLAudio.volume выше единицы бросает исключение, а
+        // gain-путь здесь недоступен (нет WebAudio либо он не умеет маршрутизацию
+        // на выбранное устройство вывода).
+        a.volume = Math.min(1.0, target);
       }
       log('play', key, 'volume', a.volume);
       attempt(a, key);
@@ -144,7 +200,7 @@
     var key = engine.loopKey;
     var vol = (engine.cfg[key] && engine.cfg[key].volume !== undefined) ? engine.cfg[key].volume : 1.0;
     var base = engine.masterVolume * 0.55 * vol;
-    engine.loopAudio.volume = engine.ducked ? base * 0.1 : base;
+    engine.loopAudio.volume = Math.min(1.0, engine.ducked ? base * 0.1 : base);
   }
 
   var duckTimeout = null;
@@ -166,6 +222,7 @@
     if (key === engine.loopKey && engine.loopAudio) {
       if (!enabled(key)) {
         try { engine.loopAudio.pause(); } catch (e) {}
+        if (window.AudioOutput) window.AudioOutput.unregister(engine.loopAudio, 'game');
         engine.loopAudio = null;
       } else {
         updateLoopVolume();
@@ -173,10 +230,14 @@
       return;
     }
     engine.loopKey = key;
-    if (engine.loopAudio) { try { engine.loopAudio.pause(); } catch (e) {} engine.loopAudio = null; }
+    if (engine.loopAudio) {
+      try { engine.loopAudio.pause(); } catch (e) {}
+      if (window.AudioOutput) window.AudioOutput.unregister(engine.loopAudio, 'game');
+      engine.loopAudio = null;
+    }
     if (!key || !enabled(key)) return;
     try {
-      var a = new Audio(src(key));
+      var a = makeAudio(key);
       a.loop = true;
       engine.loopAudio = a;
       updateLoopVolume();
@@ -376,6 +437,9 @@
     },
     isDuckingEnabled: function () { return engine.duckingEnabled; },
     updateLoopVolume: updateLoopVolume,
+    // Оператор сменил устройство вывода — сами элементы перенаправит AudioOutput,
+    // здесь остаётся довести до нового выхода WebAudio-контекст усиления.
+    onOutputChanged: syncCtxSink,
     isEnabled: enabled,
     test: function () { play('ui_click'); },   // ручная проверка из консоли
     _engine: engine,

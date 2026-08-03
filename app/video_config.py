@@ -51,6 +51,27 @@ DEFAULT_CONFIG = {
             "interval": 15,      # seconds between fake-error ticks
             "duration": 4        # seconds a faked camera stays "unavailable"
         },
+        # Реактивные эффекты ЭЛТ: телевизор реагирует на ход партии, а не шумит
+        # ровно. Каждый эффект — независимый тумблер + своя степень (0..100),
+        # чтобы оператор гасил лишнее прямо во время игры. Степень 0 = эффект
+        # включён, но не виден; тумблер off = слой вообще не рисуется.
+        "reactive": {
+            # Всплеск помех в момент боевого выстрела.
+            "shot_enabled": True,
+            "shot_level": 70,
+            # Постоянный уровень помех тем выше, чем меньше HP у игрока.
+            "hp_enabled": True,
+            "hp_level": 60,
+            # Срыв кадра (потеря синхронизации) в момент смерти игрока.
+            "death_enabled": True,
+            "death_level": 80,
+            # Дрожание картинки, пока дилер выбирает цель после выстрела.
+            "pending_enabled": True,
+            "pending_level": 45,
+            # Послесвечение люминофора — след за исчезающими элементами.
+            "afterglow_enabled": False,
+            "afterglow_level": 50,
+        },
         # Artificial picture degradation shown to the player on the TV — blur,
         # grain, scanlines. Dealer /cams viewer is never degraded.
         "degrade": {

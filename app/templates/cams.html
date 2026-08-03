@@ -67,7 +67,7 @@
             layout(CAMERAS.length);
             grid.innerHTML = CAMERAS.map(cam => `
                 <div class="cam-cell" data-cam="${cam}">
-                    <div class="cam-label">${cam.toUpperCase()} [REC]</div>
+                    <div class="cam-label">${cam.toUpperCase()} <span data-stat="${cam}">…</span></div>
                     <button class="exit-full" data-exit>✕ НАЗАД</button>
                     <div class="click-overlay"></div>
                     <iframe scrolling="no" src="http://${host}:8889/${encodeURIComponent(cam)}/"></iframe>
@@ -90,6 +90,38 @@
         });
 
         render();
+
+        // Подпись на каждой плитке: реально ли идёт запись плюс заряд и
+        // температура устройства, если оно их присылает. Раньше тут висело
+        // статичное [REC] — оно горело даже у мёртвой камеры.
+        async function pollStatus() {
+            try {
+                const r = await fetch('/api/cctv/status');
+                const d = await r.json();
+                (d.cameras || []).forEach(c => {
+                    const el = grid.querySelector(`[data-stat="${CSS.escape(c.name)}"]`);
+                    if (!el) return;
+                    const parts = [];
+                    parts.push(c.recording ? '[REC]' : (c.online ? '[НЕТ ПОТОКА]' : '[ОФЛАЙН]'));
+                    if (c.battery !== null && c.battery !== undefined) {
+                        parts.push(`${c.charging ? '⚡' : '🔋'}${Math.round(c.battery)}%`);
+                    }
+                    // Градусы, если есть датчик; иначе уровень нагрева от
+                    // Compute Pressure API — точных °C браузер не отдаёт.
+                    if (c.temperature !== null && c.temperature !== undefined) {
+                        parts.push(`🌡${c.temperature.toFixed(0)}°`);
+                    } else if (c.pressure) {
+                        const short = { nominal:'ok', fair:'тепло', serious:'горячо', critical:'ПЕРЕГРЕВ' };
+                        if (short[c.pressure]) parts.push(`🌡${short[c.pressure]}`);
+                    }
+                    el.textContent = parts.join(' ');
+                    el.style.color = c.recording ? '#ff4a4a' : '#888';
+                });
+            } catch (e) { /* следующий тик покажет */ }
+        }
+
+        pollStatus();
+        setInterval(pollStatus, 5000);
     </script>
 </body>
 </html>

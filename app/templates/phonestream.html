@@ -438,6 +438,108 @@
             setTimeout(captureAndSend, frameInterval);
         }
 
+        // ── Телеметрия для панели дилера ──
+        //
+        // MediaMTX видит только сам поток, но не устройство, которое снимает.
+        // Заряд и нагрев телефон сообщает о себе сам.
+        //
+        // ЗАРЯД — Battery Status API (navigator.getBattery). Ограничения:
+        //   • только Chromium (Chrome/Edge/Opera/Samsung Internet). Firefox
+        //     выпилил API из-за фингерпринтинга, Safari/iOS не имел никогда;
+        //   • только secure context. Игра крутится по локальному http, поэтому
+        //     на телефоне по адресу вида http://192.168.x.x метод ПРОСТО
+        //     ОТСУТСТВУЕТ. Лечится либо https, либо тем, что адрес считается
+        //     доверенным (localhost). Поэтому ниже отдельно различаем «браузер
+        //     не умеет» и «нужен https» — оператору это разные проблемы.
+        //
+        // ТЕМПЕРАТУРА — градусов не даёт ни один браузерный API. Причина не
+        // техническая, а приватность: точные показания датчиков позволяют
+        // однозначно опознать устройство. Ближайшее, что есть, — Compute
+        // Pressure API: он отдаёт не цифру, а уровень нагрузки/нагрева
+        // (nominal/fair/serious/critical), где critical означает буквально
+        // «устройство перегрето и нуждается в охлаждении». В спецификации
+        // объявлен источник 'thermals', но в Chrome реализован пока только
+        // 'cpu' — поэтому спрашиваем knownSources и берём лучшее из доступного:
+        // если 'thermals' однажды появится, код подхватит его сам.
+        let telemetryTimer = null;
+        let pressureState = null;    // nominal | fair | serious | critical
+        let pressureSource = null;   // из какого источника получено
+        let batteryRef = null;
+
+        async function initBattery() {
+            if (!navigator.getBattery) return;
+            try {
+                batteryRef = await navigator.getBattery();
+                // Событиями ловим смену питания сразу, не дожидаясь тика в 10с:
+                // дилеру важно видеть «сняли с зарядки» без задержки.
+                ['levelchange', 'chargingchange'].forEach(ev =>
+                    batteryRef.addEventListener(ev, sendTelemetry));
+            } catch (e) { batteryRef = null; }
+        }
+
+        async function initPressure() {
+            if (!('PressureObserver' in window)) return;
+            try {
+                const observer = new PressureObserver(records => {
+                    const last = records[records.length - 1];
+                    if (last) pressureState = last.state;
+                });
+                const known = PressureObserver.knownSources || [];
+                // 'thermals' — прямой показатель нагрева, 'cpu' — косвенный, но
+                // под стримом греется именно CPU/кодек, так что как прокси годится.
+                const source = known.includes('thermals') ? 'thermals'
+                             : known.includes('cpu') ? 'cpu' : null;
+                if (!source) return;
+                await observer.observe(source, { sampleInterval: 2000 });
+                pressureSource = source;
+            } catch (e) { pressureSource = null; }
+        }
+
+        async function sendTelemetry() {
+            const camera = phoneNameInput.value.trim() || `Phone ${phoneId.substr(-4)}`;
+            const body = { camera, recording: isStreaming, label: `браузер ${phoneId.substr(-4)}` };
+
+            if (batteryRef) {
+                body.battery = Math.round(batteryRef.level * 100);
+                body.charging = batteryRef.charging;
+            } else if (!navigator.getBattery) {
+                // Почему заряда нет — чтобы дилер не гадал. isSecureContext
+                // различает «нужен https» и «браузер не поддерживает».
+                body.battery_unavailable = window.isSecureContext
+                    ? 'браузер не поддерживает' : 'нужен https';
+            }
+
+            if (pressureState) {
+                body.pressure = pressureState;
+                body.pressure_source = pressureSource;
+            }
+
+            try {
+                await fetch('/api/cctv/telemetry', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(body)
+                });
+            } catch (e) { /* сеть моргнула, следующий тик дошлёт */ }
+        }
+
+        function startTelemetry() {
+            if (telemetryTimer) return;
+            sendTelemetry();
+            telemetryTimer = setInterval(sendTelemetry, 10000);
+        }
+
+        function stopTelemetry() {
+            clearInterval(telemetryTimer);
+            telemetryTimer = null;
+            // Финальный отчёт: помечаем, что запись кончилась, иначе у дилера
+            // камера ещё полминуты висела бы «пишущей», пока отчёт не протухнет.
+            sendTelemetry();
+        }
+
+        initBattery();
+        initPressure();
+
         startBtn.addEventListener('click', async () => {
             // If permission not granted yet, request it first
             if (!permissionGranted) {
@@ -471,12 +573,14 @@
                 }
                 
                 captureAndSend();
+                startTelemetry();
             }
         });
 
         stopBtn.addEventListener('click', () => {
             isStreaming = false;
-            
+            stopTelemetry();
+
             if (stream) {
                 stream.getTracks().forEach(track => track.stop());
                 stream = null;

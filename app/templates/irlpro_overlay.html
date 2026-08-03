@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Телеметрия камеры — IRL Pro</title>
+    <style>
+        /* Страница висит поверх видео в IRL Pro, поэтому фон прозрачный, а
+           текст — с обводкой, чтобы читался на любой картинке. Если оператор
+           откроет её просто в браузере для проверки, всё тоже видно. */
+        html, body {
+            margin: 0; padding: 0; background: transparent;
+            font-family: 'Courier New', monospace; color: #fff;
+        }
+        #box {
+            display: inline-block; padding: 6px 10px;
+            background: rgba(0,0,0,.45); border-radius: 4px;
+            font-size: 13px; line-height: 1.5;
+            text-shadow: 0 0 3px #000, 0 0 2px #000;
+        }
+        .cam { color: #4af626; letter-spacing: 1px; }
+        .row { white-space: nowrap; }
+        .dim { color: #9a9a9a; }
+        .warn { color: #ffb02e; }
+        .bad { color: #ff4a4a; }
+    </style>
+</head>
+<body>
+    <div id="box">
+        <div class="row cam" id="r-cam">—</div>
+        <div class="row" id="r-bat">заряд: …</div>
+        <div class="row" id="r-temp">нагрев: …</div>
+        <div class="row dim" id="r-sent">—</div>
+    </div>
+
+    <script>
+        // ── Мост телеметрии IRL Pro → панель дилера ──
+        //
+        // IRL Pro сам показывает заряд и температуру на своём экране, но наружу
+        // их не отдаёт: у приложения нет ни API, ни вебхука (на своём сайте
+        // «realtime stats reporting» до сих пор числится в TODO). Зато есть
+        // веб-оверлей — приложение грузит произвольный URL в системном Android
+        // WebView и рисует поверх видео. Эта страница и есть такой оверлей.
+        //
+        // Смысл в том, что WebView — полноценный Chromium: внутри него работает
+        // Battery Status API, который недоступен, если просто открыть игру по
+        // http с телефона. Так что заряд и факт зарядки мы получаем настоящие,
+        // от той же системы, что рисует их в самом IRL Pro.
+        //
+        // Оговорка про температуру: WebView не даёт градусов — их не даёт ни
+        // один браузерный API, это ограничение приватности, а не движка.
+        // Поэтому берём Compute Pressure API (уровень нагрева) и, отдельно,
+        // температуру батареи, если её удастся получить. Точные °C корпуса,
+        // которые рисует IRL Pro, из WebView недостижимы.
+
+        const params = new URLSearchParams(location.search);
+        // Имя камеры задаётся прямо в URL оверлея: ?camera=cam1 — так один и
+        // тот же адрес обслуживает разные телефоны.
+        const CAMERA = (params.get('camera') || 'cam1').trim();
+        // Куда слать. По умолчанию — туда же, откуда загружена страница.
+        const API = params.get('api') || '';
+        const PERIOD = Math.max(3, parseInt(params.get('period') || '10', 10)) * 1000;
+
+        document.getElementById('r-cam').textContent = CAMERA.toUpperCase();
+
+        let batteryRef = null;
+        let pressureState = null, pressureSource = null;
+        let lastOk = null, lastErr = null;
+
+        async function initBattery() {
+            if (!navigator.getBattery) return;
+            try {
+                batteryRef = await navigator.getBattery();
+                ['levelchange', 'chargingchange'].forEach(ev =>
+                    batteryRef.addEventListener(ev, push));
+            } catch (e) { batteryRef = null; }
+        }
+
+        async function initPressure() {
+            if (!('PressureObserver' in window)) return;
+            try {
+                const obs = new PressureObserver(recs => {
+                    const last = recs[recs.length - 1];
+                    if (last) { pressureState = last.state; render(); }
+                });
+                const known = PressureObserver.knownSources || [];
+                // 'thermals' — прямой нагрев, но в Chrome пока реализован лишь
+                // 'cpu'. Спрашиваем оба: появится thermals — подхватим сами.
+                const src = known.includes('thermals') ? 'thermals'
+                          : known.includes('cpu') ? 'cpu' : null;
+                if (!src) return;
+                await obs.observe(src, { sampleInterval: 2000 });
+                pressureSource = src;
+            } catch (e) { pressureSource = null; }
+        }
+
+        const PRESSURE_TEXT = {
+            nominal: 'норма', fair: 'тёплый',
+            serious: 'горячий', critical: 'ПЕРЕГРЕВ',
+        };
+
+        function render() {
+            const bat = document.getElementById('r-bat');
+            if (batteryRef) {
+                const pct = Math.round(batteryRef.level * 100);
+                bat.textContent = `заряд: ${pct}%${batteryRef.charging ? ' ⚡ зарядка' : ''}`;
+                bat.className = 'row' + (pct <= 15 ? ' bad' : pct <= 35 ? ' warn' : '');
+            } else {
+                bat.textContent = 'заряд: н/д' + (window.isSecureContext ? '' : ' (нужен https)');
+                bat.className = 'row dim';
+            }
+
+            const t = document.getElementById('r-temp');
+            if (pressureState) {
+                t.textContent = 'нагрев: ' + (PRESSURE_TEXT[pressureState] || pressureState);
+                t.className = 'row' + (pressureState === 'critical' ? ' bad'
+                                     : pressureState === 'serious' ? ' warn' : '');
+            } else {
+                t.textContent = 'нагрев: н/д';
+                t.className = 'row dim';
+            }
+
+            const s = document.getElementById('r-sent');
+            s.textContent = lastErr ? ('ошибка: ' + lastErr)
+                          : lastOk ? ('отправлено ' + lastOk) : '…';
+            s.className = 'row ' + (lastErr ? 'bad' : 'dim');
+        }
+
+        async function push() {
+            const body = { camera: CAMERA, recording: true, label: 'IRL Pro' };
+            if (batteryRef) {
+                body.battery = Math.round(batteryRef.level * 100);
+                body.charging = batteryRef.charging;
+            } else if (!navigator.getBattery) {
+                body.battery_unavailable = window.isSecureContext
+                    ? 'WebView не поддерживает' : 'нужен https';
+            }
+            if (pressureState) {
+                body.pressure = pressureState;
+                body.pressure_source = pressureSource;
+            }
+            try {
+                const r = await fetch(API + '/api/cctv/telemetry', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(body)
+                });
+                if (!r.ok) throw new Error('HTTP ' + r.status);
+                lastErr = null;
+                lastOk = new Date().toLocaleTimeString('ru-RU');
+            } catch (e) {
+                lastErr = e.message;
+            }
+            render();
+        }
+
+        (async () => {
+            await Promise.all([initBattery(), initPressure()]);
+            render();
+            push();
+            setInterval(push, PERIOD);
+        })();
+    </script>
+</body>
+</html>

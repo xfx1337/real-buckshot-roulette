@@ -275,3 +275,44 @@ def save_upload(key: str, orig_filename: str, content: bytes) -> str:
 
 def mime_for(path: Path) -> str:
     return MIME_BY_EXT.get(path.suffix.lower(), "application/octet-stream")
+
+
+# ── Выбор устройств вывода ────────────────────────────────────────────────
+# Оператор может направить звук игры и звук видеоконтента на РАЗНЫЕ колонки
+# (например, игра — на bluetooth-колонку, видео — на телевизор по HDMI).
+# Здесь хранится только выбор оператора: deviceId из `enumerateDevices()`
+# браузера плюс подпись для отображения в панели. Применяет выбор клиент
+# через `HTMLMediaElement.setSinkId()`.
+#
+# deviceId браузера стабилен в пределах origin, пока пользователь не сбросит
+# разрешения, поэтому его можно хранить на сервере и переиспользовать между
+# перезапусками. Пустой deviceId = системное устройство по умолчанию.
+#
+# Ключи каналов: "game" (SoundEngine на панели дилера) и "video" (видео/CCTV
+# на TV-экране).
+_OUTPUTS_KEY = "__outputs__"
+OUTPUT_CHANNELS = ("game", "video")
+
+
+def get_outputs() -> dict:
+    """Выбранные устройства вывода по каналам: {channel: {deviceId, label}}."""
+    stored = _load_overrides().get(_OUTPUTS_KEY, {})
+    out = {}
+    for ch in OUTPUT_CHANNELS:
+        entry = stored.get(ch) or {}
+        out[ch] = {
+            "deviceId": entry.get("deviceId", ""),
+            "label": entry.get("label", ""),
+        }
+    return out
+
+
+def set_output(channel: str, device_id: str, label: str = "") -> None:
+    """Назначить каналу устройство вывода. Пустой device_id — вернуть дефолт."""
+    if channel not in OUTPUT_CHANNELS:
+        raise KeyError(channel)
+    data = _load_overrides()
+    outputs = data.get(_OUTPUTS_KEY, {})
+    outputs[channel] = {"deviceId": device_id or "", "label": label or ""}
+    data[_OUTPUTS_KEY] = outputs
+    _save_overrides(data)
