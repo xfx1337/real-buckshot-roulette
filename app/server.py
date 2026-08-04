@@ -38,7 +38,7 @@ from app.game_engine import (
 from app import sound_config
 from app import video_config
 from app import audio_engine
-from app.sound_director import director as sound_director
+from app.sound_director import director as sound_director, loop_for_state
 
 import socket
 from urllib.parse import quote, unquote, urlparse
@@ -224,8 +224,42 @@ tv_ws_list: list[WebSocket] = []  # TV video overlay WebSocket connections
 # Current video command being broadcast to all TV screens.
 tv_video_state: dict = {"action": "idle", "video": None, "loop": False}
 
+# Последнее сообщение оператора на телевизор. Держим здесь, чтобы TV, который
+# переподключился (или включился позже), сразу дорисовал текст, который уже
+# висит на других экранах, а не остался пустым до следующей отправки.
+tv_message_state: dict = {"action": "message_clear"}
+
 def _is_tv_muting():
     return bool(tv_video_state.get("action") == "play" and tv_video_state.get("mute_game_sound", False))
+
+
+def _sync_tv_mute():
+    """Немедленно свести серверный звук с состоянием ролика на TV.
+
+    `broadcast_state()` до движка не всегда доходит: снапшот едет через очередь,
+    а без активной игры рассылки нет вовсе. Ролик же стартует именно в такие
+    моменты (победа/поражение — игра уже кончилась), поэтому флаг ставим руками,
+    иначе звуки игры доиграют поверх ролика."""
+    mute = _is_tv_muting()
+    sound_director.force_mute = mute
+    if sound_director.global_mute == mute:
+        return
+    sound_director.global_mute = mute
+    if mute:
+        # В очереди озвучки лежат снапшоты, снятые ДО старта ролика — у них
+        # global_mute=False. Разобрав их, воркер снимет мут и заново поднимет
+        # музыку прямо поверх ролика. Выкидываем их, они уже неактуальны.
+        _drain_sound_queue()
+        for ch in sound_config.OUTPUT_CHANNELS:
+            audio_engine.stop_channel(ch)
+        sound_director.loop_key = None
+    elif game and sound_director.enabled:
+        # Ролик кончился. Снапшот с этим уже не придёт (после game_over
+        # состояние не меняется), поэтому фон возвращаем сами.
+        try:
+            sound_director.set_loop(loop_for_state(game.to_dict(for_dealer=True)))
+        except Exception as e:
+            print(f"[audio] не удалось вернуть фон после ролика: {e}")
 
 async def notify_showscreen(message: str, player_name: str, item: str):
     if not showscreen_ws_list:
@@ -328,7 +362,22 @@ def _sound_worker():
 threading.Thread(target=_sound_worker, daemon=True, name="sound-director").start()
 
 
+def _drain_sound_queue():
+    """Выкинуть накопленные снапшоты, не разбирая их."""
+    while True:
+        try:
+            _sound_queue.get_nowait()
+        except queue.Empty:
+            return
+        else:
+            _sound_queue.task_done()
+
+
 def _queue_sound_state(state: dict):
+    # Ролик на экране — озвучивать нечего: снапшот всё равно будет отброшен
+    # движком, а в очереди он только оттеснит актуальные.
+    if _is_tv_muting():
+        return
     try:
         _sound_queue.put_nowait(state)
     except queue.Full:
@@ -356,6 +405,9 @@ async def broadcast_state():
     # прозвучит дважды. Флаг едет в снапшоте, чтобы это работало и во вкладках,
     # из которых режим не переключали.
     dealer_dict["server_sound"] = sound_director.enabled
+    # Идёт ли сейчас ролик на TV. Нужно кнопке ручного запуска на экране
+    # «конец игры»: пока ролик крутится, она заблокирована, после — снова жмётся.
+    dealer_dict["tv_playing"] = tv_video_state.get("action") == "play"
     dealer_data = json.dumps(dealer_dict, ensure_ascii=False)
     dead_ws = []
     for ws in dealer_ws_list:
@@ -751,6 +803,12 @@ async def create_game(
     elif game_mode == "story_one_round":
         game.config.rounds = [dict(r) for r in STORY_ONE_ROUND_DEFAULT_ROUNDS]
     undo_stack.clear()
+    # Текст прошлой партии на телевизоре к новой игре отношения не имеет —
+    # иначе он висел бы поверх лобби, пока оператор не сотрёт его руками.
+    if tv_message_state.get("action") == "message":
+        tv_message_state.clear()
+        tv_message_state.update({"action": "message_clear"})
+        await broadcast_tv({"action": "message_clear"})
     await broadcast_state()
     return {"ok": True, "game_id": game.game_id, "game_mode": game_mode}
 
@@ -1641,12 +1699,17 @@ async def tv_play(request: Request):
     cfg = video_config.load_config()
     vol = cfg.get("settings", {}).get("volume", 100)
     mute = cfg.get("auto_play", {}).get("mute_game_sound", False)
+    # Ролики итога (победа/поражение) звучат сами и всегда идут на весь зал —
+    # игровой звук поверх них не нужен никогда, независимо от галки.
+    if slot in ("player_win", "player_lose"):
+        mute = True
     
     # Get file modification time for smart cache busting
     filepath = video_config.VIDEOS_DIR / video
     mtime = int(os.path.getmtime(filepath)) if filepath.exists() else 0
     
     tv_video_state = {"action": "play", "video": video, "loop": loop, "volume": vol, "mtime": mtime, "mute_game_sound": mute}
+    _sync_tv_mute()
     await broadcast_tv(tv_video_state)
     await broadcast_state()
     return {"ok": True, "video": video}
@@ -1707,6 +1770,59 @@ async def tv_cctv_config(request: Request):
     video_config.save_config(cfg)
     await broadcast_tv({"action": "cctv_config", "cctv": cctv})
     return {"ok": True, "cctv": cctv}
+
+
+@app.post("/api/tv/message", tags=["TV"], summary="Напечатать сообщение оператора на TV", include_in_schema=False)
+async def tv_message(request: Request):
+    """Вывести текст оператора на телевизор с эффектом печатной машинки.
+
+    Body: {"text": "...", "speed": 45, "beep": true, "hold": 0, "over_video": false}
+      speed      — миллисекунды на символ (чем больше, тем медленнее печатает);
+      beep       — щёлкать ли динамиком на каждый символ;
+      hold       — через сколько секунд убрать текст сам (0 — держать до СТЕРЕТЬ);
+      over_video — показать поверх видео/камер вместо чёрного экрана.
+    """
+    data = await request.json()
+    text = str(data.get("text") or "").strip()
+    if not text:
+        return {"ok": False, "error": "Пустой текст"}
+    # Верхняя граница на длину: на 800×600 больше просто не поместится
+    # читаемым кеглем, а обрезка на клиенте выглядела бы как потеря текста.
+    text = text[:600]
+    try:
+        speed = int(data.get("speed", 45))
+    except (TypeError, ValueError):
+        speed = 45
+    speed = max(5, min(400, speed))
+    try:
+        hold = float(data.get("hold", 0))
+    except (TypeError, ValueError):
+        hold = 0.0
+    hold = max(0.0, min(600.0, hold))
+
+    msg = {
+        "action": "message",
+        "text": text,
+        "speed": speed,
+        "beep": bool(data.get("beep", True)),
+        "hold": hold,
+        # over_video — не закрашивать фон наглухо, а показать текст поверх
+        # того, что уже идёт на экране (видео или камеры).
+        "over_video": bool(data.get("over_video", False)),
+    }
+    tv_message_state.clear()
+    tv_message_state.update(msg)
+    await broadcast_tv(msg)
+    return {"ok": True, "text": text}
+
+
+@app.post("/api/tv/message/clear", tags=["TV"], summary="Убрать сообщение оператора с TV", include_in_schema=False)
+async def tv_message_clear():
+    """Убрать текст с телевизора."""
+    tv_message_state.clear()
+    tv_message_state.update({"action": "message_clear"})
+    await broadcast_tv({"action": "message_clear"})
+    return {"ok": True}
 
 
 @app.get("/api/cctv/errors", tags=["TV"], summary="Список картинок-ошибок CCTV", include_in_schema=False)
@@ -2145,6 +2261,7 @@ async def cctv_log(since: float = 0.0):
 async def tv_pause():
     global tv_video_state
     tv_video_state["action"] = "pause"
+    _sync_tv_mute()
     await broadcast_tv({"action": "pause"})
     await broadcast_state()
     return {"ok": True}
@@ -2154,6 +2271,7 @@ async def tv_pause():
 async def tv_resume():
     global tv_video_state
     tv_video_state["action"] = "play"
+    _sync_tv_mute()
     await broadcast_tv({"action": "resume"})
     await broadcast_state()
     return {"ok": True}
@@ -2163,6 +2281,7 @@ async def tv_resume():
 async def tv_stop():
     global tv_video_state
     tv_video_state = {"action": "idle", "video": None, "loop": False}
+    _sync_tv_mute()
     await broadcast_tv({"action": "stop"})
     await broadcast_state()
     return {"ok": True}
@@ -2259,6 +2378,10 @@ async def ws_tv(ws: WebSocket):
         # Send current video state on connect
         if tv_video_state["action"] != "idle":
             await ws.send_text(json.dumps(tv_video_state, ensure_ascii=False))
+        # Текст оператора, который висит на экране прямо сейчас: телевизор,
+        # который только что переподключился, дорисует его без повторной отправки.
+        if tv_message_state.get("action") == "message":
+            await ws.send_text(json.dumps({**tv_message_state, "instant": True}, ensure_ascii=False))
         while True:
             msg = await ws.receive_text()
             try:
@@ -2267,6 +2390,7 @@ async def ws_tv(ws: WebSocket):
                     # Video finished — notify dealer via broadcast_state
                     if tv_video_state.get("action") == "play":
                         tv_video_state["action"] = "idle"
+                        _sync_tv_mute()
                         await broadcast_state()
             except Exception:
                 pass

@@ -58,9 +58,28 @@
   // Новый Audio, привязанный к каналу вывода 'game' (см. static/audio_output.js).
   // Промис применения sink кладём на сам элемент: attempt() дожидается его перед
   // play(), иначе звук стартует на устройстве по умолчанию (setSinkId — async).
+  // Играющие сейчас одиночные эффекты. Нужны, чтобы оборвать их разом, когда
+  // на TV стартует ролик: одного volume=0 мало — элемент продолжает играть и
+  // станет слышен, если мут снимут до его конца.
+  var activeAudio = [];
+
+  function forgetAudio(a) {
+    var i = activeAudio.indexOf(a);
+    if (i !== -1) activeAudio.splice(i, 1);
+  }
+
+  function stopAllEffects() {
+    activeAudio.splice(0).forEach(function (a) {
+      try { a.pause(); a.currentTime = 0; } catch (e) {}
+      if (window.AudioOutput) window.AudioOutput.unregister(a, 'game');
+    });
+  }
+
   function makeAudio(key) {
     var a = new Audio(src(key));
     if (window.AudioOutput) a._sinkReady = window.AudioOutput.register(a, 'game');
+    activeAudio.push(a);
+    a.addEventListener('ended', function () { forgetAudio(a); });
     return a;
   }
 
@@ -161,6 +180,9 @@
 
   function play(key) {
     if (!enabled(key)) { log('skip (disabled):', key); return; }
+    // Идёт ролик на TV — сервер молчит полностью. Громкости 0 мало: элемент
+    // всё равно живёт и «догорит» вслух, если мут снимут раньше конца звука.
+    if (engine.muted) { log('skip (muted by TV clip):', key); return; }
     if (key === 'shot_live' || key === 'shot_live_saw' || key === 'shot_blank') {
       triggerDucking();
     }
@@ -218,23 +240,30 @@
     }, 2000);
   }
 
+  // Снять фоновый трек. Луп создаётся через makeAudio(), поэтому его надо
+  // ещё и вычеркнуть из activeAudio, иначе список растёт без конца.
+  function stopLoopAudio() {
+    if (!engine.loopAudio) return;
+    try { engine.loopAudio.pause(); } catch (e) {}
+    if (window.AudioOutput) window.AudioOutput.unregister(engine.loopAudio, 'game');
+    forgetAudio(engine.loopAudio);
+    engine.loopAudio = null;
+  }
+
   function setLoop(key) {
+    // Пока идёт ролик, фон не поднимаем: иначе трек стартует под роликом и
+    // зазвучит на его последних кадрах.
+    if (engine.muted) { stopLoopAudio(); engine.loopKey = key; return; }
     if (key === engine.loopKey && engine.loopAudio) {
       if (!enabled(key)) {
-        try { engine.loopAudio.pause(); } catch (e) {}
-        if (window.AudioOutput) window.AudioOutput.unregister(engine.loopAudio, 'game');
-        engine.loopAudio = null;
+        stopLoopAudio();
       } else {
         updateLoopVolume();
       }
       return;
     }
     engine.loopKey = key;
-    if (engine.loopAudio) {
-      try { engine.loopAudio.pause(); } catch (e) {}
-      if (window.AudioOutput) window.AudioOutput.unregister(engine.loopAudio, 'game');
-      engine.loopAudio = null;
-    }
+    stopLoopAudio();
     if (!key || !enabled(key)) return;
     try {
       var a = makeAudio(key);
@@ -362,7 +391,14 @@
 
     if (s.global_mute !== undefined && !!s.global_mute !== engine.muted) {
       engine.muted = !!s.global_mute;
+      if (engine.muted) {
+        // Ролик начался — глушим сервер полностью: обрываем эффекты и
+        // останавливаем фон, а не просто уводим громкость в 0.
+        stopAllEffects();
+        stopLoopAudio();
+      }
       updateLoopVolume();
+      log('global mute ->', engine.muted);
     }
 
     var fresh = newEntries(engine.prevLog, s.log || []);
@@ -401,6 +437,10 @@
   // ── Разблокировка автоплея ──
   function onGesture() {
     if (audioCtx && audioCtx.state === 'suspended') { try { audioCtx.resume(); } catch (e) {} }
+    // Клик по кнопке «запустить ролик» — тоже жест. Без этой проверки
+    // обработчик увидит только что остановленный фон и немедленно вернёт его
+    // обратно, поверх ролика.
+    if (engine.muted) { engine.blocked = false; hideBanner(); return; }
     if (engine.blocked || !engine.loopAudio) {
       // Перезапустить актуальный loop и снять баннер.
       var want = engine.loopKey;
@@ -450,6 +490,7 @@
     getVolume: function () { return engine.masterVolume; },
     setMuted: function (m) {
       engine.muted = !!m;
+      if (engine.muted) { stopAllEffects(); stopLoopAudio(); }
       updateLoopVolume();
     },
     setDucking: function (enabled) {

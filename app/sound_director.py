@@ -152,6 +152,11 @@ def loop_for_state(state: dict) -> str | None:
 class SoundDirector:
     """Решает, что играть, по потоку снапшотов состояния."""
 
+    # Пока True, движок молчит независимо от снапшотов. Ставится напрямую из
+    # server.py в момент старта ролика: снапшот с этим флагом может прийти
+    # позже или не прийти вовсе (после game_over состояние не меняется).
+    force_mute = False
+
     def __init__(self):
         self.enabled = False          # серверный звук выключен по умолчанию
         self.master_volume = 0.8
@@ -174,13 +179,18 @@ class SoundDirector:
 
     # ── Проигрывание ───────────────────────────────────────────────────────
     def _gain_for(self, key: str) -> float:
-        if self.global_mute: return 0.0
+        if self.global_mute or self.force_mute: return 0.0
         return self.master_volume * sound_config.get_volume(key)
 
     def play(self, key: str, force: bool = False) -> bool:
         """Проиграть событие. force=1 — проверка из панели, играет даже если
         событие выключено (как preview в браузерном тракте)."""
         if not force and not self.enabled:
+            return False
+        if not force and (self.global_mute or self.force_mute):
+            # На время ролика (победа/поражение) сервер молчит полностью.
+            # Гасить громкостью мало: звук всё равно занимает голос микшера и
+            # «догорает» после ролика. Проще не начинать его вовсе.
             return False
         if not force and not sound_config.is_enabled(key):
             return False
@@ -192,7 +202,7 @@ class SoundDirector:
         return audio_engine.play(path, "game", self._gain_for(key), key)
 
     def _loop_gain(self, key: str) -> float:
-        if self.global_mute: return 0.0
+        if self.global_mute or self.force_mute: return 0.0
         base = self.master_volume * _LOOP_BASE * sound_config.get_volume(key)
         if self.ducking_enabled and time.monotonic() < self._ducked_until:
             base *= _DUCK_FACTOR
@@ -216,6 +226,13 @@ class SoundDirector:
     def set_loop(self, key: str | None):
         """Сменить фоновую музыку. Тот же ключ — только правим громкость,
         чтобы трек не начинался заново на каждом снапшоте."""
+        if self.global_mute or self.force_mute:
+            # Пока идёт ролик, фон не поднимаем: иначе трек стартует под
+            # роликом и зазвучит на его последних кадрах.
+            audio_engine.stop_key("game", _LOOP_VOICE)
+            self.loop_key = None
+            return
+
         if key and key == self.loop_key and sound_config.is_enabled(key):
             audio_engine.set_gain("game", _LOOP_VOICE, self._loop_gain(key))
             return
@@ -258,10 +275,18 @@ class SoundDirector:
         if not state or not self.enabled or not audio_engine.available():
             return
         with self._lock:
-            mute = state.get("global_mute", False)
+            # force_mute перебивает снапшот: пока ролик на экране, снятый до
+            # него снапшот не имеет права вернуть звук.
+            mute = bool(state.get("global_mute", False) or self.force_mute)
             if self.global_mute != mute:
                 self.global_mute = mute
-                if self.loop_key:
+                if mute:
+                    # Ролик начался: обрываем всё, что уже звучит. Единичные
+                    # эффекты (выстрел, смерть) длиннее одного снапшота, и без
+                    # явного stop они доиграют поверх ролика.
+                    audio_engine.stop_channel("game")
+                    self.loop_key = None
+                elif self.loop_key:
                     audio_engine.set_gain("game", _LOOP_VOICE, self._loop_gain(self.loop_key))
 
             phase = state.get("phase") or "no_game"

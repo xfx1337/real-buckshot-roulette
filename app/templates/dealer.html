@@ -879,6 +879,26 @@ input[type="checkbox"]{ accent-color:var(--green); cursor:crosshair; }
 #gameover-winner{ font-family:var(--font-mono); font-size:22px; letter-spacing:3px; color:var(--green-bright); text-shadow:0 0 16px var(--green); margin-bottom:20px; }
 #panel-gameover .btn-dealer{ max-width:340px; margin:0 auto; }
 
+/* Ручной запуск ролика итога. Намеренно крупнее «НОВОЙ ИГРЫ» и подсвечен —
+   оператор должен упереться в него взглядом до того, как начнёт новую игру. */
+.btn-result-clip{
+  display:block; width:100%; max-width:520px; margin:0 auto 18px;
+  padding:26px 24px; font-family:var(--font-display); font-weight:700;
+  font-size:24px; letter-spacing:4px; color:#1a0a0a; cursor:pointer;
+  background:linear-gradient(180deg,#ffd76a,#e8a020);
+  border:2px solid #ffe08a;
+  box-shadow:0 0 34px rgba(232,160,32,.55), inset 0 1px 0 rgba(255,255,255,.45);
+  animation:redPulse 1.6s infinite;
+}
+.btn-result-clip:hover{
+  filter:brightness(1.1); animation:none;
+  box-shadow:0 0 46px rgba(232,160,32,.8), inset 0 1px 0 rgba(255,255,255,.55);
+}
+.btn-result-clip:disabled{
+  background:#1a2018; color:#5a6a5c; border-color:#2a3a2c;
+  box-shadow:none; animation:none; cursor:default;
+}
+
 /* ── sidebar ── */
 .dealer-sidebar{ position:sticky; top:88px; display:flex; flex-direction:column; gap:18px; }
 @media(max-width:920px){ .dealer-sidebar{ position:static; } }
@@ -1260,6 +1280,10 @@ body{ cursor:default; }
             <div class="rd-simple">
                 <h2 id="gameover-title">ИГРА ОКОНЧЕНА</h2>
                 <p id="gameover-winner" class="rd-simple-winner"></p>
+                <!-- Ролик итога запускает оператор вручную: автозапуск по фазе
+                     срабатывал не всегда. Кнопку рисует renderGameOver(). -->
+                <button class="btn btn-result-clip" id="btn-result-clip" hidden
+                        onclick="playResultClip(this)"></button>
                 <button class="btn btn-dealer" onclick="createGame()">НОВАЯ ИГРА</button>
             </div>
         </div>
@@ -1344,6 +1368,52 @@ body{ cursor:default; }
                         </div>
 
                         <div class="tv-status" id="tv-status">статус: нет видео</div>
+                    </div>
+
+                    <!-- Текст с пульта на телевизор. Телевизор печатает его
+                         посимвольно, как терминал. -->
+                    <div class="rd-card">
+                        <h3>Сообщение на телевизор <span class="rd-tag">печатается посимвольно</span></h3>
+
+                        <h4 style="margin-top:0;">▸ ТЕКСТ</h4>
+                        <textarea id="tv-msg-text" rows="3" maxlength="600" placeholder="ЧТО НАПЕЧАТАТЬ НА ЭКРАНЕ..."
+                                  style="width:100%; font-family:var(--font-mono); font-size:14px; padding:10px;
+                                         background:rgba(0,0,0,.35); color:var(--green);
+                                         border:1px solid var(--text-dim); resize:vertical;"></textarea>
+                        <div style="display:flex; justify-content:space-between; font-size:11px; color:var(--text-dim); margin:4px 0 12px;">
+                            <span>Ctrl+Enter — отправить</span>
+                            <span><span id="tv-msg-count">0</span>/600</span>
+                        </div>
+
+                        <h4>▸ СКОРОСТЬ ПЕЧАТИ</h4>
+                        <div style="display:flex; align-items:center; gap:10px; margin-bottom:12px;">
+                            <input type="range" id="tv-msg-speed" min="10" max="200" value="45" step="5"
+                                   oninput="document.getElementById('tv-msg-speed-val').textContent = this.value + ' мс'"
+                                   style="flex:1;">
+                            <span id="tv-msg-speed-val" style="font-family:var(--font-mono); font-size:12px; color:var(--green); width:58px; text-align:right;">45 мс</span>
+                        </div>
+
+                        <div style="display:flex; flex-wrap:wrap; gap:14px; font-size:12px; margin-bottom:12px;">
+                            <label><input type="checkbox" id="tv-msg-beep" checked> звук печати</label>
+                            <label><input type="checkbox" id="tv-msg-over"> поверх видео/камер</label>
+                            <label style="display:flex; align-items:center; gap:6px;">
+                                убрать через
+                                <input type="number" id="tv-msg-hold" min="0" max="600" value="0" step="1"
+                                       style="width:60px; font-family:var(--font-mono); font-size:12px; padding:3px 5px;
+                                              background:rgba(0,0,0,.35); color:var(--green); border:1px solid var(--text-dim);">
+                                сек (0 — держать)
+                            </label>
+                        </div>
+
+                        <div class="tv-btns">
+                            <button class="btn btn-plate plate-teal" onclick="tvSendMessage()">⌨ НАПЕЧАТАТЬ НА TV</button>
+                            <button class="btn btn-plate plate-yellow" onclick="tvClearMessage()">✖ СТЕРЕТЬ</button>
+                        </div>
+
+                        <h4>▸ ЗАГОТОВКИ</h4>
+                        <div class="tv-btns" id="tv-msg-presets"></div>
+
+                        <div class="tv-status" id="tv-msg-status">сообщение не отправлено</div>
                     </div>
 
                     <div class="rd-card">
@@ -1610,7 +1680,7 @@ body{ cursor:default; }
 </div>
 </div>
 <script src="/static/audio_output.js?v=1"></script>
-<script src="/static/sound.js?v=4"></script>
+<script src="/static/sound.js?v=6"></script>
 <script>
 let ws;
 let gameState = null;
@@ -2409,20 +2479,51 @@ function renderGameOver(s) {
         document.getElementById('gameover-winner').textContent = '';
     }
 
-    // Auto-play end video for TV
-    if (tvConfigCache && tvConfigCache.config.auto_play.result_on_game_over) {
-        if (window._lastGameOverId !== s.game_id) {
-            window._lastGameOverId = s.game_id;
-            
-            const p1 = s.players.find(p => p.number === 1);
-            const playerWon = p1 && s.winner_name === p1.name;
-            
-            if (playerWon) {
-                tvPlaySlot('player_win');
-            } else {
-                tvPlaySlot('player_lose');
-            }
-        }
+    // Ролик итога — вручную. Автозапуск по фазе срабатывал ненадёжно (фаза
+    // game_over приходит не одним снапшотом, а конфиг TV мог быть ещё не
+    // загружен), поэтому решение остаётся за оператором.
+    const p1 = s.players.find(p => p.number === 1);
+    const playerWon = !!(p1 && s.winner_name === p1.name);
+    const slot = playerWon ? 'player_win' : 'player_lose';
+
+    const btn = document.getElementById('btn-result-clip');
+    if (!btn) return;
+
+    // Конфиг TV мог ещё не догрузиться — тогда кнопку показываем: пропустить
+    // ролик хуже, чем показать лишнюю кнопку.
+    const wantBtn = !tvConfigCache || tvConfigCache.config.auto_play.result_on_game_over;
+    btn.hidden = !wantBtn;
+    if (!wantBtn) return;
+    btn.dataset.slot = slot;
+
+    const label = playerWon ? '▶ РОЛИК: ПОБЕДА ИГРОКА' : '▶ РОЛИК: ПОРАЖЕНИЕ ИГРОКА';
+    if (s.tv_playing) {
+        // Ролик на экране — перезапуск с нуля оператору не нужен.
+        btn.disabled = true;
+        btn.textContent = '⏵ РОЛИК ИДЁТ…';
+    } else {
+        // Кончился (или ещё не запускался) — можно жать, в том числе повторно.
+        btn.disabled = false;
+        btn.textContent = label;
+    }
+}
+
+// Запуск ролика итога по кнопке. Блокируем сразу, не дожидаясь снапшота с
+// tv_playing: иначе второе нажатие успеет перезапустить видео с нуля.
+async function playResultClip(btn) {
+    const slot = btn.dataset.slot;
+    if (!slot || btn.disabled) return;
+    const label = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = '⏵ РОЛИК ИДЁТ…';
+    try {
+        await tvPlaySlot(slot);
+    } catch (e) {
+        // Не запустилось (нет файла в слоте, сервер недоступен) — возвращаем
+        // кнопку, иначе оператор останется без единственного способа повторить.
+        btn.disabled = false;
+        btn.textContent = label;
+        alert('Не удалось запустить ролик. Проверьте, что для слота выбран файл на вкладке TV.');
     }
 }
 
@@ -3222,7 +3323,7 @@ function renderTvConfig(data) {
     const autoLabels = {
         static_on_create: 'Помехи при создании игры',
         intro_after_static: 'Вступление после подтверждения помех',
-        result_on_game_over: 'Ролик победы/поражения в конце игры',
+        result_on_game_over: 'Кнопка «ролик победы/поражения» на экране конца игры',
         mute_game_sound: 'Глушить звуки игры во время видео',
     };
     autoEl.innerHTML = Object.entries(autoLabels).map(([key, label]) => {
@@ -3590,8 +3691,11 @@ async function tvPlaySlot(slot) {
     const forceLoop = document.getElementById('tv-slot-loop') ? document.getElementById('tv-slot-loop').checked : false;
     const configLoop = (tvConfigCache && tvConfigCache.config.loop && tvConfigCache.config.loop[slot]) || false;
     const shouldLoop = forceLoop || configLoop;
-    await fetch('/api/tv/play', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ slot, loop: shouldLoop }) });
+    // fetch не бросает на 4xx/5xx — проверяем сами, иначе вызывающий код
+    // считает неудачный запуск успешным (слот без файла отвечает 400).
+    const r = await fetch('/api/tv/play', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ slot, loop: shouldLoop }) });
     updateTvStatus();
+    if (!r.ok) throw new Error('tv/play ' + r.status);
 }
 
 async function tvPlayManual() {
@@ -3616,6 +3720,144 @@ async function tvStop() {
     await fetch('/api/tv/stop', { method: 'POST' });
     updateTvStatus();
 }
+
+// ── Сообщение на телевизор ──
+// Оператор набирает текст здесь, телевизор печатает его посимвольно.
+// Заготовки живут в localStorage этого браузера: они у каждого ведущего свои
+// и в общий video_config.json не просятся.
+const TV_MSG_PRESETS_KEY = 'tvMsgPresets';
+const TV_MSG_DEFAULT_PRESETS = [
+    'ДОБРО ПОЖАЛОВАТЬ',
+    'ПРАВИЛА ПРОСТЫЕ. ПРОИГРАВШИХ НЕ БУДЕТ.',
+    'ПОСЛЕДНИЙ ШАНС ОТКАЗАТЬСЯ.',
+];
+
+// Текст заготовки набирает оператор, а на кнопку он попадает через innerHTML —
+// экранируем, иначе символы вроде < ломают разметку панели.
+function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, c => ({
+        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+    })[c]);
+}
+
+function tvMsgSetStatus(text, cls) {
+    const el = document.getElementById('tv-msg-status');
+    if (!el) return;
+    el.textContent = text;
+    el.className = 'tv-status' + (cls ? ' ' + cls : '');
+}
+
+async function tvSendMessage(preset) {
+    const box = document.getElementById('tv-msg-text');
+    const text = (preset !== undefined ? preset : box.value).trim();
+    if (!text) {
+        tvMsgSetStatus('пустой текст — нечего печатать');
+        return;
+    }
+    const body = {
+        text,
+        speed: parseInt(document.getElementById('tv-msg-speed').value, 10) || 45,
+        beep: document.getElementById('tv-msg-beep').checked,
+        over_video: document.getElementById('tv-msg-over').checked,
+        hold: parseFloat(document.getElementById('tv-msg-hold').value) || 0,
+    };
+    try {
+        const r = await fetch('/api/tv/message', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(body),
+        });
+        const j = await r.json();
+        if (j.ok) {
+            // Сколько телевизор будет печатать: оператору важно понимать,
+            // когда текст дойдёт до конца, прежде чем слать следующий.
+            const secs = Math.ceil(text.length * body.speed / 1000);
+            tvMsgSetStatus('печатает: «' + text.slice(0, 40) + (text.length > 40 ? '…' : '') + '» (~' + secs + ' с)');
+        } else {
+            tvMsgSetStatus('ошибка: ' + (j.error || 'не отправлено'));
+        }
+    } catch (e) {
+        tvMsgSetStatus('ошибка связи с сервером');
+    }
+}
+
+async function tvClearMessage() {
+    try {
+        await fetch('/api/tv/message/clear', { method: 'POST' });
+        tvMsgSetStatus('экран очищен');
+    } catch (e) {
+        tvMsgSetStatus('ошибка связи с сервером');
+    }
+}
+
+function tvMsgLoadPresets() {
+    try {
+        const raw = localStorage.getItem(TV_MSG_PRESETS_KEY);
+        if (raw) {
+            const arr = JSON.parse(raw);
+            if (Array.isArray(arr)) return arr;
+        }
+    } catch (e) {}
+    return TV_MSG_DEFAULT_PRESETS.slice();
+}
+
+function tvMsgSavePresets(list) {
+    try { localStorage.setItem(TV_MSG_PRESETS_KEY, JSON.stringify(list)); } catch (e) {}
+}
+
+function tvMsgRenderPresets() {
+    const box = document.getElementById('tv-msg-presets');
+    if (!box) return;
+    const list = tvMsgLoadPresets();
+    box.innerHTML = list.map((t, i) =>
+        `<span style="display:inline-flex; align-items:stretch; margin:0 6px 6px 0;">
+            <button class="btn btn-plate" style="padding:8px 12px; font-size:12px;"
+                    onclick="tvSendMessage(tvMsgLoadPresets()[${i}])"
+                    title="Отправить на телевизор">${escapeHtml(t.slice(0, 30))}${t.length > 30 ? '…' : ''}</button>
+            <button class="btn btn-plate" style="padding:8px 9px; font-size:12px;"
+                    onclick="tvMsgDeletePreset(${i})" title="Удалить заготовку">✖</button>
+        </span>`
+    ).join('') +
+    `<button class="btn btn-plate plate-teal" style="padding:8px 12px; font-size:12px;"
+             onclick="tvMsgAddPreset()" title="Сохранить текст из поля как заготовку">+ ИЗ ПОЛЯ</button>`;
+}
+
+function tvMsgAddPreset() {
+    const text = document.getElementById('tv-msg-text').value.trim();
+    if (!text) { tvMsgSetStatus('поле пустое — нечего сохранять'); return; }
+    const list = tvMsgLoadPresets();
+    if (!list.includes(text)) list.push(text);
+    tvMsgSavePresets(list);
+    tvMsgRenderPresets();
+    tvMsgSetStatus('заготовка сохранена');
+}
+
+function tvMsgDeletePreset(i) {
+    const list = tvMsgLoadPresets();
+    list.splice(i, 1);
+    tvMsgSavePresets(list);
+    tvMsgRenderPresets();
+}
+
+// Ctrl+Enter шлёт текст, не выходя из поля: во время игры оператор печатает
+// вслепую и до кнопки мышью не тянется.
+(function tvMsgInit() {
+    function bind() {
+        const box = document.getElementById('tv-msg-text');
+        if (!box) return;
+        const counter = document.getElementById('tv-msg-count');
+        box.addEventListener('input', () => { if (counter) counter.textContent = box.value.length; });
+        box.addEventListener('keydown', (e) => {
+            if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+                e.preventDefault();
+                tvSendMessage();
+            }
+        });
+        tvMsgRenderPresets();
+    }
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', bind);
+    else bind();
+})();
 
 let cctvActive = false;
 // Repaint the CCTV toggle from `cctvActive` — also called after pushing a

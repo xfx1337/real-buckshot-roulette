@@ -236,6 +236,113 @@
         .cam-diag-ok   { color: #8effb0; }
         .cam-diag-bad  { color: #ff8a7a; }
 
+        /* ── Сообщение оператора ───────────────────────────────────────────
+           Текст, который оператор печатает с пульта и шлёт на телевизор.
+           Экран — кинескоп 800×600: тонкие линии, малый кегль и низкий
+           контраст на нём не читаются вообще, поэтому здесь всё наоборот —
+           глухая чёрная подложка вместо прозрачности, крупный моноширинный
+           кегль в vmin, жирное начертание и тёмная обводка по контуру букв.
+           Свечение специально слабое: сильный blur на ЭЛТ замыливает штрихи.
+
+           Слой выше видео (100), CCTV (90) и UI-шума (9000) — сообщение
+           оператора всегда важнее того, что под ним, и не должно тонуть в
+           зерне. Ниже панели диагностики (9500). */
+        #tv-message {
+            display: none;
+            /* Ниже слоёв зерна и строчек (9000/9001), но выше видео (100),
+               камер (90) и реактивных эффектов (8900): текст должен лежать
+               ПОД кинескопным шумом, как надпись «ожидание игры», а не поверх
+               него — иначе он выглядит наклейкой на экране, а не свечением
+               люминофора. */
+            position: fixed; inset: 0; z-index: 8950;
+            /* Фон не закрашиваем: под сообщением остаётся тот же зеленоватый
+               кинескоп с зерном и строчками, что и на экране ожидания игры.
+               Глухая чёрная плашка выбивалась бы из остального интерфейса. */
+            background: radial-gradient(120% 110% at 50% 40%, #0a1a0d 0%, #060d07 55%, #020402 100%);
+            /* Отступы с запасом: кинескоп режет края кадра оверсканом, и текст,
+               прижатый к краю, на реальном телевизоре просто не влезет. */
+            padding: 9vmin 10vmin;
+            align-items: center; justify-content: center;
+            pointer-events: none;
+        }
+        #tv-message.active { display: flex; }
+        /* Режим «поверх видео/камер»: фон не рисуем вовсе, только притемняем,
+           чтобы буквы не терялись в светлых кадрах. */
+        #tv-message.overlay { background: rgba(0, 0, 0, .55); }
+
+        /* Начертание — как у надписи «ожидание игры»: обычный вес, широкий
+           разряд, мягкое свечение люминофора. Жирный шрифт с чёрной обводкой
+           на кинескопе выглядит инородно и мажет штрихи. */
+        #tv-message-text {
+            font-family: var(--font-mono);
+            /* Кегль ставит JS в --msg-size по длине текста: короткая фраза
+               занимает весь экран, длинная ужимается, но не ниже 4.6vmin —
+               мельче на кинескопе уже не прочитать. */
+            font-size: var(--msg-size, 8vmin);
+            line-height: 1.5;
+            letter-spacing: .18em;
+            font-weight: 400;
+            color: var(--green);
+            text-shadow: 0 0 var(--glow, 6px) var(--green);
+            text-align: center;
+            max-width: 100%;
+            white-space: pre-wrap;
+            word-break: break-word;
+        }
+        /* Курсор — подчёркивание, как в «ожидание игры_», и мигает тем же
+           terminalBlink, что и остальные терминальные надписи. */
+        #tv-message-cursor {
+            animation: terminalBlink 1s step-end infinite;
+        }
+
+        /* ── Подсказки в паузах ──
+           Плашка внизу экрана на время ожидания (подключение, лобби, смена
+           раунда, зарядка дробовика) — как loading-screen tips в играх.
+           Ниже видео (100), CCTV (90) и сообщения оператора (9200): подсказка
+           фоновая, любой из этих слоёв её перекрывает. */
+        #tv-tip {
+            display: none;
+            position: fixed;
+            left: 0; right: 0;
+            /* Оверскан кинескопа съедает нижний край — держим отступ. */
+            bottom: 7vmin;
+            z-index: 60;
+            padding: 0 9vmin;
+            pointer-events: none;
+        }
+        #tv-tip.active { display: block; }
+
+        #tv-tip-inner {
+            max-width: 84vw;
+            margin: 0 auto;
+            text-align: center;
+            font-family: var(--font-mono);
+            /* На 800×600 3.2vmin ≈ 19px — нижняя граница читаемости на ЭЛТ
+               для второстепенного текста. */
+            font-size: 3.2vmin;
+            line-height: 1.5;
+            letter-spacing: .04em;
+            color: #7fdc97;
+            text-shadow:
+                 1px 0 0 #000, -1px 0 0 #000, 0 1px 0 #000, 0 -1px 0 #000,
+                 0 0 5px rgba(120, 255, 160, .3);
+            /* Смена подсказки — через прозрачность, без сдвига текста. */
+            opacity: 0;
+            transition: opacity .6s linear;
+        }
+        #tv-tip-inner.visible { opacity: 1; }
+
+        /* Шапка «СОГЛАШЕНИЕ / П. …» — приглушена, чтобы не спорить с самой
+           подсказкой, но задаёт рамку «это не подсказка игры, это документ». */
+        #tv-tip-label {
+            display: block;
+            font-size: 2.3vmin;
+            letter-spacing: .28em;
+            color: #3c7a4c;
+            margin-bottom: .9vmin;
+            text-shadow: none;
+        }
+
         /* Послесвечение люминофора: слабый след за уходящей картинкой. */
         body.fx-afterglow #player-app {
             /* Значение силы приходит из --glow (0..1). */
@@ -290,6 +397,19 @@
     <!-- Video overlay -->
     <div id="tv-video-overlay">
         <video id="tv-video" playsinline></video>
+    </div>
+
+    <!-- Сообщение оператора (печатается посимвольно) -->
+    <div id="tv-message">
+        <div id="tv-message-text"><span id="tv-message-body"></span><span id="tv-message-cursor">_</span></div>
+    </div>
+
+    <!-- Подсказка в паузах между раундами -->
+    <div id="tv-tip">
+        <div id="tv-tip-inner">
+            <span id="tv-tip-label">ПОЛЬЗОВАТЕЛЬСКОЕ СОГЛАШЕНИЕ</span>
+            <span id="tv-tip-text"></span>
+        </div>
     </div>
 
     <!-- TV WebSocket connection indicator -->
@@ -483,10 +603,14 @@
                 playVideoOnSelectedSink();
                 break;
             case 'stop':
+                // Оверлей снимаем до pause(): обработчик 'pause' держит звук
+                // выключенным, пока ролик на экране, и иначе не разглушит.
+                videoOverlay.classList.remove('active');
                 videoEl.pause();
                 videoEl.removeAttribute('src');
                 videoEl.load();
-                videoOverlay.classList.remove('active');
+                tvMutesGameSound = false;
+                if (window.SoundEngine) window.SoundEngine.setMuted(false);
                 break;
             case 'set_volume':
                 if (cmd.volume !== undefined) {
@@ -517,7 +641,120 @@
                 // New auto-cycle / camera / fake-error settings pushed from dealer.
                 cctvSetConfig(cmd.cctv || {});
                 break;
+            case 'message':
+                // Текст с пульта оператора. instant — телевизор переподключился
+                // к уже висящему сообщению, дорисовываем его целиком без печати.
+                tvShowMessage(cmd);
+                break;
+            case 'message_clear':
+                tvHideMessage();
+                break;
         }
+    }
+
+    // ── Сообщение оператора: печать посимвольно ──
+    // Оператор набирает текст на пульте, телевизор «печатает» его как терминал.
+    // Печать идёт по таймеру на символ; служебные символы (пробел, перевод
+    // строки) не щёлкают — так звук ближе к настоящей машинке.
+    const msgOverlay = document.getElementById('tv-message');
+    const msgBody = document.getElementById('tv-message-body');
+    let msgTypeTimer = null;
+    let msgHoldTimer = null;
+    let msgClickCtx = null;
+
+    // Щелчок клавиши синтезируем на месте: короткий шумовой импульс. Отдельный
+    // звуковой файл под это не нужен, а на слабом телевизоре WebAudio-импульс
+    // дешевле, чем создание нового Audio на каждый символ.
+    function msgClick() {
+        if (!msgTypeSound || !cctvAudioUnlocked) return;
+        try {
+            const AC = window.AudioContext || window.webkitAudioContext;
+            if (!AC) return;
+            if (!msgClickCtx) msgClickCtx = new AC();
+            if (msgClickCtx.state === 'suspended') msgClickCtx.resume();
+            const ctx = msgClickCtx;
+            const dur = 0.03;
+            const buf = ctx.createBuffer(1, Math.ceil(ctx.sampleRate * dur), ctx.sampleRate);
+            const data = buf.getChannelData(0);
+            for (let i = 0; i < data.length; i++) {
+                // Затухающий шум — сухой «клац», без звона.
+                data[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / data.length, 3);
+            }
+            const src = ctx.createBufferSource();
+            src.buffer = buf;
+            const hp = ctx.createBiquadFilter();
+            hp.type = 'highpass';
+            hp.frequency.value = 1400;
+            const gain = ctx.createGain();
+            gain.gain.value = 0.22;
+            src.connect(hp).connect(gain).connect(ctx.destination);
+            src.start();
+        } catch (e) { /* звук печати необязателен — молча пропускаем */ }
+    }
+
+    let msgTypeSound = true;
+
+    // Кегль под длину текста. Считаем по итоговой строке, а не по уже
+    // напечатанной части, иначе буквы прыгали бы в размере во время печати.
+    // Нижняя граница жёсткая: на кинескопе 800×600 мельче 4.6vmin (≈28px)
+    // текст с дивана уже не читается, лучше обрезать сообщение по длине.
+    function msgFontSize(text) {
+        const n = text.length;
+        if (n <= 20) return 8.5;
+        if (n <= 45) return 7;
+        if (n <= 90) return 5.8;
+        if (n <= 160) return 5;
+        return 4.6;
+    }
+
+    function tvShowMessage(cmd) {
+        clearTimeout(msgTypeTimer);
+        clearTimeout(msgHoldTimer);
+        const text = String(cmd.text || '');
+        const speed = Math.max(5, Math.min(400, Number(cmd.speed) || 45));
+        msgTypeSound = cmd.beep !== false;
+        msgOverlay.style.setProperty('--msg-size', msgFontSize(text) + 'vmin');
+
+        msgOverlay.classList.add('active');
+        msgOverlay.classList.remove('done');
+        // Пока не решено иначе — сообщение перекрывает всё глухим чёрным.
+        // Поверх картинки показываем полупрозрачно, но с плотной плашкой.
+        msgOverlay.classList.toggle('overlay', !!cmd.over_video);
+        msgBody.textContent = '';
+
+        const finish = () => {
+            msgOverlay.classList.add('done');
+            const hold = Number(cmd.hold) || 0;
+            if (hold > 0) msgHoldTimer = setTimeout(tvHideMessage, hold * 1000);
+        };
+
+        if (cmd.instant) {
+            msgBody.textContent = text;
+            finish();
+            return;
+        }
+
+        let i = 0;
+        const step = () => {
+            if (i >= text.length) { finish(); return; }
+            const ch = text[i++];
+            msgBody.textContent += ch;
+            if (ch.trim()) msgClick();
+            // Пауза после точки/запятой — печать звучит живее ровного тика.
+            let wait = speed;
+            if ('.!?'.includes(ch)) wait = speed * 7;
+            else if (',;:'.includes(ch)) wait = speed * 3;
+            else if (ch === '\n') wait = speed * 5;
+            msgTypeTimer = setTimeout(step, wait);
+        };
+        step();
+    }
+
+    function tvHideMessage() {
+        clearTimeout(msgTypeTimer);
+        clearTimeout(msgHoldTimer);
+        msgOverlay.classList.remove('active', 'done', 'overlay');
+        msgBody.textContent = '';
     }
 
     // Notify server when video ends, and manage game sound muting
@@ -526,6 +763,9 @@
     });
     
     videoEl.addEventListener('pause', () => {
+        // Пауза посреди ролика — не конец ролика. Пока оверлей на экране,
+        // звук игры остаётся выключенным, иначе музыка вернётся под стоп-кадр.
+        if (videoOverlay.classList.contains('active') && !videoEl.ended) return;
         if (window.SoundEngine) window.SoundEngine.setMuted(false);
     });
 
@@ -1122,6 +1362,82 @@
 
     connectTV();
 
+    // ── Подсказки в паузах ──
+    // Пока идёт ожидание (подключение, лобби, смена раунда, зарядка), внизу
+    // экрана крутятся выдержки из «Соглашения». Меняются раз в TIP_PERIOD;
+    // порядок — перемешанная очередь, так что повтор возможен только после
+    // того, как показаны все остальные.
+    const TIPS = [
+        'Вследствие невыполнения ▓▓▓▓▓▓▓▓▓▓ Компания имеет право взыскать с вас ▓▓▓▓▓▓▓▓▓▓ в полном объёме и без предварительного уведомления.',
+        'Напоминаем: выстрел в себя — это тоже ход.',
+        'Статистика предыдущих Участников не разглашается и не комментируется.',
+        'Дилер гарантирует честную игру, равные шансы и полное отсутствие гарантий по всем трём пунктам.',
+        'Просьба воздержаться от вопросов «за что?». Данный вопрос отнесён Соглашением к Претензиям.',
+        'Заведение напоминает: возврат не производится.',
+        'Компания благодарит вас за спокойствие. Оно облегчает работу всем.',
+        'Медицинская помощь оказывается по усмотрению Дилера.',
+        'Пункт 5 прочитан вами полностью. Вы подтвердили это.',
+        'В случае наступления исхода, не предусмотренного вашими планами на вечер, действие Соглашения не приостанавливается.',
+    ];
+    const TIP_PERIOD = 9000;   // сколько висит одна подсказка
+    const TIP_FADE = 600;      // должно совпадать с transition у #tv-tip-inner
+
+    const tipBox = document.getElementById('tv-tip');
+    const tipInner = document.getElementById('tv-tip-inner');
+    const tipText = document.getElementById('tv-tip-text');
+    let tipQueue = [];
+    let tipTimer = null;
+    let tipFadeTimer = null;
+    let tipShown = false;
+
+    function tipNext() {
+        if (!tipQueue.length) {
+            // Перемешиваем заново. Если первый элемент новой очереди совпал с
+            // только что показанным, сдвигаем его — чтобы на стыке очередей
+            // одна и та же строка не висела два периода подряд.
+            tipQueue = TIPS.slice();
+            for (let i = tipQueue.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [tipQueue[i], tipQueue[j]] = [tipQueue[j], tipQueue[i]];
+            }
+            if (tipQueue.length > 1 && tipQueue[0] === tipText.textContent) {
+                tipQueue.push(tipQueue.shift());
+            }
+        }
+        return tipQueue.shift();
+    }
+
+    function tipCycle(first) {
+        clearTimeout(tipFadeTimer);
+        if (first) {
+            tipText.textContent = tipNext();
+            tipInner.classList.add('visible');
+        } else {
+            tipInner.classList.remove('visible');
+            tipFadeTimer = setTimeout(() => {
+                tipText.textContent = tipNext();
+                tipInner.classList.add('visible');
+            }, TIP_FADE);
+        }
+        tipTimer = setTimeout(() => tipCycle(false), TIP_PERIOD);
+    }
+
+    function tipShow() {
+        if (tipShown) return;
+        tipShown = true;
+        tipBox.classList.add('active');
+        tipCycle(true);
+    }
+
+    function tipHide() {
+        if (!tipShown) return;
+        tipShown = false;
+        clearTimeout(tipTimer);
+        clearTimeout(tipFadeTimer);
+        tipBox.classList.remove('active');
+        tipInner.classList.remove('visible');
+    }
+
     // ── Player Game WebSocket ──
     const playerId = document.getElementById('player-app').dataset.playerId;
     let ws;
@@ -1135,6 +1451,8 @@
         ws.onopen = () => {
             clearTimeout(showConnectingTimer);
             document.getElementById('connecting').style.display = 'none';
+            // Дальше подсказку включает/выключает updateUI по фазе.
+            tipHide();
             clearTimeout(reconnectTimer);
             ws.pingInterval = setInterval(() => {
                 if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ping: 1}));
@@ -1150,6 +1468,7 @@
             clearInterval(ws.pingInterval);
             showConnectingTimer = setTimeout(() => {
                 document.getElementById('connecting').style.display = 'flex';
+                tipShow();
             }, 3000);
             reconnectTimer = setTimeout(connect, 2000);
         };
@@ -1159,14 +1478,26 @@
     let roundOverTimeout = null;
     let showingRoundOverScreen = false;
 
+    // Фазы, в которых на экране висит «ожидание» и есть место под подсказку.
+    // round_over — отдельно: там сначала 5 c анимации индикаторов раунда,
+    // подсказку включаем только когда экран уже показан.
+    const TIP_PHASES = ['lobby', 'dealer_loading', 'dealer_reloading'];
+
     function updateUI(data) {
         if (data.error) {
             const screens = ['state-game', 'state-dead', 'state-gameover', 'state-roundover', 'state-loading'];
             screens.forEach(s => document.getElementById(s).style.display = 'none');
             document.getElementById('state-lobby').style.display = 'flex';
             document.getElementById('lobby-status').textContent = 'СЕАНС ЗАВЕРШЁН (ИГРОК НЕ НАЙДЕН)';
+            tipHide();
             return;
         }
+
+        // Единственная точка, где подсказка включается/гасится по фазе.
+        // round_over исключён: в этой фазе её включает таймер ниже, когда
+        // экран смены раунда уже показан, а гасит — первая же следующая фаза.
+        if (TIP_PHASES.includes(data.phase)) tipShow();
+        else if (data.phase !== 'round_over') tipHide();
 
         // Реакция ЭЛТ на изменения состояния (выстрел, потеря HP, смерть).
         fxOnState(data);
@@ -1214,7 +1545,8 @@
                     const screens = ['state-lobby', 'state-game', 'state-dead', 'state-gameover', 'state-roundover', 'state-loading'];
                     screens.forEach(s => document.getElementById(s).style.display = 'none');
                     document.getElementById('state-roundover').style.display = 'flex';
-                    
+                    tipShow();
+
                     const container = document.getElementById('round-indicators');
                     const msg = document.getElementById('roundover-msg');
                     const ROMAN = ["I", "II", "III", "IV", "V", "VI", "VII"];
