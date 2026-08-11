@@ -113,9 +113,10 @@ echo "────────────────────────�
 
 # Порт хоста для проброса берём из config.json (server.port). Внутри контейнера
 # сервер всегда слушает 8000; наружу отдаём на этот порт (см. docker-compose.yml).
-SERVER_PORT="$(grep -oE '"port"[[:space:]]*:[[:space:]]*[0-9]+' "$ROOT_DIR/config.json" \
-                 | grep -oE '[0-9]+' | head -1)"
-[[ -z "$SERVER_PORT" ]] && SERVER_PORT=8000
+# SERVER_PORT="$(grep -oE '"port"[[:space:]]*:[[:space:]]*[0-9]+' "$ROOT_DIR/config.json" \
+#                  | grep -oE '[0-9]+' | head -1)"
+# [[ -z "$SERVER_PORT" ]] && SERVER_PORT=8000
+SERVER_PORT=8000
 export SERVER_PORT
 
 # LAN-IP хоста: и для ссылки в выводе, и для проброса в контейнер (мастер /setup

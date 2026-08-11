@@ -31,6 +31,19 @@
             pointer-events: none;
         }
         .click-overlay { position: absolute; inset: 0; z-index: 4; cursor: pointer; }
+        /* Виден ли этот поток игроку. Дилеру нужно различать сразу: на самой
+           плитке, а не в отдельной вкладке настроек. */
+        .cam-vis {
+            position: absolute; top: 8px; right: 8px; z-index: 5;
+            background: rgba(0,0,0,.75); padding: 3px 7px;
+            font-size: 11px; letter-spacing: 1px; border: 1px solid;
+            pointer-events: none;
+        }
+        .cam-vis[data-vis="normal"] { display: none; }
+        .cam-vis[data-vis="rare"] { color: #e5bc3e; border-color: #e5bc3e; }
+        .cam-vis[data-vis="blocked"] { color: #ff5a3a; border-color: #ff5a3a; }
+        .cam-cell[data-vis="blocked"] { border-color: #ff5a3a; }
+        .cam-cell[data-vis="rare"] { border-color: #e5bc3e; }
         /* Fullscreen one camera */
         #cams-grid.fullscreen { grid-template-columns: 1fr !important; grid-template-rows: 1fr !important; }
         #cams-grid.fullscreen .cam-cell { display: none; }
@@ -41,6 +54,9 @@
             padding: 4px 10px; font-family: inherit; cursor: pointer; font-size: 12px;
         }
         #cams-grid.fullscreen .cam-cell.active .exit-full { display: block; }
+        /* В полноэкранном режиме правый верхний угол занимает кнопка выхода —
+           уводим бейдж видимости под неё, иначе они наезжают друг на друга. */
+        #cams-grid.fullscreen .cam-cell.active .cam-vis { top: 40px; }
     </style>
 </head>
 <body>
@@ -66,8 +82,9 @@
         function render() {
             layout(CAMERAS.length);
             grid.innerHTML = CAMERAS.map(cam => `
-                <div class="cam-cell" data-cam="${cam}">
+                <div class="cam-cell" data-cam="${cam}" data-vis="normal">
                     <div class="cam-label">${cam.toUpperCase()} <span data-stat="${cam}">…</span></div>
+                    <div class="cam-vis" data-vis="normal" data-vis-for="${cam}"></div>
                     <button class="exit-full" data-exit>✕ НАЗАД</button>
                     <div class="click-overlay"></div>
                     <iframe scrolling="no" src="http://${host}:8889/${encodeURIComponent(cam)}/"></iframe>
@@ -98,7 +115,20 @@
             try {
                 const r = await fetch('/api/cctv/status');
                 const d = await r.json();
+                const rareChance = d.rare_chance ?? 10;
                 (d.cameras || []).forEach(c => {
+                    // Бейдж видимости для игрока — рисуем до статуса потока,
+                    // чтобы он появлялся даже у мёртвой камеры.
+                    const vis = c.visibility || 'normal';
+                    const badge = grid.querySelector(`[data-vis-for="${CSS.escape(c.name)}"]`);
+                    if (badge) {
+                        badge.dataset.vis = vis;
+                        badge.textContent = vis === 'blocked'
+                            ? '⛔ СКРЫТА ОТ ИГРОКА'
+                            : (vis === 'rare' ? `⚠ РЕДКАЯ ~${rareChance}%` : '');
+                        badge.closest('.cam-cell').dataset.vis = vis;
+                    }
+
                     const el = grid.querySelector(`[data-stat="${CSS.escape(c.name)}"]`);
                     if (!el) return;
                     const parts = [];

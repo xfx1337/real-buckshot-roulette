@@ -1,0 +1,759 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Телефоны — VoIP</title>
+    <link rel="stylesheet" href="/static/style.css">
+    <style>
+        /* Панель телефонов: цепочка сверху, трубки сеткой, лог снизу.
+           Смысл страницы — с одного взгляда понять, какое звено оборвалось,
+           поэтому статусы крупные и цветные, а не строчкой мелкого текста. */
+        body { padding: 16px 20px 40px; }
+
+        .voip-head {
+            display: flex; align-items: baseline; gap: 16px;
+            margin-bottom: 14px; flex-wrap: wrap;
+        }
+        .voip-head h1 {
+            font-family: var(--font-mono); color: var(--green);
+            font-size: 1.2rem; letter-spacing: 2px; text-transform: uppercase;
+        }
+        .voip-head .sub { color: var(--text-dim); font-size: 0.8rem; }
+        .voip-head .spacer { margin-left: auto; }
+
+        /* ── Цепочка связи ─────────────────────────────────────────── */
+        .chain {
+            display: grid; gap: 8px; margin-bottom: 16px;
+            grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+        }
+        .link {
+            border: 1px solid var(--border-light); background: var(--bg-panel);
+            padding: 10px 12px; position: relative;
+        }
+        .link .name {
+            font-size: 0.7rem; letter-spacing: 2px; text-transform: uppercase;
+            color: var(--text-dim);
+        }
+        .link .value {
+            font-size: 1rem; margin-top: 4px; color: var(--text-bright);
+            word-break: break-word;
+        }
+        .link .detail {
+            font-size: 0.7rem; margin-top: 4px; color: var(--text-dim);
+            word-break: break-word;
+        }
+        .link .detail code {
+            color: var(--amber-bright); font-size: 0.7rem;
+            user-select: all; cursor: text;
+        }
+        .link .dot {
+            position: absolute; top: 10px; right: 10px;
+            width: 10px; height: 10px; border-radius: 50%;
+            background: var(--text-dark);
+        }
+        .link.ok { border-color: var(--green-dim); }
+        .link.ok .dot { background: var(--green); box-shadow: 0 0 8px var(--green-glow); }
+        .link.ok .value { color: var(--green); }
+        .link.bad { border-color: var(--red); }
+        .link.bad .dot { background: var(--red-bright); }
+        .link.bad .value { color: var(--red-bright); }
+        .link.warn { border-color: var(--amber); }
+        .link.warn .dot { background: var(--amber-bright); }
+        .link.warn .value { color: var(--amber-bright); }
+        /* Пока не пришёл первый ответ — не врать ни зелёным, ни красным. */
+        .link.unknown .value { color: var(--text-dim); }
+
+        /* ── Трубки ────────────────────────────────────────────────── */
+        .phones {
+            display: grid; gap: 10px; margin-bottom: 18px;
+            grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+        }
+        .phone {
+            border: 1px solid var(--border-light); background: var(--bg-panel);
+            padding: 12px; display: flex; flex-direction: column; gap: 8px;
+        }
+        .phone.idle { border-color: var(--green-dim); }
+        .phone.busy { border-color: var(--amber); background: var(--bg-elevated); }
+        .phone.ringing { border-color: var(--amber-bright); animation: ring 1s steps(2) infinite; }
+        .phone.offline { border-color: var(--border); opacity: 0.75; }
+        @keyframes ring { 50% { border-color: var(--border-light); } }
+
+        .phone .row { display: flex; align-items: baseline; gap: 8px; }
+        .phone .exten {
+            font-size: 1.5rem; color: var(--text-bright); letter-spacing: 2px;
+        }
+        .phone .slot {
+            font-size: 0.75rem; color: var(--text-dim); letter-spacing: 1px;
+        }
+        .phone .state {
+            margin-left: auto; font-size: 0.7rem; letter-spacing: 1px;
+            text-transform: uppercase; padding: 2px 7px;
+            border: 1px solid var(--border-light); color: var(--text-dim);
+        }
+        .phone.idle .state { color: var(--green); border-color: var(--green-dim); }
+        .phone.busy .state, .phone.ringing .state {
+            color: var(--amber-bright); border-color: var(--amber);
+        }
+        .phone.offline .state { color: var(--red-bright); border-color: var(--red); }
+
+        .phone .meta {
+            font-size: 0.7rem; color: var(--text-dim); min-height: 1em;
+            word-break: break-all;
+        }
+        .phone .warn-note { font-size: 0.7rem; color: var(--amber-bright); }
+        .phone .actions { display: flex; gap: 6px; flex-wrap: wrap; }
+        .phone .actions .btn { flex: 1 1 auto; }
+        /* Последние цифры, набранные на этой трубке: они нужны прямо на
+           плитке, иначе дилер ищет их в общем логе во время игры. */
+        .phone .digits {
+            font-family: var(--font-mono); font-size: 1.1rem; letter-spacing: 4px;
+            color: var(--amber-bright); min-height: 1.3em;
+        }
+
+        /* ── Общие блоки ───────────────────────────────────────────── */
+        .section {
+            border: 1px solid var(--border); background: var(--bg-panel);
+            margin-bottom: 16px;
+        }
+        .section > h2 {
+            font-size: 0.75rem; letter-spacing: 2px; text-transform: uppercase;
+            color: var(--text-dim); padding: 9px 12px;
+            border-bottom: 1px solid var(--border);
+            display: flex; align-items: center; gap: 10px;
+        }
+        .section > h2 .spacer { margin-left: auto; }
+        .section .body { padding: 12px; }
+
+        .log {
+            font-family: var(--font-mono); font-size: 0.8rem;
+            max-height: 260px; overflow-y: auto; padding: 10px 12px;
+            background: var(--bg-input);
+        }
+        .log .line { display: flex; gap: 8px; padding: 1px 0; }
+        .log .t { color: var(--text-dark); flex: 0 0 auto; }
+        .log .who { color: var(--green); flex: 0 0 auto; }
+        .log .what { color: var(--text); }
+        .log .line.digit .what { color: var(--amber-bright); }
+        .log .line.err .what { color: var(--red-bright); }
+
+        pre.cli-out {
+            font-family: var(--font-mono); font-size: 0.75rem;
+            background: var(--bg-input); color: var(--text);
+            padding: 10px 12px; margin: 0; max-height: 340px;
+            overflow: auto; white-space: pre;
+        }
+        .cli-buttons { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 10px; }
+
+        select, .target-select {
+            background: var(--bg-input); color: var(--text-bright);
+            border: 1px solid var(--border-light); font-family: var(--font-mono);
+            font-size: 0.75rem; padding: 5px 7px;
+        }
+        .toast {
+            position: fixed; bottom: 16px; right: 16px; z-index: 50;
+            background: var(--bg-elevated); border: 1px solid var(--border-light);
+            color: var(--text-bright); padding: 9px 14px; font-size: 0.8rem;
+            max-width: 60vw; display: none;
+        }
+        .toast.err { border-color: var(--red); color: var(--red-bright); }
+    </style>
+</head>
+<body class="crt-bg">
+    <div class="voip-head">
+        <h1>Телефоны</h1>
+        <span class="sub">Asterisk → AddPac AP1100F → трубки</span>
+        <span class="spacer"></span>
+        <label class="sub">
+            <input type="checkbox" id="poll-gateway" checked>
+            опрашивать шлюз (telnet)
+        </label>
+        <button class="btn btn-secondary btn-small" id="refresh">Обновить</button>
+        <a class="btn btn-secondary btn-small" href="/dealer">К дилеру</a>
+    </div>
+
+    <!-- Цепочка: каждое звено падает по своей причине, поэтому и показано
+         отдельно, вместе с командой, которой чинится. -->
+    <div class="chain" id="chain">
+        <div class="link unknown" id="link-iface">
+            <div class="dot"></div>
+            <div class="name">Интерфейс en6</div>
+            <div class="value">…</div>
+            <div class="detail"></div>
+        </div>
+        <div class="link unknown" id="link-ami">
+            <div class="dot"></div>
+            <div class="name">АТС (Asterisk AMI)</div>
+            <div class="value">…</div>
+            <div class="detail"></div>
+        </div>
+        <div class="link unknown" id="link-endpoint">
+            <div class="dot"></div>
+            <div class="name">SIP-транк до шлюза</div>
+            <div class="value">…</div>
+            <div class="detail"></div>
+        </div>
+        <div class="link unknown" id="link-gateway">
+            <div class="dot"></div>
+            <div class="name">Шлюз (telnet CLI)</div>
+            <div class="value">…</div>
+            <div class="detail"></div>
+        </div>
+        <div class="link unknown" id="link-stream">
+            <div class="dot"></div>
+            <div class="name">События (WebSocket)</div>
+            <div class="value">…</div>
+            <div class="detail"></div>
+        </div>
+    </div>
+
+    <div class="section">
+        <h2>
+            Трубки — порты FXS
+            <span class="spacer"></span>
+            <select id="target" class="target-select" title="Что услышит трубка после ответа">
+                <option value="lobby">музыка лобби</option>
+                <option value="echo">эхо-тест</option>
+                <option value="hello">hello-world</option>
+                <option value="digits">сбор цифр (700)</option>
+            </select>
+            <button class="btn btn-secondary btn-tiny" id="call-all">Позвонить всем</button>
+            <button class="btn btn-danger btn-tiny" id="hangup-all">Сбросить всё</button>
+        </h2>
+        <div class="body">
+            <div class="phones" id="phones">
+                {% for p in ports %}
+                <div class="phone" data-exten="{{ p.exten }}">
+                    <div class="row">
+                        <span class="exten">{{ p.exten }}</span>
+                        <span class="slot">порт {{ p.slot }}</span>
+                        <span class="state">—</span>
+                    </div>
+                    <div class="digits" data-digits></div>
+                    <div class="meta" data-meta></div>
+                    {% if p.known_bad %}
+                    <div class="warn-note">известная неисправность: звонит, но не снимается</div>
+                    {% endif %}
+                    <div class="actions">
+                        <button class="btn btn-dealer btn-small" data-call="{{ p.exten }}">Позвонить</button>
+                        <button class="btn btn-danger btn-small" data-hangup="{{ p.exten }}">Сброс</button>
+                        <button class="btn btn-danger btn-small" data-reset="{{ p.exten }}"
+                                title="shutdown/no shutdown на шлюзе — вернуть порт в Idle, когда он завис в Disconnecting">Разбудить порт</button>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+    </div>
+
+    <div class="section">
+        <h2>
+            Набранные цифры и звонки
+            <span class="spacer"></span>
+            <button class="btn btn-secondary btn-tiny" id="clear-log">Очистить</button>
+        </h2>
+        <div class="log" id="log"></div>
+    </div>
+
+    <div class="section">
+        <h2>
+            История занятости каналов
+            <span class="spacer"></span>
+            <select id="history-exten">
+                <option value="">Все расширения</option>
+                {% for p in ports %}
+                <option value="{{ p.exten }}">{{ p.exten }}</option>
+                {% endfor %}
+            </select>
+            <select id="history-period">
+                <option value="3600">Последний час</option>
+                <option value="21600">Последние 6 часов</option>
+                <option value="86400" selected>Последние 24 часа</option>
+                <option value="604800">Последняя неделя</option>
+                <option value="">Вся история</option>
+            </select>
+            <button class="btn btn-secondary btn-tiny" id="load-history">Обновить</button>
+        </h2>
+        <div class="body">
+            <!-- Статистика -->
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin-bottom: 16px;" id="stats-container">
+                <div style="border: 1px solid var(--border-light); padding: 8px;">
+                    <div style="font-size: 0.7rem; color: var(--text-dim); text-transform: uppercase;">Всего звонков</div>
+                    <div style="font-size: 1.3rem; color: var(--green);" id="stat-total">—</div>
+                </div>
+                <div style="border: 1px solid var(--border-light); padding: 8px;">
+                    <div style="font-size: 0.7rem; color: var(--text-dim); text-transform: uppercase;">Завершено</div>
+                    <div style="font-size: 1.3rem; color: var(--text-bright);" id="stat-completed">—</div>
+                </div>
+                <div style="border: 1px solid var(--border-light); padding: 8px;">
+                    <div style="font-size: 0.7rem; color: var(--text-dim); text-transform: uppercase;">Средняя длительность</div>
+                    <div style="font-size: 1.3rem; color: var(--amber-bright);" id="stat-avg">—</div>
+                </div>
+                <div style="border: 1px solid var(--border-light); padding: 8px;">
+                    <div style="font-size: 0.7rem; color: var(--text-dim); text-transform: uppercase;">Общее время</div>
+                    <div style="font-size: 1.3rem; color: var(--text-bright);" id="stat-total-duration">—</div>
+                </div>
+            </div>
+            
+            <!-- Таблица истории -->
+            <div style="overflow-x: auto; max-height: 400px; overflow-y: auto;">
+                <table style="width: 100%; border-collapse: collapse; font-size: 0.75rem; font-family: var(--font-mono);">
+                    <thead style="position: sticky; top: 0; background: var(--bg-panel); border-bottom: 1px solid var(--border);">
+                        <tr>
+                            <th style="padding: 6px 8px; text-align: left; color: var(--text-dim); text-transform: uppercase;">Расшир.</th>
+                            <th style="padding: 6px 8px; text-align: left; color: var(--text-dim); text-transform: uppercase;">Порт</th>
+                            <th style="padding: 6px 8px; text-align: left; color: var(--text-dim); text-transform: uppercase;">Начало</th>
+                            <th style="padding: 6px 8px; text-align: left; color: var(--text-dim); text-transform: uppercase;">Конец</th>
+                            <th style="padding: 6px 8px; text-align: left; color: var(--text-dim); text-transform: uppercase;">Длит. (сек)</th>
+                            <th style="padding: 6px 8px; text-align: left; color: var(--text-dim); text-transform: uppercase;">Канал</th>
+                            <th style="padding: 6px 8px; text-align: left; color: var(--text-dim); text-transform: uppercase;">Причина отбоя</th>
+                        </tr>
+                    </thead>
+                    <tbody id="history-table">
+                        <tr>
+                            <td colspan="7" style="padding: 20px; text-align: center; color: var(--text-dim);">Загрузка...</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <div class="section">
+        <h2>CLI шлюза</h2>
+        <div class="body">
+            <div class="cli-buttons" id="cli-buttons"></div>
+            <pre class="cli-out" id="cli-out">—</pre>
+        </div>
+    </div>
+
+    <div class="toast" id="toast"></div>
+
+<script>
+// Панель телефонов.
+//
+// Два источника данных, намеренно раздельных:
+//   * опрос /api/voip/status — состояние цепочки и портов (медленное, секунды);
+//   * WebSocket /ws/voip — цифры и события звонков (мгновенное).
+// Смешивать их нельзя: опрос со шлюза занимает секунды, а нажатая цифра
+// должна появляться сразу.
+
+const $ = (sel, root = document) => root.querySelector(sel);
+const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
+
+const phones = {};
+$$('.phone').forEach(el => { phones[el.dataset.exten] = el; });
+
+// Цифры, набранные на трубке в текущем звонке. Чистятся на отбое.
+const digitBuffer = {};
+
+function toast(message, isError = false) {
+    const el = $('#toast');
+    el.textContent = message;
+    el.classList.toggle('err', isError);
+    el.style.display = 'block';
+    clearTimeout(el._timer);
+    el._timer = setTimeout(() => { el.style.display = 'none'; }, 4000);
+}
+
+function setLink(id, cls, value, detail = '') {
+    const el = $(id);
+    el.className = 'link ' + cls;
+    $('.value', el).textContent = value;
+    $('.detail', el).innerHTML = detail;
+}
+
+function stamp(seconds) {
+    const d = seconds ? new Date(seconds * 1000) : new Date();
+    return d.toTimeString().slice(0, 8);
+}
+
+function logLine(who, what, kind = '') {
+    const log = $('#log');
+    // Автопрокрутка только когда дилер и так внизу: иначе она выдёргивает
+    // его из места, которое он читает.
+    const atBottom = log.scrollHeight - log.scrollTop - log.clientHeight < 30;
+    const line = document.createElement('div');
+    line.className = 'line ' + kind;
+    line.innerHTML = `<span class="t">${stamp()}</span>` +
+                     `<span class="who"></span><span class="what"></span>`;
+    $('.who', line).textContent = who;
+    $('.what', line).textContent = what;
+    log.appendChild(line);
+    while (log.children.length > 300) log.removeChild(log.firstChild);
+    if (atBottom) log.scrollTop = log.scrollHeight;
+}
+
+// ── Статус ───────────────────────────────────────────────────────────
+async function refresh() {
+    const withGateway = $('#poll-gateway').checked;
+    let data;
+    try {
+        const resp = await fetch(`/api/voip/status?gateway=${withGateway}`);
+        data = await resp.json();
+    } catch (e) {
+        setLink('#link-ami', 'bad', 'сервер не ответил', String(e));
+        return;
+    }
+
+    // en6
+    if (data.iface.ok) {
+        setLink('#link-iface', 'ok', data.iface.addr + ' на месте');
+    } else {
+        setLink('#link-iface', 'bad', data.iface.addr + ' пропал',
+                'восстановить: <code>' + (data.iface.hint || '') + '</code>');
+    }
+
+    // AMI
+    if (data.ami.ok) {
+        setLink('#link-ami', 'ok', 'подключено', '127.0.0.1:5038');
+    } else {
+        setLink('#link-ami', 'bad', 'нет связи',
+                escapeHtml(data.ami.error || '') +
+                (data.ami.hint ? '<br>запустить: <code>' + data.ami.hint + '</code>' : ''));
+    }
+
+    // SIP-транк: что об этом думает сама АТС.
+    const ep = data.endpoint || {};
+    const contact = (ep.contacts || [])[0];
+    if (ep.ok && contact) {
+        const rtt = contact.rtt_ms != null ? `, ${contact.rtt_ms} мс` : '';
+        setLink('#link-endpoint', 'ok', contact.status + rtt, escapeHtml(contact.uri || ''));
+    } else if (contact) {
+        setLink('#link-endpoint', 'bad', contact.status || 'недоступен',
+                escapeHtml(contact.uri || ''));
+    } else if (data.ami.ok) {
+        setLink('#link-endpoint', 'bad', 'контактов нет',
+                escapeHtml(ep.error || 'endpoint addpac не отвечает на OPTIONS'));
+    } else {
+        setLink('#link-endpoint', 'unknown', '—', 'нет связи с АТС');
+    }
+
+    // Шлюз по telnet.
+    if (!withGateway) {
+        setLink('#link-gateway', 'unknown', 'опрос выключен', '');
+    } else if (data.gateway.ok) {
+        const sip = data.gateway.sip || {};
+        // Registration=Failed здесь нормально: звонки идут по статическому
+        // IP-транку, а не по регистрации (см. voip/README.md).
+        const note = sip.registration
+            ? `регистрация: ${escapeHtml(sip.registration)} (не влияет на звонки)` : '';
+        setLink('#link-gateway', 'ok', 'отвечает',
+                (sip.server ? 'SIP-сервер: ' + escapeHtml(sip.server) + '<br>' : '') + note);
+    } else {
+        setLink('#link-gateway', 'bad', 'не отвечает',
+                escapeHtml(data.gateway.error || '') +
+                (data.gateway.hint ? '<br>' + escapeHtml(data.gateway.hint) : ''));
+    }
+
+    // Трубки.
+    (data.ports || []).forEach(port => {
+        const el = phones[port.exten];
+        if (!el) return;
+        const gwState = (port.gateway_state || '').toLowerCase();
+        let cls = 'phone', label = port.gateway_state || '—';
+
+        if (port.channel) {
+            // Живой канал важнее строчки из шлюза: он и свежее, и точнее.
+            const state = (port.channel_state || '').toLowerCase();
+            cls += state.includes('ring') ? ' ringing' : ' busy';
+            label = port.channel_state || 'в звонке';
+        } else if (gwState.startsWith('idle')) {
+            cls += ' idle'; label = 'свободна';
+        } else if (gwState) {
+            cls += ' busy';
+        } else if (withGateway) {
+            cls += ' offline'; label = 'нет данных';
+        }
+        if (port.known_bad) cls += ' known-bad';
+        el.className = cls;
+        $('.state', el).textContent = label;
+        $('[data-meta]', el).textContent = port.channel
+            ? `${port.channel}${port.duration ? ' · ' + port.duration : ''}`
+            : (port.type ? `тип ${port.type}` : '');
+    });
+}
+
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = String(text == null ? '' : text);
+    return div.innerHTML;
+}
+
+// ── Действия ─────────────────────────────────────────────────────────
+async function post(url, body) {
+    const resp = await fetch(url, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(body || {}),
+    });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok) throw new Error(data.detail || resp.statusText);
+    return data;
+}
+
+async function call(exten) {
+    const target = $('#target').value;
+    try {
+        await post('/api/voip/call', {exten, target});
+        logLine(exten, `звоним (${target})`);
+    } catch (e) {
+        toast(`${exten}: ${e.message}`, true);
+        logLine(exten, `звонок не прошёл: ${e.message}`, 'err');
+    }
+}
+
+async function hangup(exten) {
+    try {
+        const data = await post('/api/voip/hangup', {exten});
+        const count = (data.hung_up || []).length;
+        logLine(exten || 'все', count ? `сброшено каналов: ${count}` : 'сбрасывать нечего');
+        refresh();
+    } catch (e) {
+        toast(`сброс: ${e.message}`, true);
+    }
+}
+
+// Сброс канала через AMI не помогает, если порт завис в Disconnecting: там
+// занята сама аналоговая линия, и лечится это только на шлюзе.
+async function resetPort(exten, button) {
+    button.disabled = true;
+    try {
+        const data = await post('/api/voip/reset-port', {exten});
+        logLine(exten, `порт ${data.slot} разбужен${data.status ? ` → ${data.status}` : ''}`);
+        refresh();
+    } catch (e) {
+        toast(`порт ${exten}: ${e.message}`, true);
+    } finally {
+        button.disabled = false;
+    }
+}
+
+$$('[data-call]').forEach(b => b.addEventListener('click', () => call(b.dataset.call)));
+$$('[data-hangup]').forEach(b => b.addEventListener('click', () => hangup(b.dataset.hangup)));
+$$('[data-reset]').forEach(b => b.addEventListener('click', () => resetPort(b.dataset.reset, b)));
+$('#refresh').addEventListener('click', refresh);
+$('#poll-gateway').addEventListener('change', refresh);
+$('#hangup-all').addEventListener('click', () => hangup(''));
+$('#call-all').addEventListener('click', async () => {
+    // Последовательно: восемь originate разом шлюз не проглатывает.
+    for (const exten of Object.keys(phones)) {
+        await call(exten);
+        await new Promise(r => setTimeout(r, 400));
+    }
+});
+$('#clear-log').addEventListener('click', () => { $('#log').innerHTML = ''; });
+
+// ── CLI шлюза ────────────────────────────────────────────────────────
+async function loadCliButtons() {
+    const resp = await fetch('/api/voip/cli/commands');
+    const data = await resp.json();
+    const box = $('#cli-buttons');
+    box.innerHTML = '';
+    (data.commands || []).forEach(command => {
+        const button = document.createElement('button');
+        button.className = 'btn btn-secondary btn-small';
+        button.textContent = command;
+        button.addEventListener('click', async () => {
+            $('#cli-out').textContent = '…';
+            try {
+                const result = await post('/api/voip/cli', {command});
+                $('#cli-out').textContent = result.output || '(пусто)';
+            } catch (e) {
+                $('#cli-out').textContent = 'ошибка: ' + e.message;
+            }
+        });
+        box.appendChild(button);
+    });
+}
+
+// ── Поток событий ────────────────────────────────────────────────────
+let socket = null;
+
+function connect() {
+    const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+    socket = new WebSocket(`${proto}://${location.host}/ws/voip`);
+
+    socket.onopen = () => setLink('#link-stream', 'ok', 'подключено', '/ws/voip');
+    socket.onclose = () => {
+        setLink('#link-stream', 'bad', 'разорвано', 'переподключение…');
+        setTimeout(connect, 2000);
+    };
+    socket.onmessage = (message) => {
+        let event;
+        try { event = JSON.parse(message.data); } catch (e) { return; }
+        handleEvent(event);
+    };
+}
+
+function handleEvent(event) {
+    const who = event.exten
+        ? `${event.exten}${event.slot ? ' (' + event.slot + ')' : ''}`
+        : '—';
+
+    if (event.kind === 'digit') {
+        const key = event.exten || event.channel;
+        digitBuffer[key] = (digitBuffer[key] || '') + event.digit;
+        showDigits(event.exten, digitBuffer[key]);
+        logLine(who, `нажато ${event.digit}`, 'digit');
+    } else if (event.kind === 'dialled') {
+        showDigits(event.exten, event.number);
+        logLine(who, `набрано ${event.number}`, 'digit');
+    } else if (event.kind === 'call') {
+        if (event.event === 'Hangup') {
+            delete digitBuffer[event.exten || event.channel];
+            logLine(who, `отбой${event.cause ? ' — ' + event.cause : ''}`);
+        } else if (event.event === 'Newstate') {
+            logLine(who, event.state || event.event);
+        }
+        // Состояние портов после любого события звонка уже другое.
+        scheduleRefresh();
+    } else if (event.kind === 'ami') {
+        if (event.state === 'connected') {
+            logLine('АТС', 'поток событий подключён');
+        } else {
+            logLine('АТС', `поток событий потерян: ${event.error || ''}`, 'err');
+        }
+        scheduleRefresh();
+    } else if (event.kind === 'action') {
+        // Действие могло прийти из другой вкладки — там его тоже видно.
+        scheduleRefresh();
+    }
+}
+
+function showDigits(exten, text) {
+    const el = phones[exten];
+    if (el) $('[data-digits]', el).textContent = text;
+}
+
+// События звонка приходят пачками (Newstate, BridgeEnter, Hangup подряд);
+// без склейки каждое дёргало бы telnet-опрос шлюза.
+let refreshTimer = null;
+function scheduleRefresh() {
+    clearTimeout(refreshTimer);
+    refreshTimer = setTimeout(refresh, 600);
+}
+
+// ── История busy каналов ─────────────────────────────────────────────
+async function loadHistory() {
+    const exten = $('#history-exten').value;
+    const period = $('#history-period').value;
+    
+    let url = '/api/voip/busy/history?limit=100';
+    if (exten) url += `&exten=${exten}`;
+    if (period) {
+        const since = Date.now() / 1000 - parseFloat(period);
+        url += `&since=${since}`;
+    }
+    
+    try {
+        const resp = await fetch(url);
+        const data = await resp.json();
+        renderHistory(data.calls || []);
+    } catch (e) {
+        toast(`Ошибка загрузки истории: ${e.message}`, true);
+    }
+}
+
+async function loadStatistics() {
+    const period = $('#history-period').value;
+    let url = '/api/voip/busy/statistics';
+    if (period) {
+        const since = Date.now() / 1000 - parseFloat(period);
+        url += `?since=${since}`;
+    }
+    
+    try {
+        const resp = await fetch(url);
+        const data = await resp.json();
+        $('#stat-total').textContent = data.total_calls || 0;
+        $('#stat-completed').textContent = data.completed_calls || 0;
+        $('#stat-avg').textContent = data.avg_duration ? `${data.avg_duration} сек` : '—';
+        $('#stat-total-duration').textContent = formatDuration(data.total_duration || 0);
+    } catch (e) {
+        console.error('Failed to load statistics:', e);
+    }
+}
+
+function renderHistory(calls) {
+    const tbody = $('#history-table');
+    
+    if (calls.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="7" style="padding: 20px; text-align: center; color: var(--text-dim);">Нет данных за выбранный период</td></tr>';
+        return;
+    }
+    
+    tbody.innerHTML = calls.map(call => {
+        const startTime = new Date(call.started_at * 1000);
+        const endTime = call.ended_at ? new Date(call.ended_at * 1000) : null;
+        const duration = call.duration || '—';
+        const channelShort = (call.channel || '').split('/').pop() || call.channel;
+        
+        const rowClass = call.ended_at ? '' : 'style="background: var(--bg-elevated);"';
+        
+        return `
+            <tr ${rowClass}>
+                <td style="padding: 6px 8px; color: var(--green);">${escapeHtml(call.exten || '—')}</td>
+                <td style="padding: 6px 8px; color: var(--text-dim);">${escapeHtml(call.slot || '—')}</td>
+                <td style="padding: 6px 8px; color: var(--text);">${formatTime(startTime)}</td>
+                <td style="padding: 6px 8px; color: var(--text);">${endTime ? formatTime(endTime) : '<span style="color: var(--amber-bright);">активен</span>'}</td>
+                <td style="padding: 6px 8px; color: var(--amber-bright);">${duration}</td>
+                <td style="padding: 6px 8px; color: var(--text-dim); font-size: 0.7rem;" title="${escapeHtml(call.channel || '')}">${escapeHtml(channelShort || '—')}</td>
+                <td style="padding: 6px 8px; color: var(--text-dim); font-size: 0.7rem;">${escapeHtml(call.hangup_cause || '—')}</td>
+            </tr>
+        `;
+    }).join('');
+}
+
+function formatTime(date) {
+    const today = new Date();
+    const isToday = date.toDateString() === today.toDateString();
+    
+    if (isToday) {
+        return date.toTimeString().slice(0, 8);
+    } else {
+        return date.toLocaleDateString('ru-RU', {month: '2-digit', day: '2-digit'}) + ' ' + 
+               date.toTimeString().slice(0, 8);
+    }
+}
+
+function formatDuration(seconds) {
+    if (!seconds) return '—';
+    const hours = Math.floor(seconds / 3600);
+    const minutes = Math.floor((seconds % 3600) / 60);
+    const secs = seconds % 60;
+    
+    if (hours > 0) {
+        return `${hours}ч ${minutes}м`;
+    } else if (minutes > 0) {
+        return `${minutes}м ${secs}с`;
+    } else {
+        return `${secs}с`;
+    }
+}
+
+$('#load-history').addEventListener('click', () => {
+    loadHistory();
+    loadStatistics();
+});
+
+$('#history-period').addEventListener('change', () => {
+    loadHistory();
+    loadStatistics();
+});
+
+$('#history-exten').addEventListener('change', loadHistory);
+
+refresh();
+loadCliButtons();
+connect();
+loadHistory();
+loadStatistics();
+setInterval(refresh, 10000);
+setInterval(() => {
+    loadHistory();
+    loadStatistics();
+}, 30000); // Обновляем историю каждые 30 секунд
+</script>
+</body>
+</html>

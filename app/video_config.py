@@ -35,6 +35,13 @@ DEFAULT_CONFIG = {
     "settings": {
         "volume": 100
     },
+    # Multiplayer TV layout. `slots` — сколько секций игроков телевизор рисует
+    # в мультиплеере. 0 = авто: столько секций, сколько игроков в партии.
+    # Ненулевое значение фиксирует сетку, лишние секции остаются пустыми
+    # ("СВОБОДНО") — оператор готовит экран до того, как игроки подключились.
+    "multiplayer": {
+        "slots": 0
+    },
     # CCTV camera-mode settings. The TV (teleplayer) runs its own random
     # auto-cycle timer using these values — no cross-device time sync.
     "cctv": {
@@ -45,6 +52,14 @@ DEFAULT_CONFIG = {
         "max_show": 10,          # max seconds a show stays on screen
         "mode": "random",        # "random" = coin-flip: one random cam or all; "grid" = all enabled; "single" = one random fullscreen
         "cameras": ["cam1", "cam2", "cam3", "cam4"],  # enabled camera pool (MediaMTX path names)
+        # Видимость каждой камеры для игрока. Ключ — имя камеры, значение:
+        #   "normal"  — обычный показ в составе пула (по умолчанию);
+        #   "rare"    — камера выкинута из пула, но с шансом rare_chance
+        #               прорывается на экран одна, как случайный сбой связи;
+        #   "blocked" — игрок не видит её никогда, ни авто, ни вручную.
+        # Панель дилера /cams показывает все камеры независимо от статуса.
+        "visibility": {},
+        "rare_chance": 10,       # проценты: вероятность прорыва «редкой» камеры за один показ
         # Fake "signal lost" glitch — TV-only cosmetic. Dealer /cams page never fakes.
         "fake_error": {
             "enabled": False,

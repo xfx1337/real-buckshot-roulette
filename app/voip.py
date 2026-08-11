@@ -1,0 +1,806 @@
+"""VoIP control layer — the PBX and the AddPac gateway, as seen by the web UI.
+
+The dealer needs one page that answers three questions without a terminal:
+which handset is on which FXS port, whether the chain Asterisk → gateway →
+handset is actually up, and what a phone is doing right now. This module is
+the part that talks to the hardware; app/server.py exposes it over HTTP and a
+WebSocket, and templates/voip.html draws it.
+
+Two links are probed, because they fail independently and for different
+reasons:
+
+  * AMI on 127.0.0.1:5038 — Asterisk itself. Down means the PBX is not
+    running (voip/scripts/run-asterisk.sh) or en6 lost its static address.
+  * telnet on 192.168.100.3:23 — the gateway's CLI. Down means the ethernet
+    segment is broken, which AMI alone would not reveal: Asterisk reports the
+    gateway "Avail" from qualify long before the ports are usable.
+
+Per-port state comes from the gateway's own `show voice port summary`, since
+Asterisk knows nothing about an FXS port until a call exists on it.
+
+Everything here is blocking sockets. Callers on the async side run it through
+asyncio.to_thread, so a gateway that stops answering telnet cannot stall the
+game's event loop.
+"""
+
+import re
+import socket
+import threading
+import time
+from typing import Callable, Optional
+
+from app.busy_tracker import get_tracker
+
+# ── Where the pieces live ────────────────────────────────────────────────
+# Both addresses are fixed by voip/etc/pjsip.conf and the gateway's own
+# configuration; they are not user-settable, so they are constants here.
+
+AMI_HOST = "127.0.0.1"
+AMI_PORT = 5038
+AMI_USER = "digits"
+AMI_SECRET = "backshot-ami"
+
+GATEWAY_HOST = "192.168.100.3"
+GATEWAY_PORT = 23
+GATEWAY_USER = "root"
+GATEWAY_PASSWORD = "router"
+
+# The Mac's address on the direct segment. pjsip.conf binds to it, and en6
+# drops it on reboot — the single most common reason the PBX will not start,
+# so the UI checks for it by name.
+LOCAL_IFACE_ADDR = "192.168.100.2"
+
+# Extension → FXS port, in the gateway's own numbering. Matches the mapping in
+# voip/scripts/phone_digits.py and voip/README.md.
+PORT_NAMES = {
+    "101": "0/0",
+    "102": "0/1",
+    "103": "0/2",
+    "104": "0/3",
+    "105": "1/0",
+    "106": "1/1",
+    "107": "1/2",
+    "108": "1/3",
+}
+
+# Ports the dealer can call, in dial order.
+EXTENSIONS = list(PORT_NAMES.keys())
+
+# What a called handset hears when it answers. Keys are what the UI sends;
+# values are (context, extension) in voip/etc/extensions.conf.
+CALL_TARGETS = {
+    "lobby": ("to-handset", "lobby"),
+    "echo": ("from-gateway", "601"),
+    "hello": ("from-gateway", "500"),
+    "digits": ("from-gateway", "700"),
+}
+
+# Known hardware fault, documented in voip/README.md: this port rings but
+# never answers. Flagged in the UI so it does not read as a new bug.
+KNOWN_BAD_PORTS = {"105"}
+
+
+# ── AMI ──────────────────────────────────────────────────────────────────
+
+
+class AMIError(RuntimeError):
+    """AMI refused a login or an action."""
+
+
+class AMI:
+    """A minimal Asterisk Manager Interface client.
+
+    Deliberately not shared with voip/scripts/phone_digits.py: that script has
+    to keep working with nothing but a Python install and a checkout of voip/,
+    which is why the protocol is small enough to write twice.
+    """
+
+    def __init__(self, host: str = AMI_HOST, port: int = AMI_PORT, timeout: float = 5.0):
+        self.sock = socket.create_connection((host, port), timeout=timeout)
+        self.sock.settimeout(1.0)
+        self.buffer = b""
+
+    def login(self, username: str = AMI_USER, secret: str = AMI_SECRET) -> None:
+        self.sock.sendall(
+            f"Action: Login\r\nUsername: {username}\r\n"
+            f"Secret: {secret}\r\nEvents: on\r\n\r\n".encode()
+        )
+        for packet in self.packets(limit=5.0):
+            if packet.get("response") == "Success":
+                return
+            if packet.get("response") == "Error":
+                raise AMIError(packet.get("message", "AMI login refused"))
+        raise AMIError("no reply to AMI login")
+
+    def packets(self, limit: Optional[float] = None):
+        """Yield AMI packets as dicts with lower-case keys."""
+        end = time.time() + limit if limit else None
+        while end is None or time.time() < end:
+            while b"\r\n\r\n" not in self.buffer:
+                try:
+                    chunk = self.sock.recv(4096)
+                except socket.timeout:
+                    if end is not None and time.time() >= end:
+                        return
+                    continue
+                if not chunk:
+                    return
+                self.buffer += chunk
+            raw, self.buffer = self.buffer.split(b"\r\n\r\n", 1)
+            packet = {}
+            for line in raw.decode("utf-8", "replace").split("\r\n"):
+                if ": " in line:
+                    key, value = line.split(": ", 1)
+                    packet[key.lower()] = value
+            if packet:
+                yield packet
+
+    def action(self, name: str, limit: float = 5.0, **fields) -> list[dict]:
+        """Send one action and collect the packets it produces.
+
+        Actions that answer with a list (CoreShowChannels, PJSIPShowEndpoints)
+        end with a "...Complete" event, so reading stops there instead of
+        waiting out the whole limit.
+        """
+        lines = [f"Action: {name}"]
+        for key, value in fields.items():
+            if value is not None:
+                lines.append(f"{key}: {value}")
+        self.sock.sendall(("\r\n".join(lines) + "\r\n\r\n").encode())
+
+        collected = []
+        for packet in self.packets(limit=limit):
+            collected.append(packet)
+            event = packet.get("event", "")
+            if event.endswith("Complete") or event == "CoreShowChannelsComplete":
+                break
+            # A bare Response with no list to follow (Originate, Hangup) is the
+            # whole reply.
+            if packet.get("response") == "Error":
+                break
+            if packet.get("response") == "Success" and name in (
+                "Originate", "Hangup", "Ping"
+            ):
+                break
+        return collected
+
+    def close(self) -> None:
+        try:
+            self.sock.close()
+        except OSError:
+            pass
+
+
+def _ami_connect() -> AMI:
+    ami = AMI()
+    ami.login()
+    return ami
+
+
+# ── Gateway telnet ───────────────────────────────────────────────────────
+
+IAC, DO, DONT, WILL, WONT = 255, 253, 254, 251, 252
+GATEWAY_PROMPT = re.compile(rb"AP1100F[^\r\n]*[#>]\s*$")
+
+
+class Gateway:
+    """Telnet client for the AddPac CLI — the same protocol handling as
+    voip/scripts/addpac.py, including the "-- more --" pager."""
+
+    def __init__(self, host: str = GATEWAY_HOST, timeout: float = 6.0):
+        self.sock = socket.create_connection((host, GATEWAY_PORT), timeout=timeout)
+        self.sock.settimeout(0.4)
+
+    def _strip_iac(self, data: bytes) -> bytes:
+        """Answer telnet option negotiation, return the payload bytes."""
+        out = b""
+        i = 0
+        while i < len(data):
+            if data[i] == IAC and i + 2 < len(data):
+                cmd, opt = data[i + 1], data[i + 2]
+                if cmd == DO:
+                    self.sock.sendall(bytes([IAC, WONT, opt]))
+                elif cmd == WILL:
+                    self.sock.sendall(bytes([IAC, DONT, opt]))
+                i += 3
+            elif data[i] == IAC:
+                i += 2
+            else:
+                out += bytes([data[i]])
+                i += 1
+        return out
+
+    def read_until(self, pattern, limit: float = 8.0) -> bytes:
+        out = b""
+        end = time.time() + limit
+        while time.time() < end:
+            try:
+                chunk = self.sock.recv(4096)
+            except socket.timeout:
+                if b"more" in out[-60:].lower():
+                    self.sock.sendall(b" ")
+                    end = time.time() + limit
+                    continue
+                if pattern and pattern.search(out[-80:]):
+                    break
+                continue
+            if not chunk:
+                break
+            out += self._strip_iac(chunk)
+            if pattern and pattern.search(out[-80:]):
+                break
+        return out
+
+    def login(self) -> None:
+        self.read_until(re.compile(rb"login:"))
+        self.sock.sendall(GATEWAY_USER.encode() + b"\r\n")
+        self.read_until(re.compile(rb"[Pp]assword:"))
+        self.sock.sendall(GATEWAY_PASSWORD.encode() + b"\r\n")
+        self.read_until(GATEWAY_PROMPT)
+
+    def run(self, command: str, limit: float = 8.0) -> str:
+        self.sock.sendall(command.encode() + b"\r\n")
+        raw = self.read_until(GATEWAY_PROMPT, limit)
+        return raw.decode("latin-1", "replace").replace("\r", "")
+
+    def close(self) -> None:
+        try:
+            self.sock.close()
+        except OSError:
+            pass
+
+
+# Telnet on this gateway accepts one session at a time and takes ~2 s to log
+# in, so sessions are serialised and the login is reused between polls.
+_gateway_lock = threading.Lock()
+_gateway: Optional[Gateway] = None
+
+
+def gateway_run(commands: list[str], limit: float = 8.0) -> list[tuple[str, str]]:
+    """Run CLI commands on the gateway, reusing one telnet session.
+
+    Returns (command, output) pairs. A dropped session is reconnected once —
+    the gateway closes idle telnet on its own, so the first command after a
+    quiet spell would otherwise always fail.
+    """
+    global _gateway
+    with _gateway_lock:
+        for attempt in (1, 2):
+            try:
+                if _gateway is None:
+                    _gateway = Gateway()
+                    _gateway.login()
+                return [(cmd, _gateway.run(cmd, limit)) for cmd in commands]
+            except OSError:
+                if _gateway is not None:
+                    _gateway.close()
+                _gateway = None
+                if attempt == 2:
+                    raise
+        return []
+
+
+def gateway_disconnect() -> None:
+    global _gateway
+    with _gateway_lock:
+        if _gateway is not None:
+            _gateway.close()
+            _gateway = None
+
+
+# ── Parsing gateway output ───────────────────────────────────────────────
+
+# Lines of `show voice port summary` look like:
+#   0/0    FXS     Idle       ...
+# Firmware pads them differently between revisions, so slot/port and the first
+# word after the type are pulled out rather than matching whole columns.
+_PORT_LINE = re.compile(
+    r"^\s*(?P<slot>\d+)\s*/\s*(?P<port>\d+)\s+(?P<type>\S+)\s+(?P<state>\S+)",
+    re.MULTILINE,
+)
+
+_SLOT_TO_EXTEN = {slot: exten for exten, slot in PORT_NAMES.items()}
+
+
+def parse_port_summary(text: str) -> dict[str, dict]:
+    """Map 'slot/port' → {'state': ..., 'type': ...} from CLI output."""
+    ports = {}
+    for match in _PORT_LINE.finditer(text):
+        slot = f"{match.group('slot')}/{match.group('port')}"
+        ports[slot] = {
+            "state": match.group("state"),
+            "type": match.group("type"),
+        }
+    return ports
+
+
+def parse_sip_state(text: str) -> dict:
+    """Pull the SIP server address and registration state out of `show sip`.
+
+    Registration reports Failed by design (see voip/README.md): the gateway
+    has one set of provider credentials and Asterisk has no matching account.
+    Calls run over a static IP trunk regardless, so the UI shows this as a
+    note rather than an error — but it still shows the server address, which
+    is what actually matters and what was wrong before.
+    """
+    server = ""
+    registration = ""
+    # The proxy server line is a table row, not a labelled field:
+    #   192.168.100.2   5060   128   Failed(Rx:OtherMsg)
+    row = re.search(
+        r"^\s*(\d+\.\d+\.\d+\.\d+)\s+(\d+)\s+\d+\s+(\S+)",
+        text,
+        re.MULTILINE,
+    )
+    if row:
+        server = row.group(1)
+        registration = row.group(3)
+    else:
+        address = re.search(r"(\d+\.\d+\.\d+\.\d+)", text)
+        if address:
+            server = address.group(1)
+    return {"server": server, "registration": registration}
+
+
+# ── Status probes ────────────────────────────────────────────────────────
+
+
+def _local_iface_up() -> bool:
+    """Is 192.168.100.2 still on an interface?
+
+    Binding a socket to the address is enough to tell, and unlike shelling out
+    to ifconfig it costs nothing and cannot hang.
+    """
+    probe = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        probe.bind((LOCAL_IFACE_ADDR, 0))
+        return True
+    except OSError:
+        return False
+    finally:
+        probe.close()
+
+
+def _endpoint_state(ami: AMI) -> dict:
+    """Ask Asterisk what it thinks of the gateway endpoint.
+
+    PJSIPShowEndpoint reports the AOR's qualify result — "Avail" means the
+    gateway answered an OPTIONS ping within qualify_frequency (30 s), which is
+    the PBX's own view of reachability, independent of telnet.
+    """
+    contacts = []
+    device_state = ""
+    for packet in ami.action("PJSIPShowEndpoint", Endpoint="addpac", limit=4.0):
+        event = packet.get("event", "")
+        if event == "ContactStatusDetail":
+            contacts.append({
+                "uri": packet.get("uri", ""),
+                "status": packet.get("status", ""),
+                "rtt_ms": _rtt_ms(packet.get("roundtriptime", "")),
+            })
+        elif event == "EndpointDetail":
+            device_state = packet.get("devicestate", "")
+    return {"contacts": contacts, "device_state": device_state}
+
+
+def _rtt_ms(raw: str) -> Optional[float]:
+    """AMI reports round-trip time in microseconds, as a string."""
+    try:
+        return round(int(raw) / 1000.0, 1)
+    except (TypeError, ValueError):
+        return None
+
+
+def _active_channels(ami: AMI) -> list[dict]:
+    channels = []
+    for packet in ami.action("CoreShowChannels", limit=4.0):
+        if packet.get("event") != "CoreShowChannel":
+            continue
+        channels.append({
+            "channel": packet.get("channel", ""),
+            "state": packet.get("channelstatedesc", ""),
+            "caller": packet.get("calleridnum", ""),
+            "connected": packet.get("connectedlinenum", ""),
+            "exten": packet.get("exten", ""),
+            "context": packet.get("context", ""),
+            "duration": packet.get("duration", ""),
+        })
+    return channels
+
+
+def _exten_from_channel(channel: str) -> str:
+    """Read the FXS extension out of a channel name like 'PJSIP/addpac-0000001'.
+
+    Outbound calls are dialled as PJSIP/<exten>@addpac, and Asterisk names the
+    resulting channel after the endpoint, not the extension — so the number is
+    recovered from the dialled extension where it exists, and from the caller
+    ID otherwise. This only has to be good enough to light a port's tile.
+    """
+    match = re.search(r"PJSIP/(\d{3})", channel)
+    return match.group(1) if match else ""
+
+
+def collect_status(with_gateway: bool = True) -> dict:
+    """One snapshot of the whole chain, for the status endpoint.
+
+    Every link is probed independently and reported with its own error, so a
+    dead gateway does not hide a live PBX — the point of the page is to say
+    *which* hop is broken.
+    """
+    status = {
+        "at": time.time(),
+        "iface": {
+            "addr": LOCAL_IFACE_ADDR,
+            "ok": _local_iface_up(),
+        },
+        "ami": {"ok": False, "error": ""},
+        "endpoint": {"ok": False, "contacts": [], "device_state": "", "error": ""},
+        "gateway": {"ok": False, "error": "", "sip": {}},
+        "channels": [],
+        "ports": [],
+    }
+
+    if not status["iface"]["ok"]:
+        status["iface"]["hint"] = (
+            f"sudo ipconfig set en6 MANUAL {LOCAL_IFACE_ADDR} 255.255.255.0"
+        )
+
+    ami = None
+    try:
+        ami = _ami_connect()
+        status["ami"]["ok"] = True
+    except (OSError, AMIError) as exc:
+        status["ami"]["error"] = str(exc)
+        status["ami"]["hint"] = "voip/scripts/run-asterisk.sh -d"
+
+    if ami is not None:
+        try:
+            endpoint = _endpoint_state(ami)
+            status["endpoint"].update(endpoint)
+            # A contact answering OPTIONS is reported as "Reachable" by
+            # PJSIPShowEndpoint and as "Avail" by the CLI; both spellings
+            # count, since which one appears depends on the Asterisk build.
+            status["endpoint"]["ok"] = any(
+                c["status"].lower().startswith(("avail", "reachable"))
+                for c in endpoint["contacts"]
+            )
+        except OSError as exc:
+            status["endpoint"]["error"] = str(exc)
+        try:
+            status["channels"] = _active_channels(ami)
+        except OSError as exc:
+            status["channels"] = []
+            status["endpoint"].setdefault("error", str(exc))
+        ami.close()
+
+    port_states: dict[str, dict] = {}
+    if with_gateway:
+        try:
+            replies = dict(gateway_run(["show voice port summary", "show sip"], limit=6.0))
+            port_states = parse_port_summary(replies.get("show voice port summary", ""))
+            status["gateway"]["ok"] = bool(port_states)
+            status["gateway"]["sip"] = parse_sip_state(replies.get("show sip", ""))
+            if not port_states:
+                status["gateway"]["error"] = "gateway answered, but no ports in summary"
+        except OSError as exc:
+            status["gateway"]["error"] = str(exc)
+            status["gateway"]["hint"] = f"telnet {GATEWAY_HOST} — check the en6 cable"
+
+    # Which extensions currently have a channel, so a tile can show "in call"
+    # even when the gateway is unreachable.
+    busy_extens = {}
+    for channel in status["channels"]:
+        exten = (
+            _exten_from_channel(channel["channel"])
+            or channel["connected"]
+            or channel["caller"]
+        )
+        if exten in PORT_NAMES:
+            busy_extens[exten] = channel
+
+    for exten in EXTENSIONS:
+        slot = PORT_NAMES[exten]
+        gateway_port = port_states.get(slot, {})
+        channel = busy_extens.get(exten)
+        status["ports"].append({
+            "exten": exten,
+            "slot": slot,
+            "gateway_state": gateway_port.get("state", ""),
+            "type": gateway_port.get("type", ""),
+            "channel": channel["channel"] if channel else "",
+            "channel_state": channel["state"] if channel else "",
+            "duration": channel["duration"] if channel else "",
+            "known_bad": exten in KNOWN_BAD_PORTS,
+        })
+    
+    # Сохранить снимок для истории (асинхронно, не блокирует)
+    try:
+        tracker = get_tracker()
+        tracker.save_snapshot(status["ports"])
+    except Exception:
+        pass  # Не ломаем основную функцию, если трекер упал
+
+    return status
+
+
+# ── Actions ──────────────────────────────────────────────────────────────
+
+
+def originate(exten: str, target: str = "lobby", timeout_ms: int = 30000) -> dict:
+    """Ring a handset, and play it something when it answers.
+
+    Channel is PJSIP/<exten>@addpac — the same form the README documents for
+    the CLI — and the answered call lands in the context/extension named by
+    `target`, all of which already exist in voip/etc/extensions.conf.
+    """
+    if exten not in PORT_NAMES:
+        raise ValueError(f"unknown extension {exten!r}")
+    if target not in CALL_TARGETS:
+        raise ValueError(f"unknown call target {target!r}")
+    context, target_exten = CALL_TARGETS[target]
+
+    # A port that is not Idle refuses the INVITE with 503, so clear it first.
+    # With PLAR off (voip/scripts/addpac_config.py) an off-hook handset no
+    # longer pins its port, and the shortened reorder and line-lock timers mean
+    # a port normally reports Idle immediately after a hangup — so this rarely
+    # fires now. It stays because a call the gateway has not finished tearing
+    # down still shows as "Disconnecting", and one placed into that window
+    # fails for a reason the panel cannot otherwise explain.
+    try:
+        summary = gateway_run(["show voice port summary"], limit=8.0)
+        state = parse_port_summary(summary[0][1]).get(PORT_NAMES[exten], {})
+        if state.get("state") in ("Disconnecting", "Busy"):
+            # Drop the PBX side too, so Asterisk is not left holding a channel
+            # against a port that just went away underneath it.
+            hangup(exten=exten)
+            reset_port(exten)
+    except (OSError, AMIError, IndexError):
+        pass  # The gateway may be unreachable; let Originate report that.
+
+    ami = _ami_connect()
+    try:
+        packets = ami.action(
+            "Originate",
+            limit=6.0,
+            Channel=f"PJSIP/{exten}@addpac",
+            Context=context,
+            Exten=target_exten,
+            Priority=1,
+            CallerID=f"PBX <{exten}>",
+            Timeout=timeout_ms,
+            # Without this the action blocks until the call is answered or the
+            # timeout expires, and the HTTP request blocks with it.
+            Async="true",
+        )
+    finally:
+        ami.close()
+
+    for packet in packets:
+        if packet.get("response") == "Error":
+            raise AMIError(packet.get("message", "originate refused"))
+    return {"ok": True, "exten": exten, "target": target}
+
+
+def hangup(exten: str = "", channel: str = "") -> dict:
+    """Drop a call — by channel name if known, otherwise every channel on the
+    given extension."""
+    ami = _ami_connect()
+    try:
+        targets = [channel] if channel else []
+        if not targets:
+            for entry in _active_channels(ami):
+                name = entry["channel"]
+                if not exten or _exten_from_channel(name) == exten or \
+                        entry["connected"] == exten or entry["caller"] == exten:
+                    targets.append(name)
+        if not targets:
+            return {"ok": True, "hung_up": [], "note": "no matching channel"}
+        for name in targets:
+            ami.action("Hangup", limit=3.0, Channel=name)
+        return {"ok": True, "hung_up": targets}
+    finally:
+        ami.close()
+
+
+def reset_port(exten: str) -> dict:
+    """Force an FXS port back to Idle by bouncing it on the gateway.
+
+    A port latches in "Disconnecting" when the gateway still sees the loop
+    closed after a call ended — a handset left off-hook, a converter wired
+    across the line, a bad cable. While it is latched the port refuses
+    incoming calls with 503 and ignores anything dialled on it, and it does
+    not recover on its own. `shutdown` / `no shutdown` clears it.
+
+    This is the one write the panel makes to the gateway. It is spelled out
+    here rather than allowed through gateway_run's command list on purpose:
+    the CLI endpoint stays read-only, so no other configuration command can
+    be reached from a browser.
+    """
+    slot = PORT_NAMES.get(exten)
+    if slot is None:
+        raise ValueError(f"unknown extension {exten!r}")
+
+    replies = gateway_run([
+        "configure terminal",
+        f"voice-port {slot}",
+        "shutdown",
+        "no shutdown",
+        "exit",
+        "exit",
+    ], limit=10.0)
+
+    # The gateway answers an unknown command with its own error line rather
+    # than a non-zero status, so the reply text is what says whether it took.
+    for command, output in replies:
+        if "Invalid input" in output:
+            raise AMIError(f"шлюз отклонил «{command}»")
+
+    # `no shutdown` returns before the port has finished coming back up, and a
+    # call placed into that window is refused with 503 — the same failure the
+    # reset exists to clear. Wait for the port to report Idle instead.
+    status = _await_port_idle(slot)
+
+    return {"ok": True, "exten": exten, "slot": slot, "status": status}
+
+
+# How long to wait for a bounced port to come back. The gateway's own line-feed
+# powerdown is one second (voip/scripts/addpac_config.py sets it), and the port
+# needs a little beyond that to re-register as Idle.
+PORT_IDLE_TIMEOUT = 6.0
+PORT_IDLE_POLL = 0.5
+
+
+def _await_port_idle(slot: str, timeout: float = PORT_IDLE_TIMEOUT) -> str:
+    """Poll the gateway until `slot` reports Idle, and return its last state.
+
+    Returns whatever the port last said even on timeout: the caller places the
+    call regardless, and a state other than Idle is worth showing in the panel
+    rather than raising over.
+    """
+    deadline = time.monotonic() + timeout
+    status = ""
+    while True:
+        try:
+            summary = gateway_run(["show voice port summary"], limit=8.0)
+            status = parse_port_summary(summary[0][1]).get(slot, {}).get("state", "")
+        except (OSError, AMIError, IndexError):
+            # The reset itself went through; reading back is a nicety.
+            return status
+        if status == "Idle" or time.monotonic() >= deadline:
+            return status
+        time.sleep(PORT_IDLE_POLL)
+
+
+# ── DTMF event stream ────────────────────────────────────────────────────
+
+
+class DigitWatcher:
+    """Background AMI listener that turns phone activity into UI events.
+
+    Runs one long-lived AMI session in a thread and hands each interesting
+    event to a callback. Reconnects on its own, because the PBX is routinely
+    restarted while the page stays open — a watcher that died with it would
+    leave the digit log silently empty.
+    """
+
+    def __init__(self, on_event: Callable[[dict], None]):
+        self.on_event = on_event
+        self._stop = threading.Event()
+        self._thread: Optional[threading.Thread] = None
+        self.connected = False
+
+    def start(self) -> None:
+        if self._thread and self._thread.is_alive():
+            return
+        self._stop.clear()
+        self._thread = threading.Thread(target=self._run, daemon=True)
+        self._thread.start()
+
+    def stop(self) -> None:
+        self._stop.set()
+
+    def _run(self) -> None:
+        while not self._stop.is_set():
+            ami = None
+            try:
+                ami = _ami_connect()
+                self.connected = True
+                self._emit({"kind": "ami", "state": "connected"})
+                self._pump(ami)
+            except (OSError, AMIError) as exc:
+                if self.connected:
+                    self._emit({"kind": "ami", "state": "lost", "error": str(exc)})
+                self.connected = False
+            finally:
+                if ami is not None:
+                    ami.close()
+            # Retry slowly enough not to spin while Asterisk is down.
+            self._stop.wait(3.0)
+
+    def _pump(self, ami: AMI) -> None:
+        # Digits already reported for a call, so a Local-channel pair does not
+        # announce the same dialled number twice.
+        announced: set[str] = set()
+        while not self._stop.is_set():
+            got_packet = False
+            for packet in ami.packets(limit=1.0):
+                got_packet = True
+                self._handle(packet, announced)
+            # packets() returning nothing is normal (a quiet second); a closed
+            # socket shows up as an OSError from recv, which _run catches.
+            if not got_packet and self._stop.is_set():
+                return
+
+    def _handle(self, event: dict, announced: set) -> None:
+        name = event.get("event", "")
+        channel = event.get("channel", "")
+        caller = event.get("calleridnum", "")
+        exten = caller if caller in PORT_NAMES else _exten_from_channel(channel)
+        
+        tracker = get_tracker()
+
+        if name == "DTMFEnd":
+            digit = event.get("digit", "")
+            # Asterisk reports a key on both legs of a bridge; only the
+            # receiving leg is the actual press.
+            if digit and event.get("direction", "Received") == "Received":
+                self._emit({
+                    "kind": "digit",
+                    "exten": exten,
+                    "slot": PORT_NAMES.get(exten, ""),
+                    "digit": digit,
+                    "channel": channel,
+                })
+        elif name == "Newchannel":
+            dialled = event.get("exten", "")
+            base = channel.rsplit(";", 1)[0]
+            if dialled and dialled not in ("s", "") and base not in announced:
+                announced.add(base)
+                self._emit({
+                    "kind": "dialled",
+                    "exten": exten,
+                    "slot": PORT_NAMES.get(exten, ""),
+                    "number": dialled,
+                    "channel": channel,
+                })
+            # Трекер: новый канал
+            tracker.on_channel_new({
+                "channel": channel,
+                "exten": exten,
+                "slot": PORT_NAMES.get(exten, ""),
+                "state": event.get("channelstatedesc", ""),
+                "caller": caller,
+                "connected": event.get("connectedlinenum", ""),
+            })
+        elif name in ("Newstate", "Hangup", "BridgeEnter"):
+            if name == "Hangup":
+                announced.discard(channel.rsplit(";", 1)[0])
+                # Трекер: отбой
+                tracker.on_channel_hangup({
+                    "channel": channel,
+                    "exten": exten,
+                }, cause=event.get("cause-txt", ""))
+            elif name == "Newstate":
+                # Трекер: изменение состояния
+                tracker.on_channel_state_change({
+                    "channel": channel,
+                    "exten": exten,
+                    "state": event.get("channelstatedesc", ""),
+                })
+            
+            self._emit({
+                "kind": "call",
+                "event": name,
+                "exten": exten,
+                "slot": PORT_NAMES.get(exten, ""),
+                "channel": channel,
+                "state": event.get("channelstatedesc", ""),
+                "cause": event.get("cause-txt", ""),
+            })
+
+    def _emit(self, payload: dict) -> None:
+        payload["at"] = time.time()
+        try:
+            self.on_event(payload)
+        except Exception:  # a broken UI must never kill the watcher thread
+            pass

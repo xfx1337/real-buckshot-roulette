@@ -22,6 +22,10 @@ esp/config.h
 sound_overrides.json
 app/static/audio/custom/
 
+# База данных busy каналов (локальные данные, не для git)
+data/busy_channels.db
+data/test_busy_channels.db
+
 # Node deps (vendored JS + Playwright)
 node_modules/
 test-results/
