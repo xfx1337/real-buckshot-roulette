@@ -435,9 +435,10 @@
         <div id="state-game" class="player-screen" style="display:none">
             
             <!-- MULTIPLAYER MODE -->
-            <div id="mp-layout" style="display:none; width:100%; height:100%; flex-direction:column; align-items:center;">
-                <div class="turn-label" id="turn-label-mp">[ ваш ход ]</div>
-                <div class="lightning-container" id="lightning-container-mp"></div>
+            <!-- Секции игроков рисует JS: по одной на слот, число слотов задаёт
+                 дилер (0 = по числу игроков в партии). -->
+            <div id="mp-layout" class="mp-layout" style="display:none">
+                <div class="mp-grid" id="mp-grid"></div>
             </div>
 
             <!-- SOLO MODE -->
@@ -648,6 +649,10 @@
                 break;
             case 'message_clear':
                 tvHideMessage();
+                break;
+            case 'mp_slots':
+                // Дилер задал число секций игроков на экране мультиплеера.
+                mpSetSlots(cmd.slots);
                 break;
         }
     }
@@ -1014,12 +1019,41 @@
         cctvOverlay.querySelectorAll('.cctv-cell').forEach(c => c.style.removeProperty('--dg'));
     }
 
+    // Per-camera visibility set by the dealer: "rare" or "blocked".
+    // Anything absent is a normal camera.
+    function cctvVis(cam) {
+        return (cctvCfg.visibility || {})[cam] || 'normal';
+    }
+
+    // Cameras the player may see in the regular rotation — блок и «редкие»
+    // сюда не попадают, редкие приходят только через прорыв ниже.
+    function cctvNormalPool() {
+        const all = (cctvCfg.cameras && cctvCfg.cameras.length) ? cctvCfg.cameras : ['cam1'];
+        return all.filter(cam => cctvVis(cam) === 'normal');
+    }
+
+    function cctvRarePool() {
+        const all = cctvCfg.cameras || [];
+        return all.filter(cam => cctvVis(cam) === 'rare');
+    }
+
     // Pick which cameras to show for one show, per mode.
     //  single — one random camera; grid — all enabled cameras;
     //  random — coin-flip between those two: either one random camera
     //           fullscreen, or the full grid. No partial subsets.
+    // Перед обычным раскладом бросаем кубик на «редкую» камеру: с шансом
+    // rare_chance весь показ подменяется одной редкой камерой на весь экран.
+    // Для игрока это выглядит как случайный сбой, показавший закулисье.
     function cctvPickCams() {
-        const pool = (cctvCfg.cameras && cctvCfg.cameras.length) ? cctvCfg.cameras : ['cam1'];
+        const rare = cctvRarePool();
+        const chance = Math.max(0, Math.min(100, Number(cctvCfg.rare_chance ?? 10))) / 100;
+        if (rare.length && Math.random() < chance) {
+            return [rare[Math.floor(Math.random() * rare.length)]];
+        }
+        const pool = cctvNormalPool();
+        // Все обычные камеры заблокированы или помечены редкими — обычному
+        // показу нечего рисовать, поэтому пропускаем его целиком.
+        if (!pool.length) return [];
         const one = () => [pool[Math.floor(Math.random() * pool.length)]];
         if (cctvCfg.mode === 'single') return one();
         if (cctvCfg.mode === 'random') return Math.random() < 0.5 ? one() : pool.slice();
@@ -1027,6 +1061,10 @@
     }
 
     function cctvShow(cams) {
+        // Пустой набор — все камеры заблокированы или редкие и не выпали.
+        // Включать оверлей нельзя: игрок увидит чёрный прямоугольник вместо
+        // картинки с камер.
+        if (!cams || !cams.length) { cctvHide(); return; }
         cctvRender(cams);
         cctvOverlay.classList.add('active');
         cctvShown = true;
@@ -1098,7 +1136,10 @@
     // Behaves like a manual hold: auto-cycle stays paused until the dealer
     // turns CCTV off again.
     function cctvShowSpecific(cams) {
-        cams = (cams || []).filter(Boolean);
+        // Блок уважаем и здесь, а не только на сервере: телевизор — последняя
+        // точка перед глазами игрока, и запрет не должен зависеть от того,
+        // кто именно прислал команду.
+        cams = (cams || []).filter(Boolean).filter(cam => cctvVis(cam) !== 'blocked');
         if (!cams.length) return;
         clearTimeout(cctvHideTimer); cctvHideTimer = null;
         clearTimeout(cctvAutoTimer); cctvAutoTimer = null;
@@ -1350,6 +1391,15 @@
         if (cfg.reactive) fxSetConfig(cfg.reactive);
         cctvInitFrames();
         cctvApplyDegrade();
+        // Если дилер заблокировал камеру прямо во время показа — убираем её с
+        // экрана сразу, а не после конца текущего показа.
+        if (cctvShown) {
+            const live = Object.keys(cctvPersistentFrames)
+                .filter(cam => cctvPersistentFrames[cam].style.display !== 'none')
+                .filter(cam => cctvVis(cam) !== 'blocked');
+            if (!live.length) cctvHide();
+            else cctvRender(live);
+        }
         if (cctvShown && cctvCfg.fake_error && cctvCfg.fake_error.enabled) cctvStartFaults();
         else if (cctvShown) cctvStopFaults();
         cctvScheduleNext();
@@ -1484,6 +1534,9 @@
     const TIP_PHASES = ['lobby', 'dealer_loading', 'dealer_reloading'];
 
     function updateUI(data) {
+        // Держим последнее состояние: сетка мультиплеера перерисовывается ещё и
+        // по команде дилера, вне игрового тика.
+        if (!data.error) lastPlayerState = data;
         if (data.error) {
             const screens = ['state-game', 'state-dead', 'state-gameover', 'state-roundover', 'state-loading'];
             screens.forEach(s => document.getElementById(s).style.display = 'none');
@@ -1659,30 +1712,133 @@
             renderBolts(data.opponent_hp, data.opponent_max_hp, 'opponent-lightning-container', data.game_mode, data.current_round);
             renderBolts(data.my_hp, data.my_max_hp, 'solo-lightning-container', data.game_mode, data.current_round);
         } else {
-            document.getElementById('mp-layout').style.display = 'flex';
+            document.getElementById('mp-layout').style.display = 'block';
             document.getElementById('solo-layout').style.display = 'none';
 
-            const turnLabel = document.getElementById('turn-label-mp');
-            if (data.my_handcuffed) {
-                turnLabel.textContent = '[ в наручниках ]';
-                turnLabel.style.color = 'var(--red)';
-                turnLabel.classList.add('active');
-                turnLabel.style.animation = 'none';
-            } else if (data.is_my_turn) {
-                turnLabel.textContent = '[ ваш ход ]';
-                turnLabel.style.color = 'var(--green-bright)';
-                turnLabel.classList.add('active');
-                turnLabel.style.animation = '';
-            } else {
-                turnLabel.classList.remove('active');
+            renderMpGrid(data);
+        }
+    }
+
+    // ── Мультиплеер: сетка секций игроков ──
+    // Сколько секций рисовать, решает дилер (POST /api/tv/mp_slots). 0 = авто:
+    // ровно по числу игроков в партии. Ненулевое значение фиксирует сетку —
+    // лишние секции стоят пустыми («СВОБОДНО»), пока игроки подключаются.
+    const MP_SLOTS_MAX = 8;
+    let mpSlotsOverride = 0;
+    let lastPlayerState = null;
+
+    function renderMpGrid(data) {
+        const summary = Array.isArray(data.players_summary) ? data.players_summary : [];
+        const count = Math.min(
+            MP_SLOTS_MAX,
+            Math.max(mpSlotsOverride > 0 ? mpSlotsOverride : summary.length, summary.length, 1)
+        );
+
+        const grid = document.getElementById('mp-grid');
+        // Сетку подбираем той же функцией, что и экран камер: она ищет раскладку,
+        // где ячейка ближе всего к 4:3, и штрафует рваный последний ряд. Так на
+        // кинескопе 800×600 любое число секций влезает целиком, без прокрутки.
+        const { cols, rows } = cctvGridFor(count);
+        grid.style.setProperty('--mp-cols', cols);
+        grid.style.setProperty('--mp-rows', rows);
+
+        // Неполный последний ряд растягиваем на всю ширину — как в CCTV-гриде,
+        // иначе справа остаётся чёрная дыра. Остаток делим между ячейками ряда,
+        // лишние колонки достаются первым.
+        const lastCount = count - cols * (rows - 1);
+        const firstOfLast = count - lastCount;
+
+        // Перестраиваем DOM только когда изменилось число секций: иначе каждый
+        // тик состояния сбрасывал бы анимацию мигания активного игрока.
+        if (grid.children.length !== count) {
+            let html = '';
+            for (let i = 0; i < count; i++) {
+                let span = '';
+                if (i >= firstOfLast && lastCount < cols) {
+                    const idx = i - firstOfLast;
+                    const base = Math.floor(cols / lastCount);
+                    const extra = cols % lastCount;
+                    span = ` style="grid-column: span ${base + (idx < extra ? 1 : 0)}"`;
+                }
+                html += `<div class="mp-slot" data-slot="${i}"${span}>
+                    <div class="mp-slot-name"></div>
+                    <div class="mp-slot-turn"></div>
+                    <div class="mp-slot-bolts"></div>
+                </div>`;
+            }
+            grid.innerHTML = html;
+        }
+
+        for (let i = 0; i < count; i++) {
+            const slot = grid.children[i];
+            const p = summary[i];
+            const turnEl = slot.querySelector('.mp-slot-turn');
+            const nameEl = slot.querySelector('.mp-slot-name');
+            const boltsEl = slot.querySelector('.mp-slot-bolts');
+
+            if (!p) {
+                slot.classList.add('empty');
+                slot.classList.remove('dead');
+                turnEl.textContent = '';
+                turnEl.style.color = 'transparent';
+                nameEl.textContent = 'СВОБОДНО';
+                nameEl.classList.remove('active');
+                nameEl.style.color = '';
+                boltsEl.innerHTML = '';
+                continue;
             }
 
-            renderBolts(data.my_hp, data.my_max_hp, 'lightning-container-mp', data.game_mode, data.current_round);
+            slot.classList.remove('empty');
+            slot.classList.toggle('dead', !p.alive);
+
+            const isMe = p.number === data.my_number;
+            nameEl.textContent = p.name;
+
+            // Плашка узкая, поэтому статусы короткие: длинный текст в ячейке
+            // 1/8 экрана всё равно ушёл бы в многоточие.
+            if (!p.alive) {
+                turnEl.textContent = 'УБИТ';
+                turnEl.style.color = 'var(--red-bright)';
+                nameEl.classList.remove('active');
+                nameEl.style.color = '';
+            } else if (p.handcuffed) {
+                turnEl.textContent = 'НАРУЧНИКИ';
+                turnEl.style.color = 'var(--red-bright)';
+                nameEl.classList.remove('active');
+                nameEl.style.color = 'var(--red-bright)';
+            } else if (p.number === data.current_player_number) {
+                turnEl.textContent = isMe ? '▸ ВАШ ХОД' : '▸ ХОД';
+                turnEl.style.color = 'var(--green-bright)';
+                nameEl.classList.add('active');
+                nameEl.style.color = 'var(--green-bright)';
+            } else {
+                turnEl.textContent = '';
+                turnEl.style.color = 'transparent';
+                nameEl.classList.remove('active');
+                nameEl.style.color = '';
+            }
+
+            renderBoltsInto(boltsEl, p.hp, p.max_hp, data.game_mode, data.current_round);
+        }
+    }
+
+    // Дилер сменил число секций — перерисовываем немедленно на последнем
+    // известном состоянии, не дожидаясь следующего тика по игровому WS.
+    function mpSetSlots(slots) {
+        const n = parseInt(slots, 10);
+        mpSlotsOverride = (isNaN(n) || n < 0) ? 0 : Math.min(n, MP_SLOTS_MAX);
+        const layout = document.getElementById('mp-layout');
+        if (lastPlayerState && layout && layout.style.display !== 'none') {
+            renderMpGrid(lastPlayerState);
         }
     }
 
     function renderBolts(hp, maxHp, containerId, gameMode, currentRound) {
-        const container = document.getElementById(containerId);
+        renderBoltsInto(document.getElementById(containerId), hp, maxHp, gameMode, currentRound);
+    }
+
+    function renderBoltsInto(container, hp, maxHp, gameMode, currentRound) {
+        if (!container) return;
         const isCritical = hp === 1 && maxHp > 1;
         const isStoryStage3 = gameMode === 'story' && currentRound === 3;
         let html = '';

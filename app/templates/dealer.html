@@ -1128,6 +1128,22 @@ body{ cursor:default; }
 .tv-slot-row{ display:flex; align-items:center; gap:10px; margin-bottom:8px; font-family:var(--font-mono); font-size:12px; }
 .tv-slot-row label{ flex:0 0 200px; color:var(--text-dim); }
 .tv-slot-row select{ flex:1; }
+/* Видимость камер для игрока: строка на камеру, три взаимоисключающих
+   состояния. Подсвечиваем только выбранное — оператору важно за долю секунды
+   увидеть, какая камера сейчас скрыта от игрока. */
+.cam-vis-hint{ font-family:var(--font-mono); font-size:11px; line-height:1.5; color:var(--text-dim); margin-bottom:10px; }
+.cam-vis-row{ display:flex; align-items:center; gap:8px; margin-bottom:6px; font-family:var(--font-mono); font-size:12px; }
+.cam-vis-row .cam-vis-name{ flex:0 0 110px; color:var(--text-dim); letter-spacing:1px; }
+.cam-vis-row .cam-vis-btns{ display:flex; gap:6px; flex:1 1 auto; }
+.cam-vis-btn{
+  flex:1 1 0; padding:6px 8px; cursor:pointer;
+  font-family:var(--font-mono); font-size:11px; letter-spacing:1px; text-transform:uppercase;
+  background:#161110; border:1px solid var(--border-metal); color:var(--text-dim);
+}
+.cam-vis-btn:hover{ color:#e8dcc8; border-color:#6a5a44; }
+.cam-vis-btn.on[data-state="normal"]{ background:#1c2a1c; border-color:var(--green); color:var(--green); }
+.cam-vis-btn.on[data-state="rare"]{ background:#2a2410; border-color:#e5bc3e; color:#e5bc3e; }
+.cam-vis-btn.on[data-state="blocked"]{ background:#2a1414; border-color:#e07a5f; color:#e07a5f; }
 .tv-manual-row{ display:flex; align-items:center; gap:8px; margin-bottom:10px; flex-wrap:wrap; }
 .tv-manual-row select{ flex:1 1 160px; min-width:140px; }
 .tv-btns{ display:flex; gap:8px; flex-wrap:wrap; margin-top:6px; }
@@ -1338,6 +1354,7 @@ body{ cursor:default; }
                             <button class="btn btn-plate" onclick="tvToggleCCTV()" id="btn-cctv-toggle" style="flex:1; padding:13px 16px; font-size:13px;">📷 РЕЖИМ КАМЕР (CCTV) : ВЫКЛ</button>
                             <button class="btn btn-plate plate-yellow" onclick="startCctvServer(this)" style="flex:0 0 auto; padding:13px 16px; font-size:13px;" title="Скачать и запустить MediaMTX">ЗАПУСТИТЬ СЕРВЕР</button>
                             <button class="btn btn-plate" onclick="window.open('/cams','_blank')" style="flex:0 0 auto; padding:13px 16px; font-size:13px;" title="Открыть камеры в отдельной вкладке (для дилера)">🖥 КАМЕРЫ (ДИЛЕР)</button>
+                            <button class="btn btn-plate" onclick="window.open('/voip','_blank')" style="flex:0 0 auto; padding:13px 16px; font-size:13px;" title="Телефоны: порты, статусы АТС и шлюза, звонок на трубку">☎ ТЕЛЕФОНЫ</button>
                         </div>
 
                         <!-- Состояние камер: запись, заряд, температура. Обновляется
@@ -1470,6 +1487,16 @@ body{ cursor:default; }
                     </div>
 
                     <div class="rd-card">
+                        <h3>Мультиплеер на TV <span class="rd-tag">секции игроков</span></h3>
+                        <div class="tv-slot-row">
+                            <label>Количество игроков на экране</label>
+                            <input type="number" id="tv-mp-slots" min="0" max="8" step="1" value="0" style="width:70px;">
+                            <button class="btn btn-plate btn-small" onclick="tvApplyMpSlots()" style="margin-left:8px;">ПРИМЕНИТЬ</button>
+                        </div>
+                        <div class="tv-status" id="tv-mp-slots-status" style="margin-top:8px;">0 = авто (по числу подключённых игроков)</div>
+                    </div>
+
+                    <div class="rd-card">
                         <h3>Авто-режим камер (CCTV) <span class="rd-tag">крутилка на телевизоре</span></h3>
                         <label style="display:flex; align-items:center; gap:8px; margin-bottom:12px;">
                             <input type="checkbox" id="cctv-auto-enabled">
@@ -1496,7 +1523,18 @@ body{ cursor:default; }
                             <input type="number" id="cctv-max-show" min="1" style="width:70px;"></div>
 
                         <h4 style="margin-top:14px;">▸ КАМЕРЫ (пути MediaMTX, через запятую)</h4>
-                        <input type="text" id="cctv-cameras" placeholder="cam1, cam2, cam3, cam4" style="width:100%;">
+                        <input type="text" id="cctv-cameras" placeholder="cam1, cam2, cam3, cam4" style="width:100%;"
+                               oninput="renderCctvVisibility(); syncCctvPickList();">
+
+                        <h4 style="margin-top:16px;">▸ ВИДИМОСТЬ КАМЕР ДЛЯ ИГРОКА</h4>
+                        <div class="cam-vis-hint">
+                            НОРМА — обычный показ. РЕДКАЯ — камера убрана из обычной ротации,
+                            но иногда прорывается на экран сама, как случайный сбой связи.
+                            БЛОК — игрок не увидит её никогда. Панель /cams показывает всё в любом случае.
+                        </div>
+                        <div id="cctv-visibility-list"></div>
+                        <div class="tv-slot-row" style="margin-top:10px;"><label>Шанс прорыва «редкой» камеры, %</label>
+                            <input type="number" id="cctv-rare-chance" min="0" max="100" step="1" style="width:70px;"></div>
 
                         <h4 style="margin-top:16px;">▸ ФЕЙКОВАЯ ОШИБКА «НЕДОСТУПНО»</h4>
                         <label style="display:flex; align-items:center; gap:8px; margin-bottom:10px;">
@@ -3395,6 +3433,13 @@ function renderTvConfig(data) {
         document.getElementById('tv-volume-val').textContent = config.settings.volume + '%';
     }
 
+    // Секции игроков на экране мультиплеера (0 = авто по числу игроков)
+    const mpSlotsEl = document.getElementById('tv-mp-slots');
+    if (mpSlotsEl) {
+        mpSlotsEl.value = (config.multiplayer && config.multiplayer.slots) || 0;
+        tvRenderMpSlotsStatus(parseInt(mpSlotsEl.value, 10) || 0);
+    }
+
     // CCTV auto-mode settings
     renderCctvConfig(config.cctv || {});
     document.getElementById('irlpro-url').textContent = irlproUrl();
@@ -3402,6 +3447,89 @@ function renderTvConfig(data) {
 
     // Status
     updateTvStatus();
+}
+
+// ── Видимость камер для игрока ────────────────────────────────────────────
+// Живое состояние трёх кнопок на камеру. Держим отдельно от поля со списком
+// камер: оператор правит список текстом, и переразбор строки не должен терять
+// уже расставленные статусы. Камеры со статусом "normal" здесь не хранятся —
+// отсутствие записи и есть норма.
+let cctvVisibility = {};
+
+function cctvVisState(cam) {
+    return cctvVisibility[cam] || 'normal';
+}
+
+// Камеры берём из поля ввода, а не из сохранённого конфига: оператор мог
+// дописать камеру и ещё не нажать «сохранить», а статус ей выставить уже хочет.
+function cctvCameraListFromInput() {
+    const raw = document.getElementById('cctv-cameras');
+    const cams = (raw ? raw.value : '').split(',').map(s => s.trim()).filter(Boolean);
+    return cams.length ? cams : ['cam1', 'cam2', 'cam3', 'cam4'];
+}
+
+const CAM_VIS_STATES = [
+    { key: 'normal',  label: 'норма' },
+    { key: 'rare',    label: 'редкая' },
+    { key: 'blocked', label: 'блок' },
+];
+
+function renderCctvVisibility() {
+    const box = document.getElementById('cctv-visibility-list');
+    if (!box) return;
+    const cams = cctvCameraListFromInput();
+    box.innerHTML = cams.map(cam => {
+        const cur = cctvVisState(cam);
+        const btns = CAM_VIS_STATES.map(s =>
+            `<button type="button" class="cam-vis-btn${s.key === cur ? ' on' : ''}" data-state="${s.key}"
+                     onclick="setCamVisibility('${cam}', '${s.key}')">${s.label}</button>`
+        ).join('');
+        return `<div class="cam-vis-row">
+            <span class="cam-vis-name">${cam.toUpperCase()}</span>
+            <span class="cam-vis-btns">${btns}</span>
+        </div>`;
+    }).join('');
+}
+
+// Статус применяется сразу, без «сохранить» — блокировка нужна оператору
+// именно в тот момент, когда он о ней подумал, а не через два клика.
+async function setCamVisibility(cam, state) {
+    if (state === 'normal') delete cctvVisibility[cam];
+    else cctvVisibility[cam] = state;
+    renderCctvVisibility();
+    syncCctvPickList();
+    const st = document.getElementById('cctv-cfg-status');
+    try {
+        const r = await fetch('/api/tv/cctv/config', {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ visibility: cctvVisibility })
+        });
+        if (!r.ok) throw new Error('http ' + r.status);
+        const names = { normal: 'обычная', rare: 'редкая', blocked: 'заблокирована' };
+        if (st) {
+            st.textContent = `✓ ${cam.toUpperCase()} — ${names[state]}`;
+            st.className = 'tv-status playing';
+        }
+    } catch (e) {
+        if (st) { st.textContent = 'ошибка сохранения статуса камеры'; st.className = 'tv-status'; }
+    }
+}
+
+// Список в «показать игроку конкретную камеру»: заблокированные помечаем и
+// не даём выбрать — сервер их всё равно отклонит.
+function syncCctvPickList() {
+    const pick = document.getElementById('cctv-pick-cam');
+    if (!pick) return;
+    const cams = cctvCameraListFromInput();
+    const prev = pick.value;
+    pick.innerHTML = '<option value="">— выберите камеру —</option>' +
+        cams.map(cam => {
+            const vis = cctvVisState(cam);
+            const tag = vis === 'blocked' ? ' — заблокирована' : (vis === 'rare' ? ' — редкая' : '');
+            const dis = vis === 'blocked' ? ' disabled' : '';
+            return `<option value="${cam}"${dis}>${cam.toUpperCase()}${tag}</option>`;
+        }).join('');
+    if (cams.includes(prev) && cctvVisState(prev) !== 'blocked') pick.value = prev;
 }
 
 function renderCctvConfig(c) {
@@ -3446,15 +3574,16 @@ function renderCctvConfig(c) {
     fxRow('pending', true, 45);
     fxRow('afterglow', false, 50);
 
+    // Видимость камер: статусы приходят с сервера, «норма» = отсутствие записи.
+    cctvVisibility = {};
+    Object.entries(c.visibility || {}).forEach(([cam, state]) => {
+        if (state === 'rare' || state === 'blocked') cctvVisibility[cam] = state;
+    });
+    set('cctv-rare-chance', c.rare_chance ?? 10);
+    renderCctvVisibility();
+
     // Keep the "show one camera to the player" picker in sync with the pool.
-    const pick = document.getElementById('cctv-pick-cam');
-    if (pick) {
-        const cams = c.cameras || ['cam1','cam2','cam3','cam4'];
-        const prev = pick.value;
-        pick.innerHTML = '<option value="">— выберите камеру —</option>' +
-            cams.map(cam => `<option value="${cam}">${cam.toUpperCase()}</option>`).join('');
-        if (cams.includes(prev)) pick.value = prev;
-    }
+    syncCctvPickList();
     runDealerCctvClicker();
 }
 
@@ -3686,6 +3815,8 @@ async function cctvSaveConfig() {
         max_show: numById('cctv-max-show', 10),
         cameras: cameras.length ? cameras : ['cam1'],
         panning: document.getElementById('cctv-panning').checked,
+        visibility: cctvVisibility,
+        rare_chance: numById('cctv-rare-chance', 10),
         fake_error: {
             enabled: document.getElementById('cctv-fe-enabled').checked,
             chance: numById('cctv-fe-chance', 0.25),
@@ -4010,6 +4141,36 @@ function tvSetVolume(val) {
     tvVolumeTimeout = setTimeout(async () => {
         await fetch('/api/tv/volume', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ volume: parseInt(val) }) });
     }, 200); // Debounce
+}
+
+function tvRenderMpSlotsStatus(slots) {
+    const el = document.getElementById('tv-mp-slots-status');
+    if (!el) return;
+    el.textContent = slots > 0
+        ? `на экране ${slots} секц${slots === 1 ? 'ия' : (slots < 5 ? 'ии' : 'ий')}; незанятые показаны как «СВОБОДНО»`
+        : '0 = авто (по числу подключённых игроков)';
+}
+
+// Число секций игроков на телевизоре. Уходит на все TV сразу и сохраняется
+// в video_config.json, чтобы пережить перезапуск сервера.
+async function tvApplyMpSlots() {
+    const el = document.getElementById('tv-mp-slots');
+    let slots = parseInt(el.value, 10);
+    if (isNaN(slots) || slots < 0) slots = 0;
+    if (slots > 8) slots = 8;
+    el.value = slots;
+    try {
+        const r = await fetch('/api/tv/mp_slots', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ slots })
+        });
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        tvRenderMpSlotsStatus(slots);
+    } catch (e) {
+        const st = document.getElementById('tv-mp-slots-status');
+        if (st) st.textContent = 'ошибка отправки: ' + e.message;
+    }
 }
 
 async function tvSaveConfig() {

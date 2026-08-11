@@ -12,7 +12,7 @@
     "mute_game_sound": true
   },
   "settings": {
-    "volume": 52
+    "volume": 100
   },
   "loop": {
     "static_noise": true,
@@ -21,7 +21,7 @@
     "player_lose": false
   },
   "cctv": {
-    "auto_enabled": false,
+    "auto_enabled": true,
     "min_time": 10,
     "max_time": 60,
     "min_show": 5,
@@ -52,15 +52,22 @@
     "panning": true,
     "reactive": {
       "shot_enabled": true,
-      "shot_level": 70,
+      "shot_level": 100,
       "hp_enabled": true,
-      "hp_level": 60,
+      "hp_level": 34,
       "death_enabled": true,
-      "death_level": 80,
+      "death_level": 100,
       "pending_enabled": true,
-      "pending_level": 45,
+      "pending_level": 100,
       "afterglow_enabled": true,
-      "afterglow_level": 50
-    }
+      "afterglow_level": 100
+    },
+    "visibility": {
+      "cam4": "rare"
+    },
+    "rare_chance": 10
+  },
+  "multiplayer": {
+    "slots": 0
   }
 }

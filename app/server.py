@@ -38,6 +38,7 @@ from app.game_engine import (
 from app import sound_config
 from app import video_config
 from app import audio_engine
+from app import voip
 from app.sound_director import director as sound_director, loop_for_state
 
 import socket
@@ -219,6 +220,10 @@ connected_clients: dict[str, list[WebSocket]] = {}  # "dealer" or player_id -> [
 dealer_ws_list: list[WebSocket] = []
 showscreen_ws_list: list[WebSocket] = []
 tv_ws_list: list[WebSocket] = []  # TV video overlay WebSocket connections
+
+# Потолок секций игроков на экране мультиплеера: больше восьми на 4:3-кинескоп
+# уже не читается с дивана.
+MAX_TV_MP_SLOTS = 8
 
 # ── TV Video state ──
 # Current video command being broadcast to all TV screens.
@@ -1665,6 +1670,35 @@ async def tv_save_config(request: Request):
     return {"ok": True}
 
 
+@app.get("/api/tv/mp_slots", tags=["TV"], summary="Количество секций игроков на TV", include_in_schema=False)
+async def tv_get_mp_slots():
+    """Сколько секций игроков телевизор рисует в мультиплеере.
+    0 = авто (по числу игроков в партии)."""
+    cfg = video_config.load_config()
+    return {"slots": int(cfg.get("multiplayer", {}).get("slots", 0))}
+
+
+@app.post("/api/tv/mp_slots", tags=["TV"], summary="Задать количество секций игроков на TV", include_in_schema=False)
+async def tv_set_mp_slots(request: Request):
+    """Body: {"slots": 4}. 0 = авто по числу игроков, иначе 1..8 фиксированных
+    секций (пустые показываются как «СВОБОДНО»). Значение сохраняется в конфиг
+    и сразу уходит на все подключённые телевизоры."""
+    data = await request.json()
+    try:
+        slots = int(data.get("slots", 0))
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="slots должно быть числом")
+    if slots < 0 or slots > MAX_TV_MP_SLOTS:
+        raise HTTPException(status_code=400, detail=f"slots вне диапазона 0..{MAX_TV_MP_SLOTS}")
+
+    cfg = video_config.load_config()
+    cfg.setdefault("multiplayer", {})["slots"] = slots
+    video_config.save_config(cfg)
+
+    await broadcast_tv({"action": "mp_slots", "slots": slots})
+    return {"ok": True, "slots": slots}
+
+
 @app.post("/api/tv/volume", tags=["TV"], summary="Изменить громкость TV", include_in_schema=False)
 async def tv_set_volume(request: Request):
     """Set volume for TV videos. Body: {"volume": 100}"""
@@ -1747,8 +1781,17 @@ async def tv_cctv_show(request: Request):
     cameras = [str(c).strip() for c in cameras if str(c).strip()]
     if not cameras:
         return {"ok": False, "error": "Камера не выбрана"}
+    # Заблокированную камеру нельзя вытолкнуть игроку даже вручную — иначе
+    # кнопка блокировки не даёт никакой гарантии. «Редкие» ручной показ
+    # пропускает: дилер сам решил показать, случайность тут ни при чём.
+    visibility = (video_config.load_config().get("cctv") or {}).get("visibility") or {}
+    blocked = [c for c in cameras if visibility.get(c) == "blocked"]
+    cameras = [c for c in cameras if visibility.get(c) != "blocked"]
+    if not cameras:
+        names = ", ".join(sorted(blocked)).upper()
+        return {"ok": False, "error": f"Камера заблокирована для игрока: {names}"}
     await broadcast_tv({"action": "cctv_show", "cameras": cameras})
-    return {"ok": True, "cameras": cameras}
+    return {"ok": True, "cameras": cameras, "blocked": blocked}
 
 
 @app.post("/api/tv/cctv/config", tags=["TV"], summary="Сохранить настройки CCTV и разослать на TV", include_in_schema=False)
@@ -1758,9 +1801,18 @@ async def tv_cctv_config(request: Request):
     data = await request.json()
     cfg = video_config.load_config()
     cctv = cfg.setdefault("cctv", {})
-    for key in ("auto_enabled", "min_time", "max_time", "min_show", "max_show", "mode", "cameras", "panning"):
+    for key in ("auto_enabled", "min_time", "max_time", "min_show", "max_show", "mode", "cameras", "panning", "rare_chance"):
         if key in data:
             cctv[key] = data[key]
+    # Видимость приходит целым словарём — камеру со статусом "normal" не
+    # храним, иначе конфиг обрастает записями про каждую когда-либо
+    # существовавшую камеру и «норму» уже не отличить от отсутствия записи.
+    if "visibility" in data and isinstance(data["visibility"], dict):
+        cctv["visibility"] = {
+            str(cam): str(state)
+            for cam, state in data["visibility"].items()
+            if str(state) in ("rare", "blocked")
+        }
     if "fake_error" in data and isinstance(data["fake_error"], dict):
         cctv.setdefault("fake_error", {}).update(data["fake_error"])
     if "degrade" in data and isinstance(data["degrade"], dict):
@@ -2206,10 +2258,19 @@ async def cctv_status():
     самих камер."""
     cfg = video_config.load_config().get("cctv", {})
     cameras = cfg.get("cameras") or ["cam1", "cam2", "cam3", "cam4"]
+    visibility = cfg.get("visibility") or {}
     paths, api_error = await asyncio.to_thread(_mediamtx_api_paths)
+    rows = _cctv_status(cameras, paths)
+    # Статус видимости для игрока едет вместе с состоянием потока: панель
+    # /cams опрашивает этот endpoint раз в 5 секунд, так что дилер видит
+    # блокировки живьём и без перезагрузки страницы.
+    for row in rows:
+        row["visibility"] = visibility.get(row["name"], "normal")
     return {
-        "cameras": _cctv_status(cameras, paths),
+        "cameras": rows,
         "api_error": api_error,
+        "visibility": visibility,
+        "rare_chance": cfg.get("rare_chance", 10),
         "now": time.time(),
     }
 
@@ -2292,6 +2353,232 @@ async def tv_state():
     return tv_video_state
 
 
+# ── VoIP: телефоны через АТС и шлюз AddPac ───────────────────────────────
+#
+# Панель /voip показывает всю цепочку Asterisk → шлюз → трубка и даёт по ней
+# кликать. Вся работа с железом живёт в app/voip.py; здесь только HTTP и
+# WebSocket поверх неё.
+#
+# Каждый вызов туда — блокирующие сокеты (AMI и telnet), поэтому все они
+# уходят в asyncio.to_thread: молчащий шлюз не должен вешать игровой цикл.
+
+voip_ws_list: list[WebSocket] = []
+
+# Последние события телефонов — чтобы вкладка, открытая после набора, не
+# начинала с пустого лога.
+voip_events: list[dict] = []
+VOIP_EVENTS_MAX = 200
+
+_voip_watcher = None
+
+
+async def broadcast_voip(payload: dict) -> None:
+    """Разослать событие всем открытым панелям /voip."""
+    message = json.dumps(payload, ensure_ascii=False)
+    for ws in list(voip_ws_list):
+        try:
+            await ws.send_text(message)
+        except Exception:
+            if ws in voip_ws_list:
+                voip_ws_list.remove(ws)
+
+
+def _voip_on_event(payload: dict) -> None:
+    """Колбэк потока DigitWatcher — из его треда, не из event loop.
+
+    Поэтому отправка в сокеты идёт через run_coroutine_threadsafe: трогать
+    WebSocket из чужого треда нельзя.
+    """
+    voip_events.append(payload)
+    del voip_events[:-VOIP_EVENTS_MAX]
+    loop = _voip_loop
+    if loop is None:
+        return
+    try:
+        asyncio.run_coroutine_threadsafe(broadcast_voip(payload), loop)
+    except RuntimeError:
+        pass
+
+
+_voip_loop: Optional[asyncio.AbstractEventLoop] = None
+
+
+def _voip_ensure_watcher() -> None:
+    """Поднять слушателя AMI, если он ещё не запущен.
+
+    Запускается при первом открытии панели, а не на старте сервера: игра
+    обычно крутится и без АТС, и лишний тред с бесконечными попытками
+    подключения ей не нужен. Сам DigitWatcher переживает перезапуск Asterisk
+    и переподключается сам.
+    """
+    global _voip_watcher, _voip_loop
+    _voip_loop = asyncio.get_running_loop()
+    if _voip_watcher is None:
+        _voip_watcher = voip.DigitWatcher(_voip_on_event)
+    _voip_watcher.start()
+
+
+@app.get("/voip", response_class=HTMLResponse, tags=["VoIP"], summary="Панель телефонов", include_in_schema=False)
+async def voip_page(request: Request):
+    """Страница управления телефонами: порты, статусы цепочки, звонки, цифры."""
+    _voip_ensure_watcher()
+    return templates.TemplateResponse("voip.html", {
+        "request": request,
+        "ports": [
+            {
+                "exten": exten,
+                "slot": slot,
+                "known_bad": exten in voip.KNOWN_BAD_PORTS,
+            }
+            for exten, slot in voip.PORT_NAMES.items()
+        ],
+        "targets": list(voip.CALL_TARGETS.keys()),
+    })
+
+
+@app.get("/api/voip/status", tags=["VoIP"], summary="Состояние АТС, шлюза и портов", include_in_schema=False)
+async def voip_status(gateway: bool = True):
+    """Снимок всей цепочки.
+
+    `gateway=false` пропускает telnet-опрос: он занимает несколько секунд на
+    неотвечающем шлюзе, а страница при этом должна успевать обновлять
+    остальное.
+    """
+    return await asyncio.to_thread(voip.collect_status, gateway)
+
+
+@app.post("/api/voip/call", tags=["VoIP"], summary="Позвонить на трубку", include_in_schema=False)
+async def voip_call(request: Request):
+    data = await request.json()
+    exten = str(data.get("exten", ""))
+    target = str(data.get("target", "lobby"))
+    timeout_ms = int(data.get("timeout_ms", 30000))
+    try:
+        result = await asyncio.to_thread(voip.originate, exten, target, timeout_ms)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except (OSError, voip.AMIError) as exc:
+        raise HTTPException(status_code=503, detail=str(exc))
+    await broadcast_voip({"kind": "action", "action": "call", **result, "at": time.time()})
+    return result
+
+
+@app.post("/api/voip/hangup", tags=["VoIP"], summary="Сбросить звонок", include_in_schema=False)
+async def voip_hangup(request: Request):
+    data = await request.json()
+    exten = str(data.get("exten", ""))
+    channel = str(data.get("channel", ""))
+    try:
+        result = await asyncio.to_thread(voip.hangup, exten, channel)
+    except (OSError, voip.AMIError) as exc:
+        raise HTTPException(status_code=503, detail=str(exc))
+    await broadcast_voip({"kind": "action", "action": "hangup", "exten": exten,
+                          **result, "at": time.time()})
+    return result
+
+
+@app.post("/api/voip/reset-port", tags=["VoIP"], summary="Сбросить залипший порт", include_in_schema=False)
+async def voip_reset_port(request: Request):
+    """Принудительно вернуть порт в Idle через shutdown/no shutdown на шлюзе.
+
+    Нужно, когда порт застрял в Disconnecting: шлюз считает линию занятой,
+    входящие получают 503, набор не читается, и само это не проходит.
+    Единственная пишущая команда, которую панель шлёт на шлюз, — поэтому она
+    отдельным роутом, а не через /api/voip/cli, который остаётся только на
+    чтение.
+    """
+    data = await request.json()
+    exten = str(data.get("exten", ""))
+    try:
+        result = await asyncio.to_thread(voip.reset_port, exten)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except (OSError, voip.AMIError) as exc:
+        raise HTTPException(status_code=503, detail=str(exc))
+    await broadcast_voip({"kind": "action", "action": "reset-port",
+                          **result, "at": time.time()})
+    return result
+
+
+@app.post("/api/voip/cli", tags=["VoIP"], summary="Команда на шлюз AddPac", include_in_schema=False)
+async def voip_cli(request: Request):
+    """Выполнить команду в CLI шлюза по telnet.
+
+    Список ограничен читающими командами: панель — пульт наблюдения, а
+    `configure terminal` с опечаткой из браузера уронит порты молча.
+    """
+    data = await request.json()
+    command = str(data.get("command", "")).strip()
+    if command not in VOIP_CLI_COMMANDS:
+        raise HTTPException(status_code=400, detail=f"команда не разрешена: {command}")
+    try:
+        replies = await asyncio.to_thread(voip.gateway_run, [command], 8.0)
+    except OSError as exc:
+        raise HTTPException(status_code=503, detail=str(exc))
+    return {"ok": True, "command": command, "output": replies[0][1] if replies else ""}
+
+
+# Что можно запускать на шлюзе из браузера — только чтение состояния.
+VOIP_CLI_COMMANDS = [
+    "show voice port summary",
+    "show call active",
+    "show sip",
+    "show interface",
+    "show running-config",
+]
+
+
+@app.get("/api/voip/cli/commands", tags=["VoIP"], summary="Разрешённые команды шлюза", include_in_schema=False)
+async def voip_cli_commands():
+    return {"commands": VOIP_CLI_COMMANDS}
+
+
+@app.get("/api/voip/events", tags=["VoIP"], summary="Последние события телефонов", include_in_schema=False)
+async def voip_recent_events(limit: int = 50):
+    return {"events": voip_events[-limit:]}
+
+
+@app.get("/api/voip/busy/history", tags=["VoIP"], summary="История занятости каналов", include_in_schema=False)
+async def voip_busy_history(
+    exten: Optional[str] = None,
+    since: Optional[float] = None,
+    until: Optional[float] = None,
+    limit: int = 100
+):
+    """История звонков с фильтрацией.
+    
+    - exten: фильтр по расширению (101-108)
+    - since: начало периода (unix timestamp)
+    - until: конец периода (unix timestamp)
+    - limit: максимум записей (по умолчанию 100)
+    """
+    from app.busy_tracker import get_tracker
+    tracker = get_tracker()
+    calls = await asyncio.to_thread(tracker.get_calls_history, exten, since, until, limit)
+    return {"calls": calls}
+
+
+@app.get("/api/voip/busy/statistics", tags=["VoIP"], summary="Статистика по звонкам", include_in_schema=False)
+async def voip_busy_statistics(since: Optional[float] = None):
+    """Статистика по звонкам за период.
+    
+    - since: начало периода (unix timestamp), если не указан - вся история
+    """
+    from app.busy_tracker import get_tracker
+    tracker = get_tracker()
+    stats = await asyncio.to_thread(tracker.get_statistics, since)
+    return stats
+
+
+@app.get("/api/voip/busy/active", tags=["VoIP"], summary="Текущие активные звонки", include_in_schema=False)
+async def voip_busy_active():
+    """Список звонков, которые сейчас активны."""
+    from app.busy_tracker import get_tracker
+    tracker = get_tracker()
+    active = await asyncio.to_thread(tracker.get_active_calls)
+    return {"active_calls": active}
+
+
 # ── WebSockets ──
 #
 # WebSocket-эндпоинты не отображаются в OpenAPI/Swagger (спецификация OpenAPI 3.0
@@ -2364,6 +2651,30 @@ async def ws_player(ws: WebSocket, player_id: str):
             connected_clients[player_id].remove(ws)
 
 
+@app.websocket("/ws/voip")
+async def ws_voip(ws: WebSocket):
+    """Поток событий телефонов для панели /voip.
+
+    Сервер шлёт: {"kind": "digit"|"dialled"|"call"|"ami"|"action", ...}.
+    Клиент — только keep-alive.
+    """
+    await ws.accept()
+    voip_ws_list.append(ws)
+    _voip_ensure_watcher()
+    try:
+        # Свежеоткрытая вкладка догоняет уже случившееся, иначе лог пуст до
+        # первого нажатия на трубке.
+        for event in voip_events[-30:]:
+            await ws.send_text(json.dumps(event, ensure_ascii=False))
+        while True:
+            await ws.receive_text()
+    except WebSocketDisconnect:
+        pass
+    finally:
+        if ws in voip_ws_list:
+            voip_ws_list.remove(ws)
+
+
 @app.websocket("/ws/tv")
 async def ws_tv(ws: WebSocket):
     """WebSocket for TV video overlay. Server pushes video commands;
@@ -2373,8 +2684,15 @@ async def ws_tv(ws: WebSocket):
     try:
         # Send current CCTV settings on connect so the TV can run its own
         # auto-cycle timer even if the dealer never re-saves during this session.
-        _cctv = video_config.load_config().get("cctv", {})
+        _cfg = video_config.load_config()
+        _cctv = _cfg.get("cctv", {})
         await ws.send_text(json.dumps({"action": "cctv_config", "cctv": _cctv}, ensure_ascii=False))
+        # Сетка секций мультиплеера: телевизор, включённый посреди партии,
+        # должен нарисовать столько же слотов, сколько остальные.
+        await ws.send_text(json.dumps({
+            "action": "mp_slots",
+            "slots": int(_cfg.get("multiplayer", {}).get("slots", 0)),
+        }, ensure_ascii=False))
         # Send current video state on connect
         if tv_video_state["action"] != "idle":
             await ws.send_text(json.dumps(tv_video_state, ensure_ascii=False))

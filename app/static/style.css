@@ -600,6 +600,129 @@ body {
     animation: terminalBlink 1.2s step-end infinite;
 }
 
+/* Multiplayer TV Layout — секции игроков сеткой, как экран CCTV: одна ячейка
+   на игрока, ничего не скроллится и не переносится на «следующий экран».
+   Число колонок/строк подбирает JS под 4:3 кинескоп и кладёт в --mp-cols /
+   --mp-rows, так что одна разметка держит и 2, и 8 игроков.
+
+   Все размеры внутри ячейки — в cqmin (проценты от короткой стороны САМОЙ
+   ячейки, не экрана). Поэтому имя и заряды ужимаются вместе с ячейкой: на
+   800×600 восемь секций читаются так же, как две. */
+.mp-layout {
+    width: 100%;
+    height: 100vh;
+    background: #000;
+    position: relative;
+}
+
+.mp-grid {
+    display: grid;
+    grid-template-columns: repeat(var(--mp-cols, 2), minmax(0, 1fr));
+    grid-template-rows: repeat(var(--mp-rows, 1), minmax(0, 1fr));
+    width: 100%;
+    height: 100%;
+    gap: 4px;
+    padding: 4px;
+    box-sizing: border-box;
+}
+
+.mp-slot {
+    container-type: size;
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    min-width: 0;
+    min-height: 0;
+    overflow: hidden;
+    background: #0b0b0b;
+    border: 1px solid rgba(225, 218, 198, 0.35);
+    box-sizing: border-box;
+}
+
+/* Имя игрока — плашка в углу ячейки, как подпись камеры «CAM1 [REC]». */
+.mp-slot-name {
+    position: absolute;
+    top: 4cqmin;
+    left: 4cqmin;
+    right: 4cqmin;
+    background: rgba(0, 0, 0, 0.7);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    padding: 1.5cqmin 2.5cqmin;
+    font-family: var(--font-mono);
+    font-size: 7cqmin;
+    line-height: 1.1;
+    letter-spacing: 1px;
+    color: var(--text-bright);
+    text-align: left;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    z-index: 3;
+    transition: color 0.3s;
+}
+
+.mp-slot-name.active {
+    animation: terminalBlink 1.2s step-end infinite;
+}
+
+/* Статус хода — вторая строка под именем, тем же шрифтом плашки. */
+.mp-slot-turn {
+    position: absolute;
+    top: 14cqmin;
+    left: 4cqmin;
+    right: 4cqmin;
+    font-family: var(--font-mono);
+    font-size: 5.5cqmin;
+    line-height: 1.1;
+    letter-spacing: 1px;
+    text-align: left;
+    color: transparent;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    z-index: 3;
+}
+
+/* Заряды по центру ячейки. Держат пропорцию 1:2 и ужимаются по ширине, когда
+   зарядов много, а ячейка узкая — ряд никогда не переносится. */
+.mp-slot-bolts {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-wrap: nowrap;
+    gap: 2cqmin;
+    width: 100%;
+    height: 100%;
+    padding: 24cqmin 5cqmin 8cqmin;
+    box-sizing: border-box;
+}
+
+.mp-slot-bolts .lightning-bolt {
+    height: 100%;
+    width: auto;
+    max-width: none;
+    max-height: none;
+    aspect-ratio: 0.5;
+    flex: 0 1 auto;
+    min-width: 0;
+}
+
+/* Пустой слот: место под игрока зарезервировано, но никто не занял. */
+.mp-slot.empty { background: #070707; }
+.mp-slot.empty .mp-slot-name {
+    color: var(--text-faint, #6b6455);
+    background: rgba(0, 0, 0, 0.5);
+}
+
+/* Выбывший игрок: ячейка гаснет, но с экрана не пропадает — сетка не прыгает. */
+.mp-slot.dead { background: #0a0505; }
+.mp-slot.dead .mp-slot-name {
+    color: var(--red-bright, #c45050);
+    text-decoration: line-through;
+}
+
 /* Fallback for lobby/dead screens */
 .player-lobby-msg {
     font-family: var(--font-mono);

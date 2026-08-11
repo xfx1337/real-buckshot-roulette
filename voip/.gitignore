@@ -1,0 +1,4 @@
+# Asterisk source tree and the local install built from it — 350 MB of
+# artefacts, rebuildable with scripts/build-asterisk.sh.
+build/
+asterisk-local/
