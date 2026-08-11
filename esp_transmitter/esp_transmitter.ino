@@ -9,6 +9,23 @@ Adafruit_QMC5883P mag = Adafruit_QMC5883P();
 #undef TRIGGER_PIN
 #define TRIGGER_PIN D5 // GPIO14 на Wemos D1 Mini
 
+#include <EEPROM.h>
+
+struct CalibData {
+    uint32_t magic;
+    float offsetX, offsetY, offsetZ;
+    float scaleX, scaleY, scaleZ;
+};
+
+// ==== ЗНАЧЕНИЯ ПО УМОЛЧАНИЮ (заменятся из EEPROM, если есть) ====
+float MAG_OFFSET_X = 0.095;
+float MAG_OFFSET_Y = 0.093;
+float MAG_OFFSET_Z = -0.203;
+float MAG_SCALE_X = 0.849;
+float MAG_SCALE_Y = 1.197;
+float MAG_SCALE_Z = 1.014;
+// ===================================================
+
 typedef struct {
     uint32_t triggerCode;
     float angle; // 3D tilt-compensated azimuth (0..360°)
@@ -39,6 +56,23 @@ bool readMPU6050(float &ax, float &ay, float &az) {
 
 void setup() {
     Serial.begin(115200);
+    
+    // Инициализация EEPROM
+    EEPROM.begin(512);
+    CalibData data;
+    EEPROM.get(0, data);
+    if (data.magic == 0x1337BEEF) {
+        MAG_OFFSET_X = data.offsetX;
+        MAG_OFFSET_Y = data.offsetY;
+        MAG_OFFSET_Z = data.offsetZ;
+        MAG_SCALE_X = data.scaleX;
+        MAG_SCALE_Y = data.scaleY;
+        MAG_SCALE_Z = data.scaleZ;
+        Serial.println("[EEPROM] Загружены калибровочные данные из памяти!");
+    } else {
+        Serial.println("[EEPROM] Калибровочные данные не найдены, используются дефолтные.");
+    }
+    
     Wire.begin();
     
     // 1. Пробуждаем MPU6050 (0x68) и включаем I2C Bypass
@@ -103,14 +137,6 @@ void setup() {
     Serial.println("==================================");
 }
 
-// ==== ВСТАВЬ СЮДА ЗНАЧЕНИЯ ИЗ СКЕТЧА КАЛИБРОВКИ ====
-float MAG_OFFSET_X = 0.095;
-float MAG_OFFSET_Y = 0.093;
-float MAG_OFFSET_Z = -0.203;
-float MAG_SCALE_X = 0.849;
-float MAG_SCALE_Y = 1.197;
-float MAG_SCALE_Z = 1.014;
-// ===================================================
 
 float lastKnownAngle = 0.0f;
 float lastKnownPitch = 0.0f;
@@ -183,6 +209,15 @@ void loop() {
                     Serial.printf("float MAG_SCALE_Y = %.3f;\n", scaleY);
                     Serial.printf("float MAG_SCALE_Z = %.3f;\n", scaleZ);
                     Serial.println("==============================================\n");
+
+                    // Сохраняем в EEPROM
+                    CalibData cdata;
+                    cdata.magic = 0x1337BEEF;
+                    cdata.offsetX = offsetX; cdata.offsetY = offsetY; cdata.offsetZ = offsetZ;
+                    cdata.scaleX = scaleX; cdata.scaleY = scaleY; cdata.scaleZ = scaleZ;
+                    EEPROM.put(0, cdata);
+                    EEPROM.commit();
+                    Serial.println("[EEPROM] Данные калибровки успешно сохранены в память!");
 
                     // Применяем сразу, чтобы не надо было перезагружать для проверки
                     MAG_OFFSET_X = offsetX; MAG_OFFSET_Y = offsetY; MAG_OFFSET_Z = offsetZ;
