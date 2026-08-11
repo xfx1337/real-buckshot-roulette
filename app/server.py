@@ -22,7 +22,7 @@ import zipfile
 from pathlib import Path
 from contextlib import asynccontextmanager
 
-from typing import Optional
+from typing import Optional, Union, List, Dict, Any
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request, Response, Form, HTTPException, UploadFile, File
 from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse, FileResponse
@@ -392,6 +392,24 @@ def _queue_sound_state(state: dict):
 async def broadcast_state():
     """Send updated game state to all connected clients."""
     if not game:
+        # Даже без игры шлём калибровку дилеру, чтобы UI обновлялся
+        if is_calibrating or compass_calibration or last_compass_shot:
+            calib_msg = json.dumps({
+                "calibration": {
+                    "is_calibrating": is_calibrating,
+                    "queue": calibration_queue,
+                    "calibrated": compass_calibration,
+                    "last_shot": last_compass_shot,
+                }
+            }, ensure_ascii=False)
+            dead = []
+            for ws in dealer_ws_list:
+                try:
+                    await ws.send_text(calib_msg)
+                except Exception:
+                    dead.append(ws)
+            for ws in dead:
+                dealer_ws_list.remove(ws)
         return
     # Dealer
     dealer_dict = game.to_dict(for_dealer=True)
@@ -408,6 +426,13 @@ async def broadcast_state():
     # Идёт ли сейчас ролик на TV. Нужно кнопке ручного запуска на экране
     # «конец игры»: пока ролик крутится, она заблокирована, после — снова жмётся.
     dealer_dict["tv_playing"] = tv_video_state.get("action") == "play"
+    # Калибровка компаса
+    dealer_dict["calibration"] = {
+        "is_calibrating": is_calibrating,
+        "queue": calibration_queue,
+        "calibrated": compass_calibration,
+        "last_shot": last_compass_shot,
+    }
     dealer_data = json.dumps(dealer_dict, ensure_ascii=False)
     dead_ws = []
     for ws in dealer_ws_list:
@@ -1597,20 +1622,248 @@ async def esp_force_fire_cmd():
     return {"ok": True}
 
 
+# =====================================================================
+# CALIBRATION API  — калибровка компаса дробовика
+# =====================================================================
+# =====================================================================
+# CALIBRATION API  — калибровка компаса дробовика
+# =====================================================================
+compass_calibration: dict = {}   # slot_idx (int) -> {"angle": float, "target_id": str}
+                                 # "self_N" -> {"angle": float, "pitch": float} — per-player self-shot
+is_calibrating: bool = False
+calibration_queue: list = []     # список индексов, которые ещё ждём
+last_compass_shot: Optional[dict] = None  # данные о последнем выстреле с компаса
+
+
+@app.post("/api/calibration/start", tags=["ESP32", "Dealer Actions"])
+async def start_calibration(count: int = Form(...)):
+    global compass_calibration, is_calibrating, calibration_queue, last_compass_shot
+    compass_calibration = {}
+    is_calibrating = True
+    # Шаги калибровки: для каждого игрока — сначала выстрел В него, затем В СЕБЯ.
+    # Пример для 3 игроков: [0, "self_0", 1, "self_1", 2, "self_2"]
+    calibration_queue = []
+    for i in range(count):
+        calibration_queue.append(i)           # выстрел в игрока i
+        calibration_queue.append(f"self_{i}") # выстрел в себя (для игрока i)
+    last_compass_shot = None
+    print(f"[КАЛИБРОВКА] Старт! Очередь шагов: {calibration_queue}")
+    await broadcast_state()
+    return {"ok": True, "queue": calibration_queue}
+
+
+@app.post("/api/calibration/cancel", tags=["ESP32", "Dealer Actions"])
+async def cancel_calibration():
+    global is_calibrating, calibration_queue
+    is_calibrating = False
+    calibration_queue = []
+    print("[КАЛИБРОВКА] Отменена")
+    await broadcast_state()
+    return {"ok": True}
+
+
+@app.post("/api/calibration/assign", tags=["ESP32", "Dealer Actions"])
+async def assign_calibration_target(
+    slot_idx: Union[int, str] = Form(...),
+    target_id: str = Form(...)
+):
+    global compass_calibration
+    if slot_idx in compass_calibration:
+        if isinstance(compass_calibration[slot_idx], dict):
+            compass_calibration[slot_idx]["target_id"] = target_id
+        else:
+            compass_calibration[slot_idx] = {
+                "angle": float(compass_calibration[slot_idx]),
+                "target_id": target_id
+            }
+        print(f"[КАЛИБРОВКА] Слот #{slot_idx} переназначен на: {target_id}")
+        await broadcast_state()
+        return {"ok": True, "calibration": compass_calibration}
+    return {"ok": False, "error": "Invalid slot index"}
+
+
 @app.post(
     "/api/esp/shoot",
     tags=["ESP32"],
     summary="Продвинуть патрон по сигналу физического курка",
-    description=(
-        "Вызывается прошивкой ESP32 в момент физического выстрела (RF-курок). "
-        "Выталкивает текущий патрон из очереди, чтобы статус показал следующий, "
-        "и рассылает обновление состояния дилеру/игрокам. **Не наносит урон и не "
-        "меняет ход** — игровую логику по-прежнему ведёт дилер через веб-интерфейс."
-    ),
+    description="Принимает выстрел, угол компаса и наклон (pitch) с физического дробовика.",
 )
-async def esp_shoot():
+async def esp_shoot(
+    angle: Optional[float] = Form(None, description="Азимут (угол) компаса от 0 до 360"),
+    pitch: Optional[float] = Form(None, description="Наклон ствола от -90 до +90")
+):
+    global is_calibrating, calibration_queue, compass_calibration, last_compass_shot
+    import time
+    
+    # 1. Если идёт калибровка, перехватываем выстрел
+    if is_calibrating and angle is not None:
+        if calibration_queue:
+            target_idx = calibration_queue.pop(0)
+            # Определяем тип шага: "self_N" (выстрел в себя для игрока N) или число (выстрел в игрока)
+            is_self_step = isinstance(target_idx, str) and target_idx.startswith("self_")
+            if is_self_step:
+                # Извлекаем номер игрока из "self_N"
+                parent_idx = int(target_idx.split("_")[1])
+                parent_name = "Дилер" if parent_idx == 0 else f"Игрок {parent_idx}"
+                default_target = target_idx
+                target_name = f"В СЕБЯ 🎯 (после {parent_name})"
+            elif target_idx == 0:
+                default_target = "dealer"
+                target_name = "Дилер"
+            else:
+                default_target = f"player_{target_idx}"
+                target_name = f"Игрок {target_idx}"
+
+            compass_calibration[target_idx] = {
+                "angle": angle,
+                "target_id": default_target,
+                "pitch": pitch
+            }
+            last_compass_shot = {
+                "angle": angle,
+                "pitch": pitch,
+                "slot_idx": target_idx,
+                "target_id": default_target,
+                "target_name": target_name,
+                "is_calibration": True,
+                "timestamp": time.time()
+            }
+            print(f"[КАЛИБРОВКА] ШАГ '{target_idx}' ({target_name}) сохранен: Угол {angle}°, Наклон {pitch}°")
+            if not calibration_queue:
+                is_calibrating = False
+                print("[КАЛИБРОВКА] Все шаги калибровки успешно завершены!")
+            await broadcast_state()
+            return {"ok": True, "calibrating": True, "last_shot": last_compass_shot}
+        else:
+            is_calibrating = False
+            await broadcast_state()
+
+    if angle is not None and compass_calibration:
+        def angle_diff(a, b):
+            d = abs(a - b)
+            return min(d, 360.0 - d)
+            
+        def get_angle(val):
+            if isinstance(val, dict):
+                return val["angle"]
+            return float(val)
+
+        # 2. Определение физического выстрела во время игры
+        # Пространственные ключи — только целевые слоты (числа), не self_N
+        spatial_keys = [k for k in compass_calibration.keys()
+                        if not (isinstance(k, str) and (k == "self" or k.startswith("self_")))]
+        if spatial_keys:
+            best_idx = min(spatial_keys, key=lambda k: angle_diff(angle, get_angle(compass_calibration[k])))
+            calib_entry = compass_calibration[best_idx]
+            assigned_target = calib_entry["target_id"] if isinstance(calib_entry, dict) else f"player_{best_idx}"
+        else:
+            best_idx = 0
+            assigned_target = "dealer"
+        
+        target_name = assigned_target
+        actual_target_id = None
+        is_self_shot = False
+
+        # Порог наклона (Pitch) для выстрела в себя — берём per-player self калибровку
+        self_pitch_threshold = 30.0
+        # Ищем self-калибровку для ближайшего игрока: "self_N" где N = best_idx
+        self_key = f"self_{best_idx}"
+        if self_key in compass_calibration and isinstance(compass_calibration[self_key], dict):
+            calib_self_pitch = compass_calibration[self_key].get("pitch")
+            if calib_self_pitch is not None:
+                self_pitch_threshold = min(30.0, abs(calib_self_pitch) * 0.7)
+        # Фоллбэк на старый единый "self" ключ (обратная совместимость)
+        elif "self" in compass_calibration and isinstance(compass_calibration["self"], dict):
+            calib_self_pitch = compass_calibration["self"].get("pitch")
+            if calib_self_pitch is not None:
+                self_pitch_threshold = min(30.0, abs(calib_self_pitch) * 0.7)
+
+        # 1. Выстрел В СЕБЯ по замеру наклона (Pitch)
+        current_shooter = game.get_current_player() if game else None
+        if pitch is not None and abs(pitch) >= self_pitch_threshold and current_shooter and current_shooter.alive:
+            actual_target_id = current_shooter.id
+            target_name = f"{current_shooter.name} (В СЕБЯ 🎯)"
+            is_self_shot = True
+
+        # 2. Выстрел по азимуту компаса (горизонтальная цель)
+        if not actual_target_id and game and game.players:
+            dealer_id = None
+            dealer_name = "Дилер"
+            human_players = []
+
+            for pid, pl in game.players.items():
+                if getattr(pl, "is_dealer", False) or "dealer" in pid.lower() or pl.name.lower() in ["dealer", "дилер"]:
+                    dealer_id = pid
+                    dealer_name = pl.name
+                else:
+                    human_players.append((pid, pl))
+
+            if assigned_target == "dealer":
+                if dealer_id:
+                    actual_target_id = dealer_id
+                    target_name = dealer_name
+                elif human_players:
+                    actual_target_id = human_players[0][0]
+                    target_name = human_players[0][1].name
+            elif assigned_target.startswith("player_"):
+                try:
+                    p_num = int(assigned_target.split("_")[1]) - 1  # player_1 -> index 0
+                    if 0 <= p_num < len(human_players):
+                        actual_target_id = human_players[p_num][0]
+                        target_name = human_players[p_num][1].name
+                except Exception:
+                    pass
+
+            if not actual_target_id and assigned_target in game.players:
+                actual_target_id = assigned_target
+                target_name = game.players[assigned_target].name
+
+            if not actual_target_id:
+                try:
+                    idx = int(best_idx)
+                    if idx == 0 and dealer_id:
+                        actual_target_id = dealer_id
+                        target_name = dealer_name
+                    else:
+                        h_idx = idx - 1 if dealer_id else idx
+                        if 0 <= h_idx < len(human_players):
+                            actual_target_id = human_players[h_idx][0]
+                            target_name = human_players[h_idx][1].name
+                except Exception:
+                    pass
+
+            if not actual_target_id and game.players:
+                first_pid, first_pl = list(game.players.items())[0]
+                actual_target_id = first_pid
+                target_name = first_pl.name
+
+        last_compass_shot = {
+            "angle": angle,
+            "pitch": pitch,
+            "slot_idx": best_idx,
+            "target_id": assigned_target,
+            "actual_target_id": actual_target_id,
+            "target_name": target_name,
+            "is_self_shot": is_self_shot,
+            "is_calibration": False,
+            "timestamp": time.time()
+        }
+        print(f"[ВЫСТРЕЛ 3D] Угол {angle}°, Наклон {pitch}° -> Цель: {target_name}")
+
+        if game and game.phase == GamePhase.PLAYER_TURN and actual_target_id:
+            try:
+                prev = copy.deepcopy(game)
+                result = game.shoot(actual_target_id)
+                push_undo(prev)
+                await broadcast_state()
+                return {"ok": True, "fired": True, "automated": True, "last_shot": last_compass_shot, **result}
+            except Exception as e:
+                print(f"[esp_shoot] Ошибка авто-выстрела: {e}")
+
     if not game:
-        return {"ok": False, "fired": False}
+        await broadcast_state()
+        return {"ok": False, "fired": False, "last_shot": last_compass_shot}
+
     result = game.esp_shoot()
     if result.get("fired"):
         await broadcast_state()

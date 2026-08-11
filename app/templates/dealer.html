@@ -1181,6 +1181,12 @@ body{ cursor:default; }
         </div>
     </header>
 
+    <!-- ИНДИКАТОР ВЫСТРЕЛА С КОМПАСА -->
+    <div id="compass-shot-banner" style="display:none; background: linear-gradient(90deg, rgba(255,164,56,0.2), rgba(255,87,34,0.3)); border-bottom: 2px solid var(--orange); padding: 8px 20px; font-family: var(--font-mono); font-size: 13px; color: #fff; text-shadow: 0 1px 2px #000; align-items: center; justify-content: space-between; transition: all 0.3s ease;">
+        <span>🎯 <strong>ВЫСТРЕЛ С КОМПАСА:</strong> <span id="compass-shot-angle" style="color:var(--yellow); font-weight:bold;">--</span>° ➔ Попадание: <strong id="compass-shot-target" style="color:#3fef6a; font-size:14px; text-transform:uppercase;">--</strong></span>
+        <span id="compass-shot-mode" class="rd-tag" style="font-size:11px;"></span>
+    </div>
+
     <div class="rd-body">
         <!-- ХОД -->
         <div class="rd-screen" id="rd-screen-turn" hidden>
@@ -1273,6 +1279,31 @@ body{ cursor:default; }
                     <div class="rd-card" style="flex:1 1 auto;"><h3>Лобби <span class="rd-tag" id="current-mode-badge"></span></h3>
                         <div id="lobby-players" class="players-grid" style="grid-template-columns:1fr"></div>
                         <p class="hint" id="lobby-hint">Ожидание игроков...</p>
+                        
+                        <!-- КАЛИБРОВКА КОМПАСА -->
+                        <div class="sidebar-section" style="margin-bottom:12px;">
+                            <h3>Калибровка дробовика <span class="rd-tag">компас</span></h3>
+                            <div style="margin-bottom:10px; font-family:var(--font-mono); font-size:12px; color:var(--text-dim);">
+                                Укажите кол-во целей и по очереди для каждой: 1) стреляйте В игрока, 2) затем В СЕБЯ.
+                            </div>
+                            <div style="display:flex; gap:10px; margin-bottom:10px;">
+                                <input type="number" id="calib-count" class="cfg-input" value="2" min="1" max="4" style="width:60px;">
+                                <button class="btn btn-plate plate-yellow" onclick="startCalibration()" id="btn-start-calib" style="flex:1;">НАЧАТЬ КАЛИБРОВКУ</button>
+                                <button class="btn btn-secondary" onclick="cancelCalibration()" id="btn-cancel-calib" style="display:none; padding:8px 12px;">ОТМЕНА</button>
+                            </div>
+                            <div id="calib-status" style="font-family:var(--font-mono); font-size:12px; color:var(--orange); display:none; padding:8px; border:1px solid #5a3c18; background:rgba(255,164,56,.1);">
+                                Ожидание выстрела для калибровки цели: <strong id="calib-target"></strong>...
+                            </div>
+                            <div id="calib-done" style="font-family:var(--font-mono); font-size:12px; color:var(--green); display:none; padding:8px; border:1px solid #2a4a2c; background:rgba(63,239,106,.1);">
+                                Калибровка завершена!
+                            </div>
+                            <!-- Назначение ролей для откалиброванных углов -->
+                            <div id="calib-mapping-box" style="margin-top:12px; display:none; border-top:1px solid rgba(255,255,255,0.1); padding-top:10px;">
+                                <div style="font-size:12px; text-transform:uppercase; color:var(--text-dim); margin-bottom:8px; font-weight:bold;">Привязка углов к целям:</div>
+                                <div id="calib-mapping-list" style="display:flex; flex-direction:column; gap:8px;"></div>
+                            </div>
+                        </div>
+
                         <div class="rd-load-actions"><button class="btn btn-dealer" id="btn-start" onclick="startGame()" disabled>НАЧАТЬ ИГРУ</button></div>
                     </div>
                 </div>
@@ -1762,8 +1793,18 @@ function connect() {
     const proto = location.protocol === 'https:' ? 'wss' : 'ws';
     ws = new WebSocket(`${proto}://${location.host}/ws/dealer`);
     ws.onmessage = (e) => {
-        gameState = JSON.parse(e.data);
+        const data = JSON.parse(e.data);
+        // Если пришло только поле calibration (нет game), обновляем только UI калибровки
+        if (data.calibration && !data.phase) {
+            updateCalibrationUI(data.calibration);
+            return;
+        }
+        gameState = data;
         try { if (window.SoundEngine) SoundEngine.onState(gameState); } catch (err) { console.warn('sound', err); }
+        // Обновляем калибровку из полного стейта
+        if (gameState.calibration) {
+            updateCalibrationUI(gameState.calibration);
+        }
         render();
     };
     ws.onclose = () => setTimeout(connect, 2000);
@@ -4000,7 +4041,187 @@ async function startCctvServer(btn) {
             btn.disabled = false;
             btn.textContent = originalText;
         }
-    }, 3000);
+    }, 4000);
+}
+
+// ── CALIBRATION LOGIC ──
+async function startCalibration() {
+    const count = document.getElementById('calib-count').value;
+    document.getElementById('btn-start-calib').style.display = 'none';
+    document.getElementById('btn-cancel-calib').style.display = 'block';
+    document.getElementById('calib-status').style.display = 'block';
+    document.getElementById('calib-done').style.display = 'none';
+    document.getElementById('calib-target').textContent = "1";
+    
+    await fetch('/api/calibration/start', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+        body: 'count=' + count
+    });
+}
+
+async function cancelCalibration() {
+    document.getElementById('btn-start-calib').style.display = 'block';
+    document.getElementById('btn-cancel-calib').style.display = 'none';
+    document.getElementById('calib-status').style.display = 'none';
+    
+    await fetch('/api/calibration/cancel', { method: 'POST' });
+}
+
+let lastShotTimestamp = 0;
+
+// Обновляет UI калибровки и лог последнего выстрела с компаса
+function updateCalibrationUI(calib) {
+    if (!calib) return;
+
+    // 1. Отображение баннера последнего выстрела
+    if (calib.last_shot) {
+        const ls = calib.last_shot;
+        const banner = document.getElementById('compass-shot-banner');
+        if (banner) {
+            banner.style.display = 'flex';
+            const pitchStr = (ls.pitch !== undefined && ls.pitch !== null) ? ` (Наклон: ${Number(ls.pitch).toFixed(1)}°)` : '';
+            document.getElementById('compass-shot-angle').textContent = (ls.angle !== undefined ? Number(ls.angle).toFixed(1) : '--') + pitchStr;
+            document.getElementById('compass-shot-target').textContent = ls.target_name || ls.target_id || '--';
+            document.getElementById('compass-shot-mode').textContent = ls.is_calibration ? 'КАЛИБРОВКА' : (ls.is_self_shot ? 'В СЕБЯ 🎯' : 'ИГРА');
+            
+            if (ls.timestamp && ls.timestamp !== lastShotTimestamp) {
+                lastShotTimestamp = ls.timestamp;
+                banner.style.boxShadow = '0 0 25px rgba(255, 164, 56, 0.9)';
+                banner.style.background = 'linear-gradient(90deg, rgba(255,215,0,0.6), rgba(255,87,34,0.7))';
+                setTimeout(() => {
+                    banner.style.boxShadow = 'none';
+                    banner.style.background = 'linear-gradient(90deg, rgba(255,164,56,0.2), rgba(255,87,34,0.3))';
+                }, 1200);
+            }
+        }
+    }
+
+    // 2. Статус калибровки
+    if (calib.is_calibrating) {
+        document.getElementById('btn-start-calib').style.display = 'none';
+        document.getElementById('btn-cancel-calib').style.display = 'block';
+        document.getElementById('calib-status').style.display = 'block';
+        document.getElementById('calib-done').style.display = 'none';
+        
+        if (calib.queue && calib.queue.length > 0) {
+            let total = Object.keys(calib.calibrated || {}).length + calib.queue.length;
+            let current = total - calib.queue.length + 1;
+            let nextStep = calib.queue[0];
+            let stepLabel = "";
+            if (typeof nextStep === 'string' && nextStep.startsWith('self_')) {
+                let parentIdx = parseInt(nextStep.split('_')[1]);
+                let parentName = parentIdx === 0 ? 'Дилера' : `Игрока ${parentIdx}`;
+                stepLabel = ` [🎯 В СЕБЯ (за ${parentName})]`;
+            } else if (nextStep === 'self') {
+                stepLabel = " [🎯 НАПРАВЬТЕ НА СЕБЯ ПОД НАКЛОНОМ!]";
+            } else if (nextStep === 0) {
+                stepLabel = " [🎯 Выстрел в Дилера]";
+            } else {
+                stepLabel = ` [🎯 Выстрел в Игрока ${nextStep}]`;
+            }
+            document.getElementById('calib-target').textContent = current + ' из ' + total + stepLabel;
+        }
+    } else {
+        document.getElementById('btn-start-calib').style.display = 'block';
+        document.getElementById('btn-cancel-calib').style.display = 'none';
+        document.getElementById('calib-status').style.display = 'none';
+        if (calib.calibrated && Object.keys(calib.calibrated).length > 0) {
+            document.getElementById('calib-done').style.display = 'block';
+        } else {
+            document.getElementById('calib-done').style.display = 'none';
+        }
+    }
+
+    // 3. Выпадающие списки переназначения углов
+    const mapBox = document.getElementById('calib-mapping-box');
+    const mapList = document.getElementById('calib-mapping-list');
+    
+    if (mapBox && mapList && calib.calibrated && Object.keys(calib.calibrated).length > 0) {
+        mapBox.style.display = 'block';
+        mapList.innerHTML = '';
+
+        const options = [];
+        options.push({ value: 'dealer', label: 'Дилер' });
+        
+        if (window.gameState && window.gameState.players) {
+            let pIdx = 0;
+            for (let pid in window.gameState.players) {
+                const pl = window.gameState.players[pid];
+                options.push({ value: pid, label: `Игрок ${pIdx+1} (${pl.name || pid})` });
+                pIdx++;
+            }
+        } else {
+            for (let i = 1; i <= 4; i++) {
+                options.push({ value: `player_${i}`, label: `Игрок ${i}` });
+            }
+        }
+
+        const calibEntries = Object.entries(calib.calibrated);
+        calibEntries.forEach(([slotIdxStr, entry]) => {
+            // Пропускаем self_N записи — они привязываются автоматически к "родительскому" слоту
+            const isSelfEntry = slotIdxStr.startsWith('self_') || slotIdxStr === 'self';
+            const angleVal = (typeof entry === 'object' && entry.angle !== undefined) ? entry.angle : entry;
+            const pitchVal = (typeof entry === 'object' && entry.pitch !== undefined) ? entry.pitch : null;
+
+            if (isSelfEntry) {
+                // Показываем self-запись для информации (без select переназначения)
+                const parentIdx = slotIdxStr.startsWith('self_') ? slotIdxStr.split('_')[1] : '?';
+                const parentName = parentIdx === '0' ? 'Дилер' : `Игрок ${parentIdx}`;
+                const item = document.createElement('div');
+                item.style.cssText = 'display:flex; align-items:center; gap:10px; background:rgba(63,239,106,.06); padding:6px 10px; border-radius:4px; border:1px solid rgba(63,239,106,0.15);';
+                const info = document.createElement('div');
+                info.style.cssText = 'font-family:var(--font-mono); font-size:12px; color:var(--text-dim);';
+                let pitchStr = pitchVal !== null ? ` | Наклон: <strong>${Number(pitchVal).toFixed(1)}°</strong>` : '';
+                info.innerHTML = `🎯 <span style="color:var(--green)">В СЕБЯ</span> (${parentName}): <strong>${typeof angleVal === 'number' ? angleVal.toFixed(1) : angleVal}°</strong>${pitchStr}`;
+                item.appendChild(info);
+                mapList.appendChild(item);
+            } else {
+                const slotIdx = parseInt(slotIdxStr);
+                const currentTarget = (typeof entry === 'object' && entry.target_id) ? entry.target_id : (slotIdx === 0 ? 'dealer' : 'player_' + slotIdx);
+
+                const item = document.createElement('div');
+                item.style.cssText = 'display:flex; align-items:center; justify-content:space-between; gap:10px; background:rgba(0,0,0,0.3); padding:6px 10px; border-radius:4px; border:1px solid rgba(255,255,255,0.08);';
+
+                const info = document.createElement('div');
+                info.style.cssText = 'font-family:var(--font-mono); font-size:12px; color:var(--text-bright);';
+                info.innerHTML = `<span style="color:var(--yellow)">Слот #${slotIdx + 1}</span>: <strong>${typeof angleVal === 'number' ? angleVal.toFixed(1) : angleVal}°</strong>`;
+
+                const select = document.createElement('select');
+                select.className = 'cfg-input';
+                select.style.cssText = 'width:150px; padding:4px 8px; font-size:12px;';
+                select.onchange = (ev) => assignCalibTarget(slotIdx, ev.target.value);
+
+                options.forEach(opt => {
+                    const optEl = document.createElement('option');
+                    optEl.value = opt.value;
+                    optEl.textContent = opt.label;
+                    if (opt.value === currentTarget) {
+                        optEl.selected = true;
+                    }
+                    select.appendChild(optEl);
+                });
+
+                item.appendChild(info);
+                item.appendChild(select);
+                mapList.appendChild(item);
+            }
+        });
+    } else if (mapBox) {
+        mapBox.style.display = 'none';
+    }
+}
+
+async function assignCalibTarget(slotIdx, targetId) {
+    try {
+        await fetch('/api/calibration/assign', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: `slot_idx=${slotIdx}&target_id=${encodeURIComponent(targetId)}`
+        });
+    } catch(err) {
+        console.error('Ошибка переназначения цели:', err);
+    }
 }
 
 let tvVolumeTimeout = null;
