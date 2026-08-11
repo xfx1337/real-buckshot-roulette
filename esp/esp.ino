@@ -271,10 +271,17 @@ void sendShootToServer() {
         return;
     }
     http.addHeader("Content-Type", "application/x-www-form-urlencoded");
-    String payload = "angle=" + String(pendingAngle, 1) + "&pitch=" + String(pendingPitch, 1);
+    
+    // Безопасно копируем значения
+    float localAngle = pendingAngle;
+    float localPitch = pendingPitch;
+    
+    char payload[128];
+    snprintf(payload, sizeof(payload), "angle=%.1f&pitch=%.1f", localAngle, localPitch);
+    
     int code = http.POST(payload);
     if (code == HTTP_CODE_OK) {
-        Serial.println("[HTTP] Выстрел зарегистрирован. Угол: " + String(pendingAngle, 1) + "°, Наклон: " + String(pendingPitch, 1) + "°");
+        Serial.printf("[HTTP] Выстрел зарегистрирован. Угол: %.1f°, Наклон: %.1f°\n", localAngle, localPitch);
     } else {
         Serial.print("[HTTP] Ошибка регистрации, код: ");
         Serial.println(code);
