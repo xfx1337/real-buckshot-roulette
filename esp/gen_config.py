@@ -16,7 +16,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 CONFIG_PATH = ROOT / "config.json"
-OUTPUT_PATH = ROOT / "esp" / "config.h"
+OUTPUT_PATH_ESP = ROOT / "esp" / "config.h"
+OUTPUT_PATH_TX = ROOT / "esp_transmitter" / "config.h"
 
 # Тот же стриппер JSONC-комментариев, что использует сервер (app/config.py) —
 # один источник истины, чтобы config.json с //-подписями читался одинаково.
@@ -100,8 +101,12 @@ def main() -> None:
 #define CFG_WDT_TIMEOUT_MS {tv['wdt_timeout_ms']}UL
 """
 
-    OUTPUT_PATH.write_text(content, encoding="utf-8")
-    print(f"Сгенерирован {OUTPUT_PATH.relative_to(ROOT)}")
+    OUTPUT_PATH_ESP.write_text(content, encoding="utf-8")
+    print(f"Generated {OUTPUT_PATH_ESP.relative_to(ROOT)}")
+    
+    if OUTPUT_PATH_TX.parent.exists():
+        OUTPUT_PATH_TX.write_text(content, encoding="utf-8")
+        print(f"Generated {OUTPUT_PATH_TX.relative_to(ROOT)}")
 
 
 if __name__ == "__main__":
