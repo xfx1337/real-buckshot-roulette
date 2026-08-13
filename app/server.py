@@ -1672,13 +1672,12 @@ async def start_calibration(count: Optional[int] = Form(None)):
                 human_players.append((pid, pl))
         human_players.sort(key=lambda x: x[1].number)
 
-    # Список участников
+    # Единый список всех участников партии (Игроки + Дилер)
     participants = []
     for i, (pid, pl) in enumerate(human_players):
         participants.append((f"player_{i+1}", f"{pl.name} (# {pl.number})"))
 
-    is_solo_or_story = (game and getattr(game, 'config', None) and game.config.game_mode in ("solo", "story", "story_one_round")) or (dealer_id is not None)
-    if is_solo_or_story and len(human_players) <= 1:
+    if dealer_id or (game and getattr(game, 'config', None) and game.config.game_mode in ("solo", "story", "story_one_round")):
         participants.append(("dealer", dealer_name))
 
     desired_count = count if (isinstance(count, int) and count > 0) else 2
@@ -1688,54 +1687,32 @@ async def start_calibration(count: Optional[int] = Form(None)):
         idx = len(participants) + 1
         participants.append((f"player_{idx}", f"Игрок {idx}"))
 
+    # ЕДИНЫЙ МЕХАНИЗМ ДЛЯ ВСЕХ РЕЖИМОВ:
+    # Каждый участник целится во ВСЕХ остальных + В СЕБЯ
     calibration_queue = []
-
-    # 1v1 Режим (Соло / Стори): 1 человек против Дилера -> быстрая калибровка в 2 шага
-    if is_solo_or_story and len(participants) <= 2:
-        shooter_name = participants[0][1]
-        target_id, target_name = participants[1]
-
-        calibration_queue.append({
-            "key": f"s0_{target_id}",
-            "shooter_idx": 0,
-            "shooter_name": shooter_name,
-            "target_id": target_id,
-            "target_name": target_name,
-            "prompt": f"🎯 {shooter_name} ➔ Наведите на {target_name}"
-        })
-        calibration_queue.append({
-            "key": "s0_self",
-            "shooter_idx": 0,
-            "shooter_name": shooter_name,
-            "target_id": "self",
-            "target_name": "В СЕБЯ (наклон вверх)",
-            "prompt": f"🎯 {shooter_name} ➔ В СЕБЯ (наклон ствола вверх)"
-        })
-    else:
-        # Мультиплеер (N игроков): каждый человек со своего места целится во всех остальных + в себя
-        for i, (s_target_id, s_name) in enumerate(participants):
-            for j, (t_target_id, t_name) in enumerate(participants):
-                if i == j:
-                    continue
-                calibration_queue.append({
-                    "key": f"s{i}_{t_target_id}",
-                    "shooter_idx": i,
-                    "shooter_name": s_name,
-                    "target_id": t_target_id,
-                    "target_name": t_name,
-                    "prompt": f"🎯 {s_name} ➔ Наведите на {t_name}"
-                })
+    for i, (s_target_id, s_name) in enumerate(participants):
+        for j, (t_target_id, t_name) in enumerate(participants):
+            if i == j:
+                continue
             calibration_queue.append({
-                "key": f"s{i}_self",
+                "key": f"s{i}_{t_target_id}",
                 "shooter_idx": i,
                 "shooter_name": s_name,
-                "target_id": "self",
-                "target_name": "В СЕБЯ (наклон вверх)",
-                "prompt": f"🎯 {s_name} ➔ В СЕБЯ (наклон ствола вверх)"
+                "target_id": t_target_id,
+                "target_name": t_name,
+                "prompt": f"🎯 {s_name} ➔ Наведите на {t_name}"
             })
+        calibration_queue.append({
+            "key": f"s{i}_self",
+            "shooter_idx": i,
+            "shooter_name": s_name,
+            "target_id": "self",
+            "target_name": "В СЕБЯ (наклон вверх)",
+            "prompt": f"🎯 {s_name} ➔ В СЕБЯ (наклон ствола вверх)"
+        })
 
     last_compass_shot = None
-    print(f"[КАЛИБРОВКА] Старт! Очередь ({len(calibration_queue)} шагов)")
+    print(f"[КАЛИБРОВКА] Старт! Единая очередь ({len(calibration_queue)} шагов)")
     await broadcast_state()
     return {"ok": True, "queue": calibration_queue}
 
