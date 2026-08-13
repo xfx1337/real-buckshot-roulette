@@ -4241,7 +4241,9 @@ function updateCalibrationUI(calib) {
             let nextStep = calib.queue[0];
             let stepLabel = "";
             
-            if (nextStep === 'self') {
+            if (typeof nextStep === 'object' && nextStep !== null && nextStep.prompt) {
+                stepLabel = ` [${nextStep.prompt}]`;
+            } else if (nextStep === 'self') {
                 stepLabel = " [🎯 В СЕБЯ: направьте дробовик вверх на себя]";
             } else {
                 let idx = parseInt(nextStep);
@@ -4318,31 +4320,38 @@ function updateCalibrationUI(calib) {
 
         const calibEntries = Object.entries(calib.calibrated);
         calibEntries.forEach(([slotIdxStr, entry]) => {
-            const isSelfEntry = slotIdxStr.startsWith('self_') || slotIdxStr === 'self';
+            const isSelfEntry = slotIdxStr.includes('self') || slotIdxStr.startsWith('self_');
             const angleVal = (typeof entry === 'object' && entry.angle !== undefined) ? entry.angle : entry;
             const pitchVal = (typeof entry === 'object' && entry.pitch !== undefined) ? entry.pitch : null;
 
+            let shooterLabel = "Игрок 1";
+            if (slotIdxStr.startsWith('s')) {
+                const sIdx = parseInt(slotIdxStr.substring(1).split('_')[0]);
+                if (!isNaN(sIdx)) {
+                    shooterLabel = `Игрок ${sIdx + 1}`;
+                }
+            }
+
             if (isSelfEntry) {
-                const parentIdx = slotIdxStr.startsWith('self_') ? slotIdxStr.split('_')[1] : '?';
-                const parentName = parentIdx === '0' ? 'Дилер' : (parentIdx === '?' ? 'Текущий стрелок' : `Игрок ${parentIdx}`);
                 const item = document.createElement('div');
                 item.style.cssText = 'display:flex; align-items:center; gap:10px; background:rgba(63,239,106,.06); padding:6px 10px; border-radius:4px; border:1px solid rgba(63,239,106,0.15);';
                 const info = document.createElement('div');
                 info.style.cssText = 'font-family:var(--font-mono); font-size:12px; color:var(--text-dim);';
                 let pitchStr = pitchVal !== null ? ` | Наклон: <strong>${Number(pitchVal).toFixed(1)}°</strong>` : '';
-                info.innerHTML = `🎯 <span style="color:var(--green)">В СЕБЯ</span> (${parentName}): <strong>${typeof angleVal === 'number' ? angleVal.toFixed(1) : angleVal}°</strong>${pitchStr}`;
+                info.innerHTML = `🎯 <span style="color:var(--green)">В СЕБЯ</span> (${shooterLabel}): <strong>${typeof angleVal === 'number' ? angleVal.toFixed(1) : angleVal}°</strong>${pitchStr}`;
                 item.appendChild(info);
                 mapList.appendChild(item);
             } else {
-                const slotIdx = parseInt(slotIdxStr);
-                const currentTarget = (typeof entry === 'object' && entry.target_id) ? entry.target_id : (slotIdx === 0 ? 'dealer' : 'player_' + slotIdx);
+                const slotIdx = slotIdxStr;
+                const currentTarget = (typeof entry === 'object' && entry.target_id) ? entry.target_id : 'dealer';
 
                 const item = document.createElement('div');
                 item.style.cssText = 'display:flex; align-items:center; justify-content:space-between; gap:10px; background:rgba(0,0,0,0.3); padding:6px 10px; border-radius:4px; border:1px solid rgba(255,255,255,0.08);';
 
                 const info = document.createElement('div');
                 info.style.cssText = 'font-family:var(--font-mono); font-size:12px; color:var(--text-bright);';
-                info.innerHTML = `<span style="color:var(--yellow)">Слот #${slotIdx + 1}</span>: <strong>${typeof angleVal === 'number' ? angleVal.toFixed(1) : angleVal}°</strong>`;
+                let slotDisplayName = slotIdxStr.startsWith('s') ? `${shooterLabel} ➔ ${currentTarget}` : `Слот #${slotIdx}`;
+                info.innerHTML = `<span style="color:var(--yellow)">${slotDisplayName}</span>: <strong>${typeof angleVal === 'number' ? angleVal.toFixed(1) : angleVal}°</strong>`;
 
                 const select = document.createElement('select');
                 select.className = 'cfg-input';
