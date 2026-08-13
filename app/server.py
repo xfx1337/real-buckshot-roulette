@@ -1660,7 +1660,6 @@ async def start_calibration(count: Optional[int] = Form(None)):
     is_calibrating = True
     calibration_queue = []
 
-    # Автоматически определяем список целей из текущей игры
     dealer_id = None
     dealer_name = "Дилер"
     human_players = []
@@ -1673,30 +1672,70 @@ async def start_calibration(count: Optional[int] = Form(None)):
                 human_players.append((pid, pl))
         human_players.sort(key=lambda x: x[1].number)
 
-    targets = []
-    # 1. Сначала добавляем человека (Игрок 1, Игрок 2...) как символическую цель player_N
+    # Список участников
+    participants = []
     for i, (pid, pl) in enumerate(human_players):
-        targets.append((f"player_{i+1}", f"{pl.name} (# {pl.number})"))
+        participants.append((f"player_{i+1}", f"{pl.name} (# {pl.number})"))
 
-    # 2. В соло/стори режиме или когда есть дилер, дилер добавляется как символическая цель "dealer"
-    if dealer_id or (game and getattr(game, 'config', None) and game.config.game_mode in ("solo", "story", "story_one_round") and len(human_players) <= 1):
-        targets.append(("dealer", dealer_name))
+    is_solo_or_story = (game and getattr(game, 'config', None) and game.config.game_mode in ("solo", "story", "story_one_round")) or (dealer_id is not None)
+    if is_solo_or_story and len(human_players) <= 1:
+        participants.append(("dealer", dealer_name))
 
-    # Дозаполняем слотами player_N при необходимости
     desired_count = count if (isinstance(count, int) and count > 0) else 2
-    target_count = max(len(targets), desired_count)
+    target_count = max(len(participants), desired_count)
 
-    while len(targets) < target_count:
-        idx = len(targets) + 1
-        targets.append((f"player_{idx}", f"Игрок {idx}"))
+    while len(participants) < target_count:
+        idx = len(participants) + 1
+        participants.append((f"player_{idx}", f"Игрок {idx}"))
 
-    # Очередь шагов: по очереди каждый слот/игрок, затем 1 общий выстрел В СЕБЯ
-    for i in range(len(targets)):
-        calibration_queue.append(i)
-    calibration_queue.append("self")
+    calibration_queue = []
+
+    # 1v1 Режим (Соло / Стори): 1 человек против Дилера -> быстрая калибровка в 2 шага
+    if is_solo_or_story and len(participants) <= 2:
+        shooter_name = participants[0][1]
+        target_id, target_name = participants[1]
+
+        calibration_queue.append({
+            "key": f"s0_{target_id}",
+            "shooter_idx": 0,
+            "shooter_name": shooter_name,
+            "target_id": target_id,
+            "target_name": target_name,
+            "prompt": f"🎯 {shooter_name} ➔ Наведите на {target_name}"
+        })
+        calibration_queue.append({
+            "key": "s0_self",
+            "shooter_idx": 0,
+            "shooter_name": shooter_name,
+            "target_id": "self",
+            "target_name": "В СЕБЯ (наклон вверх)",
+            "prompt": f"🎯 {shooter_name} ➔ В СЕБЯ (наклон ствола вверх)"
+        })
+    else:
+        # Мультиплеер (N игроков): каждый человек со своего места целится во всех остальных + в себя
+        for i, (s_target_id, s_name) in enumerate(participants):
+            for j, (t_target_id, t_name) in enumerate(participants):
+                if i == j:
+                    continue
+                calibration_queue.append({
+                    "key": f"s{i}_{t_target_id}",
+                    "shooter_idx": i,
+                    "shooter_name": s_name,
+                    "target_id": t_target_id,
+                    "target_name": t_name,
+                    "prompt": f"🎯 {s_name} ➔ Наведите на {t_name}"
+                })
+            calibration_queue.append({
+                "key": f"s{i}_self",
+                "shooter_idx": i,
+                "shooter_name": s_name,
+                "target_id": "self",
+                "target_name": "В СЕБЯ (наклон вверх)",
+                "prompt": f"🎯 {s_name} ➔ В СЕБЯ (наклон ствола вверх)"
+            })
 
     last_compass_shot = None
-    print(f"[КАЛИБРОВКА] Старт! Очередь ({len(calibration_queue)} шагов): {calibration_queue}")
+    print(f"[КАЛИБРОВКА] Старт! Очередь ({len(calibration_queue)} шагов)")
     await broadcast_state()
     return {"ok": True, "queue": calibration_queue}
 
@@ -1755,41 +1794,16 @@ async def esp_shoot(
     # 1. Если идёт калибровка, перехватываем выстрел
     if is_calibrating and angle is not None:
         if calibration_queue:
-            target_idx = calibration_queue.pop(0)
+            step = calibration_queue.pop(0)
             
-            # Получаем актуальный список участников текущей игры
-            dealer_id = None
-            dealer_name = "Дилер"
-            human_players = []
-            if game and game.players:
-                for pid, pl in game.players.items():
-                    if getattr(pl, "is_dealer", False) or "dealer" in pid.lower() or pl.name.lower() in ["dealer", "дилер"]:
-                        dealer_id = pid
-                        dealer_name = pl.name
-                    else:
-                        human_players.append((pid, pl))
-                human_players.sort(key=lambda x: x[1].number)
-
-            targets = []
-            # 1. Человек (Игрок 1, Игрок 2...) как символическая цель player_N
-            for i, (pid, pl) in enumerate(human_players):
-                targets.append((f"player_{i+1}", f"{pl.name} (# {pl.number})"))
-
-            # 2. Дилер (как символическая цель "dealer")
-            if dealer_id or (game and getattr(game, 'config', None) and game.config.game_mode in ("solo", "story", "story_one_round") and len(human_players) <= 1):
-                targets.append(("dealer", dealer_name))
-
-            if target_idx == "self":
-                default_target = "self"
-                target_name = "В СЕБЯ 🎯 (наклон ствола вверх)"
+            if isinstance(step, dict):
+                target_idx = step["key"]
+                default_target = step["target_id"]
+                target_name = step["target_name"]
             else:
-                idx = int(target_idx)
-                if idx < len(targets):
-                    default_target = targets[idx][0]
-                    target_name = targets[idx][1]
-                else:
-                    default_target = f"player_{idx + 1}"
-                    target_name = f"Игрок {idx + 1}"
+                target_idx = str(step)
+                default_target = f"player_{step}" if isinstance(step, int) else str(step)
+                target_name = str(step)
 
             compass_calibration[target_idx] = {
                 "angle": angle,
@@ -1841,7 +1855,6 @@ async def esp_shoot(
                     dealer_name = pl.name
                 else:
                     human_players.append((pid, pl))
-            # Сортируем людей по их игровому номеру для стабильной привязки к слотам калибровки (1, 2, 3...)
             human_players.sort(key=lambda x: x[1].number)
 
         def resolve_target(assigned: str, slot_k: Union[int, str] = None):
@@ -1867,6 +1880,7 @@ async def esp_shoot(
             # 3. Символический 'player_N' (1-based index)
             if isinstance(assigned, str) and assigned.startswith("player_"):
                 try:
+                    p_num = int(assigned.split("_")[1])
                     # В режиме 1 на 1 против Дилера (или соло/стори): player_1 = Человек, player_2 = Дилер
                     is_1v1 = (dealer_id is not None) or (game and getattr(game, 'config', None) and game.config.game_mode in ("solo", "story", "story_one_round"))
                     if len(human_players) <= 1 and is_1v1 and p_num == 2:
@@ -1909,42 +1923,37 @@ async def esp_shoot(
 
         current_shooter = game.get_current_player() if game else None
 
+        # Определяем 0-based индекс текущего стрелка
+        shooter_s_idx = 0
+        if current_shooter and human_players:
+            for idx, (h_pid, h_pl) in enumerate(human_players):
+                if h_pid == current_shooter.id:
+                    shooter_s_idx = idx
+                    break
+
         # --- 1. Определение выстрела В СЕБЯ ---
         self_pitch_threshold = 30.0
         self_angle = None
 
-        if current_shooter:
-            shooter_idx = None
-            if current_shooter.id == dealer_id:
-                shooter_idx = 0
-            else:
-                for i, (pid, pl) in enumerate(human_players):
-                    if pid == current_shooter.id:
-                        shooter_idx = i + 1
-                        break
-            
-            self_entry = None
-            if shooter_idx is not None:
-                self_entry = compass_calibration.get(f"self_{shooter_idx}")
-            if not self_entry:
-                self_entry = compass_calibration.get("self")
+        self_keys = [f"s{shooter_s_idx}_self", f"self_{shooter_s_idx+1}", "s0_self", "self"]
+        self_entry = None
+        for sk in self_keys:
+            if sk in compass_calibration:
+                self_entry = compass_calibration[sk]
+                break
 
-            if self_entry and isinstance(self_entry, dict):
-                calib_self_pitch = self_entry.get("pitch")
-                self_angle = self_entry.get("angle")
-                if calib_self_pitch is not None:
-                    # Порог должен быть достаточно высоким, чтобы не убить себя случайно при цели в соседа
-                    self_pitch_threshold = max(35.0, abs(calib_self_pitch) * 0.75)
+        if self_entry and isinstance(self_entry, dict):
+            calib_self_pitch = self_entry.get("pitch")
+            self_angle = self_entry.get("angle")
+            if calib_self_pitch is not None:
+                self_pitch_threshold = max(35.0, abs(calib_self_pitch) * 0.75)
 
         if pitch is not None and current_shooter and current_shooter.alive:
             is_pitch_high_enough = abs(pitch) >= self_pitch_threshold
             angle_matches_self = True
             if self_angle is not None:
-                # Если азимут выстрела сильно отличается от калибровочного азимута выстрела в себя, значит ствол направлен на другого
                 angle_matches_self = angle_diff(angle, self_angle) < 40.0
 
-            # Выстрел в себя засчитывается, если наклон ОЧЕНЬ высокий (вертикально, >70) 
-            # или наклон выше порога калибровки И азимут тоже совпадает с позой самоубийства
             if abs(pitch) >= 70.0 or (is_pitch_high_enough and angle_matches_self):
                 actual_target_id = current_shooter.id
                 target_name = f"{current_shooter.name} (В СЕБЯ 🎯)"
@@ -1953,19 +1962,33 @@ async def esp_shoot(
 
         # --- 2. Определение выстрела В ДРУГОГО (по азимуту) ---
         if not actual_target_id:
+            shooter_prefix = f"s{shooter_s_idx}_"
+            shooter_keys = [k for k in compass_calibration.keys() if str(k).startswith(shooter_prefix) and not str(k).endswith("_self")]
+
+            # Фолбэк к общим замерам, если для данного стрелка еще нет отдельной сетки
+            if not shooter_keys:
+                shooter_keys = [k for k in compass_calibration.keys() if not (str(k) == "self" or str(k).endswith("_self"))]
+
             spatial_keys = []
-            for k, entry in compass_calibration.items():
-                if isinstance(k, str) and (k == "self" or k.startswith("self_")):
-                    continue
-                
+            for k in shooter_keys:
+                entry = compass_calibration[k]
                 k_assigned = entry.get("target_id") if isinstance(entry, dict) else f"player_{k}"
                 _, _, is_alive = resolve_target(k_assigned, slot_k=k)
                 if is_alive:
                     spatial_keys.append(k)
 
-            # Если живых пространственных целей нет, берём все пространственные ключи
+            # Если живых пространственных целей у данного стрелка не нашлось, проверяем абсолютно все живые пространственные ключи
             if not spatial_keys:
-                spatial_keys = [k for k in compass_calibration.keys() if not (isinstance(k, str) and (k == "self" or k.startswith("self_")))]
+                all_spatial = [k for k in compass_calibration.keys() if not (str(k) == "self" or str(k).endswith("_self"))]
+                for k in all_spatial:
+                    entry = compass_calibration[k]
+                    k_assigned = entry.get("target_id") if isinstance(entry, dict) else f"player_{k}"
+                    _, _, is_alive = resolve_target(k_assigned, slot_k=k)
+                    if is_alive:
+                        spatial_keys.append(k)
+
+            if not spatial_keys:
+                spatial_keys = [k for k in compass_calibration.keys() if not (str(k) == "self" or str(k).endswith("_self"))]
 
             if spatial_keys:
                 best_idx = min(spatial_keys, key=lambda k: angle_diff(angle, get_angle(compass_calibration[k])))
