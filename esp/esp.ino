@@ -43,7 +43,10 @@ volatile uint32_t solenoidOnSinceUs = 0;
 
 volatile bool pendingShoot = false;
 unsigned long lastShootAttemptMs = 0;
-
+volatile float pendingAngle = 0.0;
+volatile float pendingPitch = 0.0;
+volatile uint32_t pendingShotId = 0;
+uint8_t shootAttemptCount = 0;
 // ── Состояние выстрела ──
 static volatile uint32_t lastSeenUs = (uint32_t)(0UL - CFG_RF_LOCKOUT_MS * 1000UL);
 static volatile uint32_t lastFireUs = 0;
@@ -61,10 +64,10 @@ typedef struct {
 // Решение по валидному коду (вызывается из коллбека ESP-NOW)
 static void IRAM_ATTR espNowFire(uint32_t nowUs) {
     uint32_t sinceSeen = nowUs - lastSeenUs;
-    lastSeenUs = nowUs;
     if (sinceSeen < RF_LOCKOUT_MS * 1000UL) {
         return;
     }
+    lastSeenUs = nowUs;
 
     lastFireUs = nowUs;
     fireIsLive = cachedReady && cachedLive;
@@ -79,7 +82,9 @@ static void IRAM_ATTR espNowFire(uint32_t nowUs) {
 
     // ВСЕГДА отправляем выстрел на сервер (и при калибровке, и при игре)
     pendingShoot = true;
+    pendingShotId = nowUs;
     lastShootAttemptMs = 0; // Сбрасываем таймер для немедленной отправки
+    shootAttemptCount = 0;
 
     BaseType_t woken = pdFALSE;
     vTaskNotifyGiveFromISR(triggerTaskHandle, &woken);
@@ -87,9 +92,6 @@ static void IRAM_ATTR espNowFire(uint32_t nowUs) {
         portYIELD_FROM_ISR();
     }
 }
-
-volatile float pendingAngle = 0.0;
-volatile float pendingPitch = 0.0;
 
 // ESP-NOW Receive Callback
 #if ESP_ARDUINO_VERSION_MAJOR >= 3
@@ -251,9 +253,10 @@ bool sendShootToServer() {
     // Безопасно копируем значения
     float localAngle = pendingAngle;
     float localPitch = pendingPitch;
+    uint32_t localShotId = pendingShotId;
     
     char payload[128];
-    snprintf(payload, sizeof(payload), "angle=%.1f&pitch=%.1f", localAngle, localPitch);
+    snprintf(payload, sizeof(payload), "angle=%.1f&pitch=%.1f&shot_id=%u", localAngle, localPitch, localShotId);
     
     int code = http.POST(payload);
     bool success = false;
@@ -318,10 +321,11 @@ void loop() {
     if (pendingShoot) {
         if (lastShootAttemptMs == 0 || millis() - lastShootAttemptMs > 500) {
             lastShootAttemptMs = millis() == 0 ? 1 : millis();
-            if (sendShootToServer()) {
+            shootAttemptCount++;
+            if (sendShootToServer() || shootAttemptCount >= 3) {
                 pendingShoot = false;
             } else {
-                Serial.println("[HTTP] Повторная попытка отправки выстрела через 500мс...");
+                Serial.printf("[HTTP] Ошибка доставки, попытка %d/3 через 500мс...\n", shootAttemptCount);
             }
         }
     }
