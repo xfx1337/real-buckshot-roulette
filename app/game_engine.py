@@ -210,7 +210,13 @@ class GameState:
         if len(self.players) >= 4:
             raise ValueError("Максимум 4 игрока")
         pid = str(uuid.uuid4())[:8]
-        number = len(self.players) + 1
+        # Ищем максимальный номер среди текущих игроков, чтобы при кике и добавлении не было дублей
+        max_num = 0
+        for pl in self.players.values():
+            if pl.number > max_num:
+                max_num = pl.number
+        number = max_num + 1
+        
         p = Player(id=pid, name=name, number=number)
         self.players[pid] = p
         self._log(f">> Игрок #{number} [{name}] присоединился", "system")

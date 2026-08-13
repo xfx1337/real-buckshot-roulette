@@ -41,8 +41,8 @@ unsigned long lastWifiAttemptMs = 0;
 volatile bool solenoidOn = false;
 volatile uint32_t solenoidOnSinceUs = 0;
 
-bool liveLedOn = false;
 volatile bool pendingShoot = false;
+unsigned long lastShootAttemptMs = 0;
 
 // ── Состояние выстрела ──
 static volatile uint32_t lastSeenUs = (uint32_t)(0UL - CFG_RF_LOCKOUT_MS * 1000UL);
@@ -79,6 +79,7 @@ static void IRAM_ATTR espNowFire(uint32_t nowUs) {
 
     // ВСЕГДА отправляем выстрел на сервер (и при калибровке, и при игре)
     pendingShoot = true;
+    lastShootAttemptMs = 0; // Сбрасываем таймер для немедленной отправки
 
     BaseType_t woken = pdFALSE;
     vTaskNotifyGiveFromISR(triggerTaskHandle, &woken);
@@ -147,13 +148,6 @@ void triggerTask(void *) {
     }
 }
 
-void updateLiveLed() {
-    if (liveLedOn) {
-        liveLedOn = false;
-        digitalWrite(LIVE_LED_PIN, LOW);
-    }
-}
-
 void setSolenoid(bool on) {
     solenoidOn = on;
     digitalWrite(SOLENOID_PIN, on ? HIGH : LOW);
@@ -173,24 +167,6 @@ const char* wifiStatusToStr(wl_status_t status) {
         case WL_DISCONNECTED:    return "DISCONNECTED";
         default:                 return "UNKNOWN";
     }
-}
-
-void scanNetworks() {
-    Serial.println("[WiFi] Сканирую доступные сети...");
-    int n = WiFi.scanNetworks();
-    if (n <= 0) {
-        Serial.println("[WiFi] Сети не найдены.");
-        return;
-    }
-    for (int i = 0; i < n; i++) {
-        Serial.print("  - \"");
-        Serial.print(WiFi.SSID(i));
-        Serial.print("\" RSSI=");
-        Serial.print(WiFi.RSSI(i));
-        Serial.print(" enc=");
-        Serial.println(WiFi.encryptionType(i));
-    }
-    WiFi.scanDelete();
 }
 
 void ensureWifiConnected() {
@@ -259,16 +235,16 @@ bool pollShellStatus() {
     return ok;
 }
 
-void sendShootToServer() {
+bool sendShootToServer() {
     if (WiFi.status() != WL_CONNECTED) {
-        return;
+        return false;
     }
     HTTPClient http;
     http.setConnectTimeout(HTTP_TIMEOUT_MS);
     http.setTimeout(HTTP_TIMEOUT_MS);
     String url = String(SERVER_BASE_URL) + "/api/esp/shoot";
     if (!http.begin(url)) {
-        return;
+        return false;
     }
     http.addHeader("Content-Type", "application/x-www-form-urlencoded");
     
@@ -280,14 +256,17 @@ void sendShootToServer() {
     snprintf(payload, sizeof(payload), "angle=%.1f&pitch=%.1f", localAngle, localPitch);
     
     int code = http.POST(payload);
+    bool success = false;
     if (code == HTTP_CODE_OK) {
         Serial.printf("[HTTP] Выстрел зарегистрирован. Угол: %.1f°, Наклон: %.1f°\n", localAngle, localPitch);
+        success = true;
     } else {
         Serial.print("[HTTP] Ошибка регистрации, код: ");
         Serial.println(code);
     }
     http.end();
     pollShellStatus();
+    return success;
 }
 
 void setup() {
@@ -308,13 +287,8 @@ void setup() {
     pinMode(SOLENOID_PIN, OUTPUT);
     digitalWrite(SOLENOID_PIN, LOW);
 
-    digitalWrite(LIVE_LED_PIN, LOW);
-    pinMode(LIVE_LED_PIN, OUTPUT);
-    digitalWrite(LIVE_LED_PIN, LOW);
-
     WiFi.mode(WIFI_STA);
     WiFi.setSleep(false); // Запрещаем сон Wi-Fi, чтобы не пропускать ESP-NOW пакеты от дробовика
-    scanNetworks();
     WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
     Serial.println("[WiFi] Подключение идёт в фоне...");
 
@@ -341,11 +315,15 @@ void loop() {
         pollShellStatus();
     }
 
-    updateLiveLed();
-
     if (pendingShoot) {
-        pendingShoot = false;
-        sendShootToServer();
+        if (lastShootAttemptMs == 0 || millis() - lastShootAttemptMs > 500) {
+            lastShootAttemptMs = millis() == 0 ? 1 : millis();
+            if (sendShootToServer()) {
+                pendingShoot = false;
+            } else {
+                Serial.println("[HTTP] Повторная попытка отправки выстрела через 500мс...");
+            }
+        }
     }
 
     esp_task_wdt_reset();

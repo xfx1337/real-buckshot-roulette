@@ -2,9 +2,9 @@
 // Сгенерировано из config.json скриптом esp/gen_config.py.
 #pragma once
 
-#define WIFI_SSID "Prototype2G_EXT"
-#define WIFI_PASSWORD "1303proto"
-#define SERVER_BASE_URL "http://192.168.0.184:8000"
+#define WIFI_SSID "MGTS_GPON_Rb3q"
+#define WIFI_PASSWORD "Txt4eN2K"
+#define SERVER_BASE_URL "http://192.168.1.9:8000"
 
 #define TRIGGER_PIN 5
 //#define SOLENOID_PIN 5
