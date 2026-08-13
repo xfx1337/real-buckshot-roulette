@@ -1858,18 +1858,14 @@ async def esp_shoot(
             if isinstance(assigned, str) and assigned.startswith("player_"):
                 try:
                     p_num = int(assigned.split("_")[1])
-                    # В режиме 1 на 1 против Дилера (или соло/стори): player_1 = Человек, player_2 = Дилер
-                    is_1v1 = (dealer_id is not None) or (game and getattr(game, 'config', None) and game.config.game_mode in ("solo", "story", "story_one_round"))
-                    if len(human_players) <= 1 and is_1v1 and p_num == 2:
-                        if dealer_id and dealer_id in game.players:
-                            d_pl = game.players[dealer_id]
-                            return d_pl.id, d_pl.name, d_pl.alive
-                        return None, dealer_name, False
-
                     p_idx = p_num - 1
                     if 0 <= p_idx < len(human_players):
                         pid, pl = human_players[p_idx]
                         return pid, pl.name, pl.alive
+                    elif p_num == 2 and dealer_id and dealer_id in game.players:
+                        # В партии против Дилера 2-е место за столом занимает Дилер
+                        d_pl = game.players[dealer_id]
+                        return d_pl.id, d_pl.name, d_pl.alive
                 except Exception:
                     pass
 
@@ -1940,11 +1936,7 @@ async def esp_shoot(
         # --- 2. Определение выстрела В ДРУГОГО (по азимуту) ---
         if not actual_target_id:
             shooter_prefix = f"s{shooter_s_idx}_"
-            shooter_keys = [k for k in compass_calibration.keys() if str(k).startswith(shooter_prefix) and not str(k).endswith("_self")]
-
-            # Фолбэк к общим замерам, если для данного стрелка еще нет отдельной сетки
-            if not shooter_keys:
-                shooter_keys = [k for k in compass_calibration.keys() if not (str(k) == "self" or str(k).endswith("_self"))]
+            shooter_keys = [k for k in compass_calibration.keys() if str(k).startswith(shooter_prefix) and not (str(k) == "self" or str(k).endswith("_self"))]
 
             spatial_keys = []
             for k in shooter_keys:
@@ -1954,15 +1946,19 @@ async def esp_shoot(
                 if is_alive:
                     spatial_keys.append(k)
 
-            # Если живых пространственных целей у данного стрелка не нашлось, проверяем абсолютно все живые пространственные ключи
-            if not spatial_keys:
-                all_spatial = [k for k in compass_calibration.keys() if not (str(k) == "self" or str(k).endswith("_self"))]
-                for k in all_spatial:
-                    entry = compass_calibration[k]
-                    k_assigned = entry.get("target_id") if isinstance(entry, dict) else f"player_{k}"
-                    _, _, is_alive = resolve_target(k_assigned, slot_k=k)
-                    if is_alive:
-                        spatial_keys.append(k)
+            # Собираем ВСЕ живые пространственные ключи из всей базы калибровки
+            all_spatial_keys = [k for k in compass_calibration.keys() if not (str(k) == "self" or str(k).endswith("_self"))]
+            all_alive_spatial = []
+            for k in all_spatial_keys:
+                entry = compass_calibration[k]
+                k_assigned = entry.get("target_id") if isinstance(entry, dict) else f"player_{k}"
+                _, _, is_alive = resolve_target(k_assigned, slot_k=k)
+                if is_alive:
+                    all_alive_spatial.append(k)
+
+            # Если у текущего стрелка калибровано меньше 2 живых целей, но во всей базе есть больше — используем всю базу для сплита углов
+            if len(spatial_keys) < 2 and len(all_alive_spatial) >= len(spatial_keys):
+                spatial_keys = all_alive_spatial
 
             if not spatial_keys:
                 spatial_keys = [k for k in compass_calibration.keys() if not (str(k) == "self" or str(k).endswith("_self"))]
