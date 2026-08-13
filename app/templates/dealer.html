@@ -1298,17 +1298,17 @@ body{ cursor:default; }
                         
                         <!-- КАЛИБРОВКА КОМПАСА -->
                         <div class="sidebar-section" style="margin-bottom:12px;">
-                            <h3>Калибровка дробовика <span class="rd-tag">компас</span></h3>
+                            <h3>Калибровка прицела <span class="rd-tag">гироскоп</span></h3>
                             <div style="margin-bottom:10px; font-family:var(--font-mono); font-size:12px; color:var(--text-dim);">
-                                Укажите кол-во целей и по очереди для каждой: 1) стреляйте В игрока, 2) затем В СЕБЯ.
+                                Автоматически опрашивает каждое место за столом по очереди, а в конце — 1 выстрел в себя.
                             </div>
                             <div style="display:flex; gap:10px; margin-bottom:10px;">
-                                <input type="number" id="calib-count" class="cfg-input" value="2" min="1" max="4" style="width:60px;">
+                                <input type="number" id="calib-count" class="cfg-input" value="2" min="1" max="4" style="width:60px;" title="Кол-во игроков если лобби пустое">
                                 <button class="btn btn-plate plate-yellow" onclick="startCalibration()" id="btn-start-calib" style="flex:1;">НАЧАТЬ КАЛИБРОВКУ</button>
                                 <button class="btn btn-secondary" onclick="cancelCalibration()" id="btn-cancel-calib" style="display:none; padding:8px 12px;">ОТМЕНА</button>
                             </div>
                             <div id="calib-status" style="font-family:var(--font-mono); font-size:12px; color:var(--orange); display:none; padding:8px; border:1px solid #5a3c18; background:rgba(255,164,56,.1);">
-                                Ожидание выстрела для калибровки цели: <strong id="calib-target"></strong>...
+                                Ожидание выстрела: <strong id="calib-target"></strong>...
                             </div>
                             <div id="calib-done" style="font-family:var(--font-mono); font-size:12px; color:var(--green); display:none; padding:8px; border:1px solid #2a4a2c; background:rgba(63,239,106,.1);">
                                 Калибровка завершена!
@@ -4240,18 +4240,27 @@ function updateCalibrationUI(calib) {
             let current = total - calib.queue.length + 1;
             let nextStep = calib.queue[0];
             let stepLabel = "";
-            if (typeof nextStep === 'string' && nextStep.startsWith('self_')) {
-                let parentIdx = parseInt(nextStep.split('_')[1]);
-                let parentName = parentIdx === 0 ? 'Дилера' : `Игрока ${parentIdx}`;
-                stepLabel = ` [🎯 В СЕБЯ (за ${parentName})]`;
-            } else if (nextStep === 'self') {
-                stepLabel = " [🎯 НАПРАВЬТЕ НА СЕБЯ ПОД НАКЛОНОМ!]";
-            } else if (nextStep === 0) {
-                stepLabel = " [🎯 Выстрел в Дилера]";
+            
+            if (nextStep === 'self') {
+                stepLabel = " [🎯 В СЕБЯ: направьте дробовик вверх на себя]";
             } else {
-                stepLabel = ` [🎯 Выстрел в Игрока ${nextStep}]`;
+                let idx = parseInt(nextStep);
+                let targetName = `Игрока ${idx + 1}`;
+                if (window.gameState && window.gameState.players) {
+                    let playersList = Object.values(window.gameState.players);
+                    let dealer = playersList.find(p => p.is_dealer || p.id.includes('dealer') || p.name.toLowerCase().includes('дилер'));
+                    let humans = playersList.filter(p => !p.is_dealer && !p.id.includes('dealer') && p.name.toLowerCase() !== 'дилер');
+                    humans.sort((a,b) => a.number - b.number);
+                    let targets = [];
+                    if (dealer) targets.push(dealer.name || 'Дилера');
+                    humans.forEach(h => targets.push(`${h.name} (Игрок #${h.number})`));
+                    if (idx < targets.length) targetName = targets[idx];
+                } else {
+                    targetName = `Игрока ${idx + 1}`;
+                }
+                stepLabel = ` [🎯 Наведите на: ${targetName}]`;
             }
-            document.getElementById('calib-target').textContent = current + ' из ' + total + stepLabel;
+            document.getElementById('calib-target').textContent = `${current} из ${total}${stepLabel}`;
         }
     } else {
         document.getElementById('btn-start-calib').style.display = 'block';
@@ -4273,32 +4282,49 @@ function updateCalibrationUI(calib) {
         mapList.innerHTML = '';
 
         const options = [];
-        options.push({ value: 'dealer', label: 'Дилер' });
+        let hasDealerInGame = false;
+        if (window.gameState && window.gameState.players) {
+            for (let pid in window.gameState.players) {
+                const pl = window.gameState.players[pid];
+                if (pl.is_dealer || pid.toLowerCase().includes('dealer') || (pl.name && pl.name.toLowerCase() === 'dealer')) {
+                    hasDealerInGame = true;
+                    break;
+                }
+            }
+        }
+
+        if (hasDealerInGame) {
+            options.push({ value: 'dealer', label: 'Дилер' });
+        }
         
         if (window.gameState && window.gameState.players) {
             let pIdx = 0;
             for (let pid in window.gameState.players) {
                 const pl = window.gameState.players[pid];
-                options.push({ value: pid, label: `Игрок ${pIdx+1} (${pl.name || pid})` });
-                pIdx++;
+                if (!pl.is_dealer && !pid.toLowerCase().includes('dealer') && (pl.name && pl.name.toLowerCase() !== 'dealer')) {
+                    options.push({ value: pid, label: `Игрок ${pIdx+1} (${pl.name || pid})` });
+                    pIdx++;
+                }
             }
-        } else {
-            for (let i = 1; i <= 4; i++) {
-                options.push({ value: `player_${i}`, label: `Игрок ${i}` });
+        }
+
+        // Всегда добавляем символические фолбэки player_1..4
+        for (let i = 1; i <= 4; i++) {
+            const val = `player_${i}`;
+            if (!options.some(o => o.value === val)) {
+                options.push({ value: val, label: `Игрок ${i}` });
             }
         }
 
         const calibEntries = Object.entries(calib.calibrated);
         calibEntries.forEach(([slotIdxStr, entry]) => {
-            // Пропускаем self_N записи — они привязываются автоматически к "родительскому" слоту
             const isSelfEntry = slotIdxStr.startsWith('self_') || slotIdxStr === 'self';
             const angleVal = (typeof entry === 'object' && entry.angle !== undefined) ? entry.angle : entry;
             const pitchVal = (typeof entry === 'object' && entry.pitch !== undefined) ? entry.pitch : null;
 
             if (isSelfEntry) {
-                // Показываем self-запись для информации (без select переназначения)
                 const parentIdx = slotIdxStr.startsWith('self_') ? slotIdxStr.split('_')[1] : '?';
-                const parentName = parentIdx === '0' ? 'Дилер' : `Игрок ${parentIdx}`;
+                const parentName = parentIdx === '0' ? 'Дилер' : (parentIdx === '?' ? 'Текущий стрелок' : `Игрок ${parentIdx}`);
                 const item = document.createElement('div');
                 item.style.cssText = 'display:flex; align-items:center; gap:10px; background:rgba(63,239,106,.06); padding:6px 10px; border-radius:4px; border:1px solid rgba(63,239,106,0.15);';
                 const info = document.createElement('div');
@@ -4323,15 +4349,31 @@ function updateCalibrationUI(calib) {
                 select.style.cssText = 'width:150px; padding:4px 8px; font-size:12px;';
                 select.onchange = (ev) => assignCalibTarget(slotIdx, ev.target.value);
 
+                let hasMatchingOption = false;
                 options.forEach(opt => {
                     const optEl = document.createElement('option');
                     optEl.value = opt.value;
                     optEl.textContent = opt.label;
                     if (opt.value === currentTarget) {
                         optEl.selected = true;
+                        hasMatchingOption = true;
                     }
                     select.appendChild(optEl);
                 });
+
+                if (!hasMatchingOption && currentTarget) {
+                    const fallbackOpt = document.createElement('option');
+                    fallbackOpt.value = currentTarget;
+                    let label = currentTarget;
+                    if (currentTarget.startsWith('player_')) {
+                        label = `Игрок ${currentTarget.split('_')[1]}`;
+                    } else if (currentTarget === 'dealer') {
+                        label = 'Дилер';
+                    }
+                    fallbackOpt.textContent = label;
+                    fallbackOpt.selected = true;
+                    select.appendChild(fallbackOpt);
+                }
 
                 item.appendChild(info);
                 item.appendChild(select);

@@ -823,7 +823,7 @@ async def irlpro_overlay(request: Request):
 async def create_game(
     game_mode: str = Form("multiplayer", description="Режим игры: `multiplayer` (2-4 игрока), `solo` (1 на 1 с виртуальным DEALER), `story` (сюжетный режим, 3 стадии) или `story_one_round` (1 раунд, 4 HP, предметы после первой дозарядки)")
 ):
-    global game, undo_stack
+    global game, undo_stack, compass_calibration
     game = GameState()
     game.config.game_mode = game_mode
     if game_mode == "solo":
@@ -833,8 +833,21 @@ async def create_game(
     elif game_mode == "story_one_round":
         game.config.rounds = [dict(r) for r in STORY_ONE_ROUND_DEFAULT_ROUNDS]
     undo_stack.clear()
-    # Текст прошлой партии на телевизоре к новой игре отношения не имеет —
-    # иначе он висел бы поверх лобби, пока оператор не сотрёт его руками.
+
+    # При старте новой игры переводим привязки компаса на символические цели,
+    # чтобы калибровка оставалась действительной для новых UUID игроков и Дилера
+    if compass_calibration:
+        for k, entry in compass_calibration.items():
+            if isinstance(entry, dict):
+                if k == "self" or (isinstance(k, str) and k.startswith("self_")):
+                    continue
+                if isinstance(k, int) or (isinstance(k, str) and k.isdigit()):
+                    idx = int(k)
+                    if idx == 1 and game_mode in ("solo", "story", "story_one_round"):
+                        entry["target_id"] = "dealer"
+                    else:
+                        entry["target_id"] = f"player_{idx + 1}"
+
     if tv_message_state.get("action") == "message":
         tv_message_state.clear()
         tv_message_state.update({"action": "message_clear"})
@@ -1641,18 +1654,49 @@ last_compass_shot: Optional[dict] = None  # данные о последнем �
 
 
 @app.post("/api/calibration/start", tags=["ESP32", "Dealer Actions"])
-async def start_calibration(count: int = Form(...)):
+async def start_calibration(count: Optional[int] = Form(None)):
     global compass_calibration, is_calibrating, calibration_queue, last_compass_shot
     compass_calibration = {}
     is_calibrating = True
-    # Шаги калибровки: для каждого игрока — сначала выстрел В него, затем В СЕБЯ.
-    # Пример для 3 игроков: [0, "self_0", 1, "self_1", 2, "self_2"]
     calibration_queue = []
-    for i in range(count):
-        calibration_queue.append(i)           # выстрел в игрока i
-        calibration_queue.append(f"self_{i}") # выстрел в себя (для игрока i)
+
+    # Автоматически определяем список целей из текущей игры
+    dealer_id = None
+    dealer_name = "Дилер"
+    human_players = []
+    if game and game.players:
+        for pid, pl in game.players.items():
+            if getattr(pl, "is_dealer", False) or "dealer" in pid.lower() or pl.name.lower() in ["dealer", "дилер"]:
+                dealer_id = pid
+                dealer_name = pl.name
+            else:
+                human_players.append((pid, pl))
+        human_players.sort(key=lambda x: x[1].number)
+
+    targets = []
+    # 1. Сначала добавляем человека (Игрок 1, Игрок 2...) как символическую цель player_N
+    for i, (pid, pl) in enumerate(human_players):
+        targets.append((f"player_{i+1}", f"{pl.name} (# {pl.number})"))
+
+    # 2. В соло/стори режиме или когда есть дилер, дилер добавляется как символическая цель "dealer"
+    if dealer_id or (game and getattr(game, 'config', None) and game.config.game_mode in ("solo", "story", "story_one_round") and len(human_players) <= 1):
+        targets.append(("dealer", dealer_name))
+
+    # Дозаполняем слотами player_N при необходимости
+    desired_count = count if (isinstance(count, int) and count > 0) else 2
+    target_count = max(len(targets), desired_count)
+
+    while len(targets) < target_count:
+        idx = len(targets) + 1
+        targets.append((f"player_{idx}", f"Игрок {idx}"))
+
+    # Очередь шагов: по очереди каждый слот/игрок, затем 1 общий выстрел В СЕБЯ
+    for i in range(len(targets)):
+        calibration_queue.append(i)
+    calibration_queue.append("self")
+
     last_compass_shot = None
-    print(f"[КАЛИБРОВКА] Старт! Очередь шагов: {calibration_queue}")
+    print(f"[КАЛИБРОВКА] Старт! Очередь ({len(calibration_queue)} шагов): {calibration_queue}")
     await broadcast_state()
     return {"ok": True, "queue": calibration_queue}
 
@@ -1673,15 +1717,23 @@ async def assign_calibration_target(
     target_id: str = Form(...)
 ):
     global compass_calibration
+    target_key = None
     if slot_idx in compass_calibration:
-        if isinstance(compass_calibration[slot_idx], dict):
-            compass_calibration[slot_idx]["target_id"] = target_id
+        target_key = slot_idx
+    elif str(slot_idx) in compass_calibration:
+        target_key = str(slot_idx)
+    elif isinstance(slot_idx, str) and slot_idx.isdigit() and int(slot_idx) in compass_calibration:
+        target_key = int(slot_idx)
+
+    if target_key is not None:
+        if isinstance(compass_calibration[target_key], dict):
+            compass_calibration[target_key]["target_id"] = target_id
         else:
-            compass_calibration[slot_idx] = {
-                "angle": float(compass_calibration[slot_idx]),
+            compass_calibration[target_key] = {
+                "angle": float(compass_calibration[target_key]),
                 "target_id": target_id
             }
-        print(f"[КАЛИБРОВКА] Слот #{slot_idx} переназначен на: {target_id}")
+        print(f"[КАЛИБРОВКА] Слот #{target_key} переназначен на: {target_id}")
         await broadcast_state()
         return {"ok": True, "calibration": compass_calibration}
     return {"ok": False, "error": "Invalid slot index"}
@@ -1704,20 +1756,40 @@ async def esp_shoot(
     if is_calibrating and angle is not None:
         if calibration_queue:
             target_idx = calibration_queue.pop(0)
-            # Определяем тип шага: "self_N" (выстрел в себя для игрока N) или число (выстрел в игрока)
-            is_self_step = isinstance(target_idx, str) and target_idx.startswith("self_")
-            if is_self_step:
-                # Извлекаем номер игрока из "self_N"
-                parent_idx = int(target_idx.split("_")[1])
-                parent_name = "Дилер" if parent_idx == 0 else f"Игрок {parent_idx}"
-                default_target = target_idx
-                target_name = f"В СЕБЯ 🎯 (после {parent_name})"
-            elif target_idx == 0:
-                default_target = "dealer"
-                target_name = "Дилер"
+            
+            # Получаем актуальный список участников текущей игры
+            dealer_id = None
+            dealer_name = "Дилер"
+            human_players = []
+            if game and game.players:
+                for pid, pl in game.players.items():
+                    if getattr(pl, "is_dealer", False) or "dealer" in pid.lower() or pl.name.lower() in ["dealer", "дилер"]:
+                        dealer_id = pid
+                        dealer_name = pl.name
+                    else:
+                        human_players.append((pid, pl))
+                human_players.sort(key=lambda x: x[1].number)
+
+            targets = []
+            # 1. Человек (Игрок 1, Игрок 2...) как символическая цель player_N
+            for i, (pid, pl) in enumerate(human_players):
+                targets.append((f"player_{i+1}", f"{pl.name} (# {pl.number})"))
+
+            # 2. Дилер (как символическая цель "dealer")
+            if dealer_id or (game and getattr(game, 'config', None) and game.config.game_mode in ("solo", "story", "story_one_round") and len(human_players) <= 1):
+                targets.append(("dealer", dealer_name))
+
+            if target_idx == "self":
+                default_target = "self"
+                target_name = "В СЕБЯ 🎯 (наклон ствола вверх)"
             else:
-                default_target = f"player_{target_idx}"
-                target_name = f"Игрок {target_idx}"
+                idx = int(target_idx)
+                if idx < len(targets):
+                    default_target = targets[idx][0]
+                    target_name = targets[idx][1]
+                else:
+                    default_target = f"player_{idx + 1}"
+                    target_name = f"Игрок {idx + 1}"
 
             compass_calibration[target_idx] = {
                 "angle": angle,
@@ -1753,94 +1825,163 @@ async def esp_shoot(
                 return val["angle"]
             return float(val)
 
-        # 2. Определение физического выстрела во время игры
-        # Пространственные ключи — только целевые слоты (числа), не self_N
-        spatial_keys = [k for k in compass_calibration.keys()
-                        if not (isinstance(k, str) and (k == "self" or k.startswith("self_")))]
-        if spatial_keys:
-            best_idx = min(spatial_keys, key=lambda k: angle_diff(angle, get_angle(compass_calibration[k])))
-            calib_entry = compass_calibration[best_idx]
-            assigned_target = calib_entry["target_id"] if isinstance(calib_entry, dict) else f"player_{best_idx}"
-        else:
-            best_idx = 0
-            assigned_target = "dealer"
-        
-        target_name = assigned_target
+        target_name = "Неизвестно"
         actual_target_id = None
         is_self_shot = False
+        best_idx = 0
+        assigned_target = "dealer"
 
-        # Порог наклона (Pitch) для выстрела в себя — берём per-player self калибровку
-        self_pitch_threshold = 30.0
-        # Ищем self-калибровку для ближайшего игрока: "self_N" где N = best_idx
-        self_key = f"self_{best_idx}"
-        if self_key in compass_calibration and isinstance(compass_calibration[self_key], dict):
-            calib_self_pitch = compass_calibration[self_key].get("pitch")
-            if calib_self_pitch is not None:
-                self_pitch_threshold = min(30.0, abs(calib_self_pitch) * 0.7)
-        # Фоллбэк на старый единый "self" ключ (обратная совместимость)
-        elif "self" in compass_calibration and isinstance(compass_calibration["self"], dict):
-            calib_self_pitch = compass_calibration["self"].get("pitch")
-            if calib_self_pitch is not None:
-                self_pitch_threshold = min(30.0, abs(calib_self_pitch) * 0.7)
-
-        # 1. Выстрел В СЕБЯ по замеру наклона (Pitch)
-        current_shooter = game.get_current_player() if game else None
-        if pitch is not None and abs(pitch) >= self_pitch_threshold and current_shooter and current_shooter.alive:
-            actual_target_id = current_shooter.id
-            target_name = f"{current_shooter.name} (В СЕБЯ 🎯)"
-            is_self_shot = True
-
-        # 2. Выстрел по азимуту компаса (горизонтальная цель)
-        if not actual_target_id and game and game.players:
-            dealer_id = None
-            dealer_name = "Дилер"
-            human_players = []
-
+        dealer_id = None
+        dealer_name = "Дилер"
+        human_players = []
+        if game and game.players:
             for pid, pl in game.players.items():
                 if getattr(pl, "is_dealer", False) or "dealer" in pid.lower() or pl.name.lower() in ["dealer", "дилер"]:
                     dealer_id = pid
                     dealer_name = pl.name
                 else:
                     human_players.append((pid, pl))
+            # Сортируем людей по их игровому номеру для стабильной привязки к слотам калибровки (1, 2, 3...)
+            human_players.sort(key=lambda x: x[1].number)
 
-            if assigned_target == "dealer":
-                if dealer_id:
-                    actual_target_id = dealer_id
-                    target_name = dealer_name
-                elif human_players:
-                    actual_target_id = human_players[0][0]
-                    target_name = human_players[0][1].name
-            elif assigned_target.startswith("player_"):
+        def resolve_target(assigned: str, slot_k: Union[int, str] = None):
+            """
+            Преобразует строку цели (реальный player_id, 'dealer', 'player_N' или слот калибровки)
+            в кортеж (actual_target_id, target_name, is_alive).
+            """
+            if not game or not game.players:
+                return None, "Неизвестно", False
+
+            # 1. Прямое совпадение с ID действующего игрока в игре
+            if isinstance(assigned, str) and assigned in game.players:
+                pl = game.players[assigned]
+                return pl.id, pl.name, pl.alive
+
+            # 2. Символический 'dealer'
+            if assigned == "dealer":
+                if dealer_id and dealer_id in game.players:
+                    d_pl = game.players[dealer_id]
+                    return d_pl.id, d_pl.name, d_pl.alive
+                return None, dealer_name, False
+
+            # 3. Символический 'player_N' (1-based index)
+            if isinstance(assigned, str) and assigned.startswith("player_"):
                 try:
-                    p_num = int(assigned_target.split("_")[1]) - 1  # player_1 -> index 0
-                    if 0 <= p_num < len(human_players):
-                        actual_target_id = human_players[p_num][0]
-                        target_name = human_players[p_num][1].name
+                    # В режиме 1 на 1 против Дилера (или соло/стори): player_1 = Человек, player_2 = Дилер
+                    is_1v1 = (dealer_id is not None) or (game and getattr(game, 'config', None) and game.config.game_mode in ("solo", "story", "story_one_round"))
+                    if len(human_players) <= 1 and is_1v1 and p_num == 2:
+                        if dealer_id and dealer_id in game.players:
+                            d_pl = game.players[dealer_id]
+                            return d_pl.id, d_pl.name, d_pl.alive
+                        return None, dealer_name, False
+
+                    p_idx = p_num - 1
+                    if 0 <= p_idx < len(human_players):
+                        pid, pl = human_players[p_idx]
+                        return pid, pl.name, pl.alive
                 except Exception:
                     pass
 
-            if not actual_target_id and assigned_target in game.players:
-                actual_target_id = assigned_target
-                target_name = game.players[assigned_target].name
+            # 4. Фолбэк по индексу слота калибровки (если UUID устарел или калибровали до старта)
+            idx = None
+            if slot_k is not None:
+                if isinstance(slot_k, int):
+                    idx = slot_k
+                elif isinstance(slot_k, str) and slot_k.isdigit():
+                    idx = int(slot_k)
 
-            if not actual_target_id:
-                try:
-                    idx = int(best_idx)
-                    if idx == 0 and dealer_id:
-                        actual_target_id = dealer_id
-                        target_name = dealer_name
-                    else:
-                        h_idx = idx - 1 if dealer_id else idx
-                        if 0 <= h_idx < len(human_players):
-                            actual_target_id = human_players[h_idx][0]
-                            target_name = human_players[h_idx][1].name
-                except Exception:
-                    pass
+            if idx is None:
+                if isinstance(assigned, int):
+                    idx = assigned
+                elif isinstance(assigned, str) and assigned.isdigit():
+                    idx = int(assigned)
 
-            if not actual_target_id and game.players:
-                first_pid, first_pl = list(game.players.items())[0]
-                actual_target_id = first_pid
-                target_name = first_pl.name
+            if idx is not None:
+                ordered_targets = [pl for pid, pl in human_players]
+                if dealer_id and dealer_id in game.players:
+                    ordered_targets.append(game.players[dealer_id])
+
+                if 0 <= idx < len(ordered_targets):
+                    pl = ordered_targets[idx]
+                    return pl.id, pl.name, pl.alive
+
+            return None, "Неизвестно", False
+
+        current_shooter = game.get_current_player() if game else None
+
+        # --- 1. Определение выстрела В СЕБЯ ---
+        self_pitch_threshold = 30.0
+        self_angle = None
+
+        if current_shooter:
+            shooter_idx = None
+            if current_shooter.id == dealer_id:
+                shooter_idx = 0
+            else:
+                for i, (pid, pl) in enumerate(human_players):
+                    if pid == current_shooter.id:
+                        shooter_idx = i + 1
+                        break
+            
+            self_entry = None
+            if shooter_idx is not None:
+                self_entry = compass_calibration.get(f"self_{shooter_idx}")
+            if not self_entry:
+                self_entry = compass_calibration.get("self")
+
+            if self_entry and isinstance(self_entry, dict):
+                calib_self_pitch = self_entry.get("pitch")
+                self_angle = self_entry.get("angle")
+                if calib_self_pitch is not None:
+                    # Порог должен быть достаточно высоким, чтобы не убить себя случайно при цели в соседа
+                    self_pitch_threshold = max(35.0, abs(calib_self_pitch) * 0.75)
+
+        if pitch is not None and current_shooter and current_shooter.alive:
+            is_pitch_high_enough = abs(pitch) >= self_pitch_threshold
+            angle_matches_self = True
+            if self_angle is not None:
+                # Если азимут выстрела сильно отличается от калибровочного азимута выстрела в себя, значит ствол направлен на другого
+                angle_matches_self = angle_diff(angle, self_angle) < 40.0
+
+            # Выстрел в себя засчитывается, если наклон ОЧЕНЬ высокий (вертикально, >70) 
+            # или наклон выше порога калибровки И азимут тоже совпадает с позой самоубийства
+            if abs(pitch) >= 70.0 or (is_pitch_high_enough and angle_matches_self):
+                actual_target_id = current_shooter.id
+                target_name = f"{current_shooter.name} (В СЕБЯ 🎯)"
+                is_self_shot = True
+                assigned_target = "self"
+
+        # --- 2. Определение выстрела В ДРУГОГО (по азимуту) ---
+        if not actual_target_id:
+            spatial_keys = []
+            for k, entry in compass_calibration.items():
+                if isinstance(k, str) and (k == "self" or k.startswith("self_")):
+                    continue
+                
+                k_assigned = entry.get("target_id") if isinstance(entry, dict) else f"player_{k}"
+                _, _, is_alive = resolve_target(k_assigned, slot_k=k)
+                if is_alive:
+                    spatial_keys.append(k)
+
+            # Если живых пространственных целей нет, берём все пространственные ключи
+            if not spatial_keys:
+                spatial_keys = [k for k in compass_calibration.keys() if not (isinstance(k, str) and (k == "self" or k.startswith("self_")))]
+
+            if spatial_keys:
+                best_idx = min(spatial_keys, key=lambda k: angle_diff(angle, get_angle(compass_calibration[k])))
+                calib_entry = compass_calibration[best_idx]
+                assigned_target = calib_entry.get("target_id") if isinstance(calib_entry, dict) else f"player_{best_idx}"
+                actual_target_id, target_name, _ = resolve_target(assigned_target, slot_k=best_idx)
+
+            # Фолбэк если резолв не дал результат (например, до старта игры)
+            if not actual_target_id and game and game.players:
+                if current_shooter:
+                    actual_target_id = current_shooter.id
+                    target_name = current_shooter.name
+                else:
+                    first_pid, first_pl = list(game.players.items())[0]
+                    actual_target_id = first_pid
+                    target_name = first_pl.name
 
         last_compass_shot = {
             "angle": angle,
@@ -1853,7 +1994,7 @@ async def esp_shoot(
             "is_calibration": False,
             "timestamp": time.time()
         }
-        print(f"[ВЫСТРЕЛ 3D] Угол {angle}°, Наклон {pitch}° -> Цель: {target_name}")
+        print(f"[ВЫСТРЕЛ 3D] Угол {angle}°, Наклон {pitch}° -> Выбран слот: {best_idx}, Цель: {target_name} ({actual_target_id})")
 
         if game and game.phase == GamePhase.PLAYER_TURN and actual_target_id:
             try:
