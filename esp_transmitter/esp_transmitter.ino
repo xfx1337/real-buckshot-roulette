@@ -20,7 +20,7 @@ volatile unsigned long triggerFireMs = 0;
 
 ICACHE_RAM_ATTR void triggerISR() {
     unsigned long now = millis();
-    if (now - triggerFireMs > 80) {  // 80мс lockout от дребезга
+    if (now - triggerFireMs > 250) {  // 250мс lockout от дребезга
         triggerFired = true;
         triggerFireMs = now;
     }

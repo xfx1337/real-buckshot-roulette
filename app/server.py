@@ -55,6 +55,29 @@ COOKIE_PLAYER_NAME = "bsr_player_name"
 COOKIE_MAX_AGE = 60 * 60 * 12  # 12 часов — с запасом на одну игровую сессию
 
 
+from datetime import datetime
+
+# ── Логирование таргетинга и калибровки в файл ─────────────────────────────
+LOGS_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "logs")
+os.makedirs(LOGS_DIR, exist_ok=True)
+TARGETING_LOG_FILE = os.path.join(LOGS_DIR, "targeting.log")
+
+def log_targeting(event_type: str, details: dict):
+    """Записывает подробные события калибровки и таргетинга в файл logs/targeting.log."""
+    try:
+        timestamp_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+        log_line = f"[{timestamp_str}] [{event_type.upper()}]\n"
+        for k, v in details.items():
+            log_line += f"  {k}: {json.dumps(v, ensure_ascii=False) if isinstance(v, (dict, list)) else v}\n"
+        log_line += "-" * 60 + "\n"
+        
+        with open(TARGETING_LOG_FILE, "a", encoding="utf-8") as f:
+            f.write(log_line)
+            f.flush()
+    except Exception as e:
+        print(f"[LOG ERROR] {e}")
+
+
 def _set_player_cookies(resp, player_id: str, name: str) -> None:
     """Проставляет cookie идентичности на ответе (redirect/HTML). SameSite=Lax,
     http-доступ (не Secure) — игра крутится по локальному http, не https.
@@ -420,6 +443,7 @@ async def broadcast_state():
     dealer_dict = game.to_dict(for_dealer=True)
     dealer_dict["can_undo"] = len(undo_stack) > 0
     dealer_dict["global_mute"] = _is_tv_muting()
+    dealer_dict["use_gyro_targeting"] = use_gyro_targeting
 
     # Серверная озвучка смотрит на тот же снапшот, что уходит дилеру.
     if sound_director.enabled:
@@ -1554,6 +1578,7 @@ async def get_state(dealer: bool = False) -> GameStateResponse | dict:
         data = game.to_dict(for_dealer=True)
         data["can_undo"] = len(undo_stack) > 0
         data["global_mute"] = _is_tv_muting()
+        data["use_gyro_targeting"] = use_gyro_targeting
         return data
     d = game.to_dict(for_dealer=False)
     d["global_mute"] = _is_tv_muting()
@@ -1651,6 +1676,13 @@ compass_calibration: dict = {}   # slot_idx (int) -> {"angle": float, "target_id
 is_calibrating: bool = False
 calibration_queue: list = []     # список индексов, которые ещё ждём
 last_compass_shot: Optional[dict] = None  # данные о последнем выстреле с компаса
+use_gyro_targeting: bool = True  # Использовать ли гироскоп для авто-выстрела
+
+@app.post("/api/toggle_gyro", tags=["Dealer Actions"])
+async def toggle_gyro(data: dict):
+    global use_gyro_targeting
+    use_gyro_targeting = data.get("enabled", True)
+    return {"ok": True, "use_gyro_targeting": use_gyro_targeting}
 
 
 @app.post("/api/calibration/start", tags=["ESP32", "Dealer Actions"])
@@ -1674,18 +1706,23 @@ async def start_calibration(count: Optional[int] = Form(None)):
 
     # Единый список всех участников партии (Игроки + Дилер)
     participants = []
-    for i, (pid, pl) in enumerate(human_players):
-        participants.append((f"player_{i+1}", f"{pl.name} (# {pl.number})"))
+    if human_players:
+        for i, (pid, pl) in enumerate(human_players):
+            participants.append((f"player_{i+1}", f"{pl.name} (# {pl.number})"))
+    else:
+        participants.append(("player_1", "Игрок 1"))
 
-    if dealer_id or (game and getattr(game, 'config', None) and game.config.game_mode in ("solo", "story", "story_one_round")):
+    is_dealer_game = dealer_id or (game and getattr(game, 'config', None) and game.config.game_mode in ("solo", "story", "story_one_round"))
+    if is_dealer_game and not any(p[0] == "dealer" for p in participants):
         participants.append(("dealer", dealer_name))
 
     desired_count = count if (isinstance(count, int) and count > 0) else 2
-    target_count = max(len(participants), desired_count)
-
-    while len(participants) < target_count:
-        idx = len(participants) + 1
-        participants.append((f"player_{idx}", f"Игрок {idx}"))
+    p_num = 1
+    while len(participants) < desired_count:
+        candidate_id = f"player_{p_num}"
+        if not any(p[0] == candidate_id for p in participants):
+            participants.append((candidate_id, f"Игрок {p_num}"))
+        p_num += 1
 
     # ЕДИНЫЙ МЕХАНИЗМ ДЛЯ ВСЕХ РЕЖИМОВ:
     # Каждый участник целится во ВСЕХ остальных + В СЕБЯ
@@ -1707,12 +1744,18 @@ async def start_calibration(count: Optional[int] = Form(None)):
             "shooter_idx": i,
             "shooter_name": s_name,
             "target_id": "self",
-            "target_name": "В СЕБЯ (наклон вверх)",
-            "prompt": f"🎯 {s_name} ➔ В СЕБЯ (наклон ствола вверх)"
+            "target_name": "В СЕБЯ",
+            "prompt": f"🎯 {s_name} ➔ В СЕБЯ (наведите на себя — горизонтально или вверх)"
         })
 
     last_compass_shot = None
     print(f"[КАЛИБРОВКА] Старт! Единая очередь ({len(calibration_queue)} шагов)")
+    log_targeting("CALIBRATION_STARTED", {
+        "game_mode": game.config.game_mode if (game and hasattr(game, "config")) else "none",
+        "participants": participants,
+        "queue_length": len(calibration_queue),
+        "queue": calibration_queue
+    })
     await broadcast_state()
     return {"ok": True, "queue": calibration_queue}
 
@@ -1755,6 +1798,8 @@ async def assign_calibration_target(
     return {"ok": False, "error": "Invalid slot index"}
 
 
+last_processed_shot_id: Optional[str] = None
+
 @app.post(
     "/api/esp/shoot",
     tags=["ESP32"],
@@ -1763,10 +1808,18 @@ async def assign_calibration_target(
 )
 async def esp_shoot(
     angle: Optional[float] = Form(None, description="Азимут (угол) компаса от 0 до 360"),
-    pitch: Optional[float] = Form(None, description="Наклон ствола от -90 до +90")
+    pitch: Optional[float] = Form(None, description="Наклон ствола от -90 до +90"),
+    shot_id: Optional[str] = Form(None, description="ID выстрела (защита от дублей)")
 ):
-    global is_calibrating, calibration_queue, compass_calibration, last_compass_shot
+    global is_calibrating, calibration_queue, compass_calibration, last_compass_shot, last_processed_shot_id
     import time
+    
+    if shot_id and shot_id == last_processed_shot_id:
+        print(f"[ВЫСТРЕЛ] Дубликат выстрела проигнорирован (shot_id={shot_id})")
+        return {"ok": True, "duplicate": True}
+    if shot_id:
+        last_processed_shot_id = shot_id
+
     
     # 1. Если идёт калибровка, перехватываем выстрел
     if is_calibrating and angle is not None:
@@ -1797,6 +1850,15 @@ async def esp_shoot(
                 "timestamp": time.time()
             }
             print(f"[КАЛИБРОВКА] ШАГ '{target_idx}' ({target_name}) сохранен: Угол {angle}°, Наклон {pitch}°")
+            log_targeting("CALIBRATION_STEP_SAVED", {
+                "step_key": target_idx,
+                "target_name": target_name,
+                "default_target": default_target,
+                "angle": angle,
+                "pitch": pitch,
+                "remaining_queue_len": len(calibration_queue),
+                "compass_calibration_database": compass_calibration
+            })
             if not calibration_queue:
                 is_calibrating = False
                 print("[КАЛИБРОВКА] Все шаги калибровки успешно завершены!")
@@ -1847,7 +1909,13 @@ async def esp_shoot(
                 pl = game.players[assigned]
                 return pl.id, pl.name, pl.alive
 
-            # 2. Символический 'dealer'
+            # 2. Выстрел в себя
+            if assigned == "self":
+                if current_shooter:
+                    return current_shooter.id, f"{current_shooter.name} (В СЕБЯ 🎯)", current_shooter.alive
+                return None, "В СЕБЯ 🎯", True
+
+            # 3. Символический 'dealer'
             if assigned == "dealer":
                 if dealer_id and dealer_id in game.players:
                     d_pl = game.players[dealer_id]
@@ -1896,18 +1964,20 @@ async def esp_shoot(
 
         current_shooter = game.get_current_player() if game else None
 
-        # Определяем 0-based индекс текущего стрелка
+        # Определяем 0-based индекс текущего стрелка в матрице участники (Игроки + Дилер)
         shooter_s_idx = 0
-        if current_shooter and human_players:
-            for idx, (h_pid, h_pl) in enumerate(human_players):
-                if h_pid == current_shooter.id:
+        all_participants = list(human_players)
+        if dealer_id and dealer_id in game.players:
+            all_participants.append((dealer_id, game.players[dealer_id]))
+
+        if current_shooter and all_participants:
+            for idx, (p_id, p_obj) in enumerate(all_participants):
+                if p_id == current_shooter.id:
                     shooter_s_idx = idx
                     break
 
-        # --- 1. Определение выстрела В СЕБЯ ---
-        self_pitch_threshold = 30.0
-        self_angle = None
-
+        # --- 1. Определение выстрела В СЕБЯ по наклону ---
+        self_pitch_threshold = 50.0
         self_keys = [f"s{shooter_s_idx}_self", f"self_{shooter_s_idx+1}", "s0_self", "self"]
         self_entry = None
         for sk in self_keys:
@@ -1917,26 +1987,22 @@ async def esp_shoot(
 
         if self_entry and isinstance(self_entry, dict):
             calib_self_pitch = self_entry.get("pitch")
-            self_angle = self_entry.get("angle")
-            if calib_self_pitch is not None:
-                self_pitch_threshold = max(35.0, abs(calib_self_pitch) * 0.75)
+            if calib_self_pitch is not None and abs(calib_self_pitch) > 20.0:
+                self_pitch_threshold = max(24.0, abs(calib_self_pitch) * 0.75)
 
+        # Выстрел В СЕБЯ регистрируется строго при высоком наклоне ствола вверх (pitch >= порога)
         if pitch is not None and current_shooter and current_shooter.alive:
-            is_pitch_high_enough = abs(pitch) >= self_pitch_threshold
-            angle_matches_self = True
-            if self_angle is not None:
-                angle_matches_self = angle_diff(angle, self_angle) < 40.0
-
-            if abs(pitch) >= 70.0 or (is_pitch_high_enough and angle_matches_self):
+            if abs(pitch) >= self_pitch_threshold:
                 actual_target_id = current_shooter.id
                 target_name = f"{current_shooter.name} (В СЕБЯ 🎯)"
                 is_self_shot = True
                 assigned_target = "self"
 
-        # --- 2. Определение выстрела В ДРУГОГО (по азимуту) ---
+        # --- 2. Определение цели по азимуту (включая горизонтальный выстрел в себя) ---
         if not actual_target_id:
             shooter_prefix = f"s{shooter_s_idx}_"
-            shooter_keys = [k for k in compass_calibration.keys() if str(k).startswith(shooter_prefix) and not (str(k) == "self" or str(k).endswith("_self"))]
+            # Включаем все откалиброванные направления текущего стрелка (включая s{shooter_s_idx}_self)
+            shooter_keys = [k for k in compass_calibration.keys() if str(k).startswith(shooter_prefix)]
 
             spatial_keys = []
             for k in shooter_keys:
@@ -1946,28 +2012,27 @@ async def esp_shoot(
                 if is_alive:
                     spatial_keys.append(k)
 
-            # Собираем ВСЕ живые пространственные ключи из всей базы калибровки
-            all_spatial_keys = [k for k in compass_calibration.keys() if not (str(k) == "self" or str(k).endswith("_self"))]
-            all_alive_spatial = []
-            for k in all_spatial_keys:
-                entry = compass_calibration[k]
-                k_assigned = entry.get("target_id") if isinstance(entry, dict) else f"player_{k}"
-                _, _, is_alive = resolve_target(k_assigned, slot_k=k)
-                if is_alive:
-                    all_alive_spatial.append(k)
-
-            # Если у текущего стрелка калибровано меньше 2 живых целей, но во всей базе есть больше — используем всю базу для сплита углов
-            if len(spatial_keys) < 2 and len(all_alive_spatial) >= len(spatial_keys):
-                spatial_keys = all_alive_spatial
+            # Если у текущего стрелка НЕТ своих откалиброванных живых целей — делаем фолбэк на все направления
+            if not spatial_keys:
+                all_spatial_keys = list(compass_calibration.keys())
+                for k in all_spatial_keys:
+                    entry = compass_calibration[k]
+                    k_assigned = entry.get("target_id") if isinstance(entry, dict) else f"player_{k}"
+                    _, _, is_alive = resolve_target(k_assigned, slot_k=k)
+                    if is_alive:
+                        spatial_keys.append(k)
 
             if not spatial_keys:
-                spatial_keys = [k for k in compass_calibration.keys() if not (str(k) == "self" or str(k).endswith("_self"))]
+                spatial_keys = list(compass_calibration.keys())
 
             if spatial_keys:
                 best_idx = min(spatial_keys, key=lambda k: angle_diff(angle, get_angle(compass_calibration[k])))
                 calib_entry = compass_calibration[best_idx]
                 assigned_target = calib_entry.get("target_id") if isinstance(calib_entry, dict) else f"player_{best_idx}"
                 actual_target_id, target_name, _ = resolve_target(assigned_target, slot_k=best_idx)
+
+                if assigned_target == "self" or str(best_idx).endswith("_self") or str(best_idx) == "self":
+                    is_self_shot = True
 
             # Фолбэк если резолв не дал результат (например, до старта игры)
             if not actual_target_id and game and game.players:
@@ -1992,7 +2057,32 @@ async def esp_shoot(
         }
         print(f"[ВЫСТРЕЛ 3D] Угол {angle}°, Наклон {pitch}° -> Выбран слот: {best_idx}, Цель: {target_name} ({actual_target_id})")
 
-        if game and game.phase == GamePhase.PLAYER_TURN and actual_target_id:
+        # Подробное логирование выстрела
+        log_targeting("SHOT_PROCESSED", {
+            "incoming_angle": angle,
+            "incoming_pitch": pitch,
+            "game_mode": game.config.game_mode if (game and hasattr(game, "config")) else "none",
+            "game_phase": game.phase.value if (game and hasattr(game, "phase")) else "none",
+            "current_shooter": {"id": current_shooter.id, "name": current_shooter.name, "number": current_shooter.number} if current_shooter else None,
+            "shooter_s_idx": shooter_s_idx,
+            "all_participants": [{"id": pid, "name": pl.name} for pid, pl in all_participants],
+            "compass_calibration_state": compass_calibration,
+            "self_check": {
+                "self_pitch_threshold": self_pitch_threshold,
+                "is_self_shot": is_self_shot
+            },
+            "spatial_check": {
+                "best_idx": best_idx,
+                "assigned_target": assigned_target
+            },
+            "final_target": {
+                "actual_target_id": actual_target_id,
+                "target_name": target_name,
+                "is_self_shot": is_self_shot
+            }
+        })
+
+        if use_gyro_targeting and game and game.phase == GamePhase.PLAYER_TURN and actual_target_id:
             try:
                 prev = copy.deepcopy(game)
                 result = game.shoot(actual_target_id)
@@ -2001,6 +2091,29 @@ async def esp_shoot(
                 return {"ok": True, "fired": True, "automated": True, "last_shot": last_compass_shot, **result}
             except Exception as e:
                 print(f"[esp_shoot] Ошибка авто-выстрела: {e}")
+
+    if not game:
+        await broadcast_state()
+        return {"ok": False, "fired": False, "last_shot": last_compass_shot}
+
+    result = game.esp_shoot()
+    if result.get("fired"):
+        await broadcast_state()
+    return result
+
+
+@app.get("/api/logs/targeting", tags=["Debug"])
+async def get_targeting_logs(lines: int = 100):
+    """Возвращает последние N строк из файла logs/targeting.log."""
+    if not os.path.exists(TARGETING_LOG_FILE):
+        return {"ok": True, "logs": "Лог-файл пока пуст"}
+    try:
+        with open(TARGETING_LOG_FILE, "r", encoding="utf-8") as f:
+            all_lines = f.readlines()
+            recent = "".join(all_lines[-lines:])
+            return {"ok": True, "logs": recent}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
 
     if not game:
         await broadcast_state()
