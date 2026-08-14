@@ -4036,6 +4036,373 @@
             width: 15px;
             height: 15px;
         }
+
+        /* ══ Вкладка «Телефоны» ═══════════════════════════════════════════════
+   Восемь аппаратов сеткой, дисковый телефон и цепочка под ними, события
+   справа. Состояние карточки видно цветом рамки: оператор смотрит сюда
+   боковым зрением, ведя партию, а не вчитывается в текст. */
+
+        /* Пульт — кадр фиксированной высоты с overflow:hidden, поэтому прокрутка
+   обязана жить внутри колонки. Без height:100% сетка тянется по содержимому,
+   вылезает за кадр, и всё ниже аппаратов становится недостижимо. */
+        .rd-voip-grid {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) 296px;
+            gap: 12px;
+            height: 100%;
+        }
+
+        .rd-voip-grid .rd-col {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            min-height: 0;
+            overflow-y: auto;
+            overflow-x: hidden;
+            padding-right: 4px;
+        }
+
+        /* Карточки не сжимаются: иначе flex-shrink давит список аппаратов, а
+   дисковый телефон и цепочка под ним теряют высоту вместо того, чтобы
+   уехать под прокрутку. */
+        .rd-voip-grid .rd-col>.rd-card {
+            flex: 0 0 auto;
+            overflow: visible;
+        }
+
+        /* Журнал справа тянется на всю колонку и скроллится сам. */
+        .rd-voip-grid .rd-col:last-child>.rd-card.rd-log {
+            flex: 1 1 auto;
+            min-height: 180px;
+            overflow: hidden;
+        }
+
+        @media(max-width:1100px) {
+            .rd-voip-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        .voip-d-phones {
+            display: grid;
+            gap: 8px;
+            grid-template-columns: repeat(auto-fill, minmax(215px, 1fr));
+        }
+
+        .voip-d-phone {
+            border: 1px solid var(--border-light);
+            background: var(--bg-panel);
+            padding: 9px;
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+
+        .voip-d-phone.idle {
+            border-color: var(--green-dim);
+        }
+
+        .voip-d-phone.busy {
+            border-color: var(--amber);
+            background: var(--bg-elevated);
+        }
+
+        /* Мигание, а не статичный цвет: звонящий аппарат нужно заметить, не
+   разглядывая панель. */
+        .voip-d-phone.ringing {
+            border-color: var(--amber-bright);
+            animation: voipDRing 1s steps(2) infinite;
+        }
+
+        @keyframes voipDRing {
+            50% {
+                border-color: var(--border-light);
+            }
+        }
+
+        .vdp-head {
+            display: flex;
+            align-items: baseline;
+            gap: 8px;
+        }
+
+        .vdp-num {
+            font-family: var(--font-mono);
+            font-size: 1.05rem;
+            color: var(--green);
+            letter-spacing: 1px;
+        }
+
+        .vdp-state {
+            font-size: 0.72rem;
+            color: var(--text-bright);
+            margin-left: auto;
+            text-align: right;
+        }
+
+        .vdp-armed {
+            font-size: 0.66rem;
+            color: var(--amber-bright);
+        }
+
+        .vdp-digits {
+            font-family: var(--font-mono);
+            font-size: 0.68rem;
+            color: var(--text-dim);
+        }
+
+        .vdp-sound {
+            background: var(--bg-input);
+            border: 1px solid var(--border-light);
+            color: var(--text-bright);
+            font-family: var(--font-mono);
+            font-size: 0.68rem;
+            padding: 4px 5px;
+            width: 100%;
+        }
+
+        /* Две колонки, а не перенос по ширине: при flex-wrap кнопки ложились в три
+   рваные строки разной длины, и карточка читалась как список без структуры.
+   Сетка даёт устойчивую пару «действие — отмена» в каждом ряду. */
+        .vdp-btns {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 4px;
+        }
+
+        .vdp-btns .btn {
+            font-size: 0.6rem;
+            padding: 5px 4px;
+            width: 100%;
+        }
+
+        /* Итог одной строкой: можно звонить или нет. Восемь точек читаются дольше,
+   чем одна фраза, а оператор смотрит сюда на секунду. */
+        .voip-d-summary {
+            font-family: var(--font-mono);
+            font-size: 0.78rem;
+            letter-spacing: 1px;
+            padding: 7px 9px;
+            margin-bottom: 8px;
+            border-left: 3px solid var(--text-dark);
+            background: var(--bg-input);
+            color: var(--text-dim);
+        }
+
+        .voip-d-summary.ok {
+            color: var(--green);
+            border-left-color: var(--green);
+        }
+
+        .voip-d-summary.bad {
+            color: var(--red-bright);
+            border-left-color: var(--red-bright);
+        }
+
+        .voip-d-checks {
+            list-style: none;
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+        }
+
+        /* Сетка, а не flex: подсказка починки уходит на свою строку под названием
+   звена, не разрывая колонку с деталями. */
+        .vdc {
+            display: grid;
+            grid-template-columns: 9px 96px minmax(0, 1fr);
+            gap: 4px 8px;
+            align-items: baseline;
+            font-size: 0.74rem;
+        }
+
+        /* Точка живёт в своей колонке сетки: без явной ширины она схлопывается на
+   строках, где название переносится, и звено остаётся без индикатора —
+   а по нему и читают, что сломалось. */
+        .vdc-dot {
+            width: 7px;
+            height: 7px;
+            min-width: 7px;
+            border-radius: 50%;
+            background: var(--text-dark);
+            align-self: baseline;
+            margin-top: 4px;
+        }
+
+        .vdc.ok .vdc-dot {
+            background: var(--green);
+            box-shadow: 0 0 6px var(--green-glow);
+        }
+
+        /* Сломанное звено должно быть заметнее исправного, а не наравне с ним: на
+   фоне четырёх зелёных точек одна тускло-красная теряется — а искать глазом
+   надо именно её. Отсюда пульсация и подсветка названия. */
+        .vdc.down .vdc-dot {
+            background: #ff5f5f;
+            box-shadow: 0 0 8px rgba(255, 95, 95, 0.85);
+            animation: vdcPulse 1.4s ease-in-out infinite;
+        }
+
+        .vdc.down .vdc-name {
+            color: #ff8f8f;
+        }
+
+        @keyframes vdcPulse {
+            50% {
+                opacity: 0.35;
+            }
+        }
+
+        .vdc.warn .vdc-dot {
+            background: var(--amber-bright);
+            box-shadow: 0 0 6px rgba(196, 169, 90, 0.6);
+        }
+
+        .vdc.warn .vdc-name {
+            color: var(--amber-bright);
+        }
+
+        .vdc-name {
+            color: var(--text-bright);
+        }
+
+        .vdc-detail {
+            color: var(--text-dim);
+            font-size: 0.68rem;
+            word-break: break-word;
+        }
+
+        .vdc-fix {
+            grid-column: 2 / -1;
+            color: var(--amber-bright);
+            font-size: 0.68rem;
+            line-height: 1.45;
+            border-left: 2px solid var(--amber);
+            padding-left: 7px;
+        }
+
+        /* ── дисковый телефон ── */
+        .voip-d-slots {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.74rem;
+            margin-top: 8px;
+        }
+
+        .voip-d-slots th {
+            text-align: left;
+            color: var(--text-dim);
+            font-weight: normal;
+            font-size: 0.66rem;
+            letter-spacing: 1px;
+            text-transform: uppercase;
+            padding: 4px 6px;
+            border-bottom: 1px solid var(--border-light);
+        }
+
+        .voip-d-slots td {
+            padding: 5px 6px;
+            border-bottom: 1px solid var(--border);
+            color: var(--text);
+        }
+
+        .vds-num {
+            font-family: var(--font-mono);
+            color: var(--green);
+            font-size: 0.85rem;
+        }
+
+        .voip-d-addslot {
+            display: flex;
+            gap: 6px;
+            align-items: center;
+            margin-top: 9px;
+            flex-wrap: wrap;
+        }
+
+        .voip-d-addslot .vdp-sound {
+            width: auto;
+            min-width: 120px;
+            flex: 0 1 auto;
+        }
+
+        .voip-d-actions {
+            display: flex;
+            gap: 6px;
+            flex-wrap: wrap;
+            margin-top: 10px;
+        }
+
+        .voip-d-progress {
+            margin-top: 10px;
+            border-top: 1px solid var(--border);
+            padding-top: 8px;
+        }
+
+        .voip-d-progress .vdp-title {
+            font-family: var(--font-mono);
+            font-size: 0.72rem;
+            color: var(--amber-bright);
+            letter-spacing: 1px;
+            margin-bottom: 5px;
+        }
+
+        .vdp-steps {
+            list-style: none;
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+            font-size: 0.68rem;
+        }
+
+        .vdp-steps li {
+            color: var(--text-dim);
+        }
+
+        .vdp-steps li::before {
+            content: '○ ';
+        }
+
+        .vst-running {
+            color: var(--amber-bright) !important;
+        }
+
+        .vst-running::before {
+            content: '◐ ';
+        }
+
+        .vst-ok {
+            color: var(--green) !important;
+        }
+
+        .vst-ok::before {
+            content: '● ';
+        }
+
+        .vst-fail {
+            color: var(--red-bright) !important;
+        }
+
+        .vst-fail::before {
+            content: '✕ ';
+        }
+
+        .vst-skip::before {
+            content: '– ';
+        }
+
+        .voip-lg-error {
+            color: var(--red-bright);
+        }
+
+        .voip-lg-warn {
+            color: var(--amber-bright);
+        }
+
+        .voip-lg-off-hook,
+        .voip-lg-digit {
+            color: var(--text-bright);
+        }
     </style>
 </head>
 
@@ -4060,6 +4427,7 @@
                     <button class="rd-tab" data-screen="items" onclick="showScreen('items')">Предметы</button>
                     <button class="rd-tab" data-screen="lobby" onclick="showScreen('lobby')">Настройки</button>
                     <button class="rd-tab" data-screen="tv" onclick="showScreen('tv')">📺 TV</button>
+                    <button class="rd-tab" data-screen="voip" onclick="showScreen('voip')">☎ ТЕЛЕФОНЫ</button>
                 </nav>
                 <span class="rd-spacer"></span>
                 <div class="header-controls">
@@ -4339,9 +4707,9 @@
                                         style="flex:0 0 auto; padding:13px 16px; font-size:13px;"
                                         title="Открыть камеры в отдельной вкладке (для дилера)">🖥 КАМЕРЫ
                                         (ДИЛЕР)</button>
-                                    <button class="btn btn-plate" onclick="window.open('/voip','_blank')"
+                                    <button class="btn btn-plate" onclick="showScreen('voip')"
                                         style="flex:0 0 auto; padding:13px 16px; font-size:13px;"
-                                        title="Телефоны: порты, статусы АТС и шлюза, звонок на трубку">☎
+                                        title="Телефоны: звонок на трубку, состояние портов, освобождение линии">☎
                                         ТЕЛЕФОНЫ</button>
                                 </div>
 
@@ -4703,6 +5071,86 @@
                         </div>
                     </div>
                 </div>
+                <!-- ══ Телефоны ═══════════════════════════════════════════════════
+                     Подсистема телефонии: восемь дисковых аппаратов на портах FXS
+                     шлюза AddPac, своя АТС и ESP32, читающий рычаг и диск. Железо и
+                     его логика живут в voip/ и не правятся отсюда; это управление.
+
+                     Оператору отсюда нужно немногое и всегда одно и то же: позвонить
+                     на аппарат со звуком, увидеть, кто снял трубку и что набрал, и
+                     освободить залипший порт. Всё остальное — на отдельной странице
+                     /voip, ссылка внизу. -->
+                <div class="rd-screen" id="rd-screen-voip" hidden>
+                    <div class="rd-voip-grid">
+                        <div class="rd-col">
+                            <div class="rd-card">
+                                <h3>Аппараты</h3>
+                                <div class="voip-d-phones" id="voip-d-phones">
+                                    <p class="hint">Подключение к телефонии…</p>
+                                </div>
+                            </div>
+
+                            <!-- ── Дисковый телефон ──────────────────────────────
+                                 Обратное направление: не панель звонит аппарату, а
+                                 человек снимает трубку и набирает номер на диске.
+                                 Работает там, где входящий вызов не проходит — линии
+                                 с залипающим шлейфом отказывают только входящим.
+
+                                 Номера живут в базе АТС, а не в конфиге: план набора
+                                 ловит весь диапазон одним правилом и читает базу в
+                                 момент вызова, поэтому добавленный здесь номер
+                                 работает со следующего набора, без перезагрузки. -->
+                            <div class="rd-card">
+                                <h3>Дисковый телефон</h3>
+                                <p class="hint">
+                                    Снимите трубку, наберите номер на диске — заиграет назначенный звук.
+                                    Изменения действуют сразу, перезагружать ничего не нужно.
+                                </p>
+                                <table class="voip-d-slots">
+                                    <thead><tr><th>Номер</th><th>Что играет</th><th></th></tr></thead>
+                                    <tbody id="voip-d-slots"><tr><td colspan="3" class="hint">загрузка…</td></tr></tbody>
+                                </table>
+                                <div class="voip-d-addslot">
+                                    <select class="vdp-sound" id="voip-d-slot-number"></select>
+                                    <select class="vdp-sound" id="voip-d-slot-sound"></select>
+                                    <button class="btn btn-plate btn-small" onclick="voipAddSlot()">НАЗНАЧИТЬ</button>
+                                </div>
+                            </div>
+
+                            <div class="rd-card">
+                                <h3>Состояние цепочки</h3>
+                                <!-- Каждое звено отдельно, потому что снаружи поломка в
+                                     одном выглядит как поломка в другом: вызов, который
+                                     не проходит из-за лежащей АТС, из-за пропавшего
+                                     адреса на интерфейсе и из-за залипшего порта — три
+                                     разные неисправности с тремя разными починками. -->
+                                <div class="voip-d-summary" id="voip-d-summary">проверка…</div>
+                                <ul class="voip-d-checks" id="voip-d-checks">
+                                    <li class="hint">проверка…</li>
+                                </ul>
+                                <div class="voip-d-actions">
+                                    <button class="btn btn-small" onclick="voipLoadHealth()">ОБНОВИТЬ</button>
+                                    <button class="btn btn-plate plate-yellow btn-small" onclick="voipResetPorts()">СБРОСИТЬ ПОРТЫ</button>
+                                    <button class="btn btn-danger btn-small" onclick="voipReboot()">ПЕРЕЗАГРУЗИТЬ ШЛЮЗ</button>
+                                </div>
+                                <!-- Прогресс висит здесь, а не в отдельном месте: вызов
+                                     длится полминуты, перезагрузка две, и без разбивки
+                                     интерфейс может сказать только «работаю», что
+                                     неотличимо от «завис». -->
+                                <div class="voip-d-progress" id="voip-d-progress" hidden>
+                                    <div class="vdp-title" id="voip-d-progress-title"></div>
+                                    <ol class="vdp-steps" id="voip-d-progress-steps"></ol>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="rd-col">
+                            <div class="rd-card rd-log">
+                                <h3>События телефонов</h3>
+                                <div class="event-log" id="voip-d-log"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
             </div>
 
             <!-- Модалка «Сервер/Железо»: редактирует config.json (Wi-Fi, IP, код курка,
@@ -4898,7 +5346,7 @@
         // Фаза сервера → экран новой вкладочной раскладки. Сервер — источник истины:
         // на каждый push переключаемся на экран текущей фазы. Вкладки позволяют
         // оператору «подсмотреть» другой экран между обновлениями (showScreen).
-        const SCREENS = ['turn', 'loading', 'items', 'lobby', 'nogame', 'roundover', 'gameover', 'tv'];
+        const SCREENS = ['turn', 'loading', 'items', 'lobby', 'nogame', 'roundover', 'gameover', 'tv', 'voip'];
         const PHASE_TO_SCREEN = {
             lobby: 'lobby',
             round_start: 'loading', dealer_loading: 'loading', dealer_reloading: 'loading',
@@ -4924,9 +5372,12 @@
         // Ручное переключение вкладки — предпросмотр по последнему состоянию.
         // Следующий push с сервера восстановит экран текущей фазы.
         function showScreen(name) {
-            // TV-экран держим закреплённым, любой другой таб — снимаем закрепление.
-            pinnedScreen = (name === 'tv') ? 'tv' : null;
+            // TV и телефоны держим закреплёнными: обе вкладки — пульты железа, и
+            // очередной push состояния не должен выбрасывать оператора с них посреди
+            // операции. Любой другой таб — снимаем закрепление.
+            pinnedScreen = (name === 'tv' || name === 'voip') ? name : null;
             showScreenEl(name);
+            if (name === 'voip') voipDealerOpen();
             if (!gameState) return;
             if (name === 'turn') renderTurn(gameState);
             else if (name === 'loading') renderLoading(gameState);
@@ -7554,6 +8005,326 @@
 
             await fetch('/api/tv/config/save', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ videos, loop, auto_play, settings: { volume } }) });
             loadTvConfig();
+        }
+
+
+        // ══ Телефоны ══════════════════════════════════════════════════════════════
+        //
+        // Вкладка «Телефоны» — пульт восьми дисковых аппаратов: позвонить со звуком,
+        // увидеть, кто снял трубку и что набрал, освободить залипший порт. Железо
+        // живёт в voip/ и настраивается на отдельной странице /voip; отсюда им только
+        // управляют по ходу игры.
+        //
+        // Подсистема поднимается лениво, при первом открытии вкладки: игра обычно
+        // крутится и без АТС, и держать ради неё живое подключение к Asterisk с
+        // первой секунды незачем.
+
+        let voipState = {lines: {}, calls: {}, audio: null, armed: {}, maintenance: {}};
+        let voipSounds = [];
+        let voipExtensions = [];
+        let voipWs = null;
+        let voipHealthTimer = null;
+
+        async function voipApi(path, options) {
+            let res;
+            try {
+                res = await fetch(path, options);
+            } catch (e) {
+                // fetch падает так только когда до сервера вообще не достучаться:
+                // его остановили, перезапускают или потеряна сеть. Родное сообщение
+                // браузера — «Failed to fetch» — не говорит оператору ничего, поэтому
+                // заменяется на то, что можно проверить руками.
+                throw new Error('сервер игры не отвечает — он остановлен или перезапускается');
+            }
+            let body = {};
+            try { body = await res.json(); } catch (e) {}
+            if (!res.ok) throw new Error(body.detail || body.error || ('HTTP ' + res.status));
+            return body;
+        }
+
+        function voipPost(path, payload) {
+            return voipApi(path, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify(payload || {}),
+            });
+        }
+
+        // Открытие вкладки: поднять подсистему, подтянуть звуки и встать на поток
+        // событий. Идемпотентно — вкладку открывают и закрывают много раз за игру.
+        async function voipDealerOpen() {
+            if (!voipExtensions.length) {
+                voipExtensions = Array.from({length: 8}, (_, i) => String(101 + i));
+            }
+            try { voipSounds = (await voipApi('/api/voip/sounds')).sounds || []; } catch (e) {}
+            voipRefreshState();
+            voipLoadHealth();
+            voipLoadSlots();
+            if (!voipWs || voipWs.readyState > 1) voipConnect();
+            if (!voipHealthTimer) {
+                // Опрос по времени, а не по событиям: упавшая АТС или пропавший адрес
+                // на интерфейсе никаких событий не порождают — как раз потому, что
+                // упали.
+                voipHealthTimer = setInterval(() => {
+                    if (!document.getElementById('rd-screen-voip').hidden) voipLoadHealth();
+                }, 15000);
+            }
+        }
+
+        function voipConnect() {
+            const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+            voipWs = new WebSocket(proto + '//' + location.host + '/ws/voip');
+            voipWs.onmessage = ev => {
+                const event = JSON.parse(ev.data);
+                voipAddLog(event);
+                if (event.kind === 'progress') voipRenderProgress(event.progress);
+                else voipRefreshState();
+            };
+            // Переподключение: сервер перезапускают посреди игры, и пульт должен
+            // вернуться сам, а не ждать, пока оператор перезагрузит вкладку.
+            voipWs.onclose = () => setTimeout(() => {
+                if (!document.getElementById('rd-screen-voip').hidden) voipConnect();
+            }, 2000);
+            voipWs.onerror = () => voipWs.close();
+        }
+
+        let voipRefreshPending = false;
+        function voipRefreshState() {
+            // События приходят пачками — снятие трубки сразу тянет за собой звук и
+            // остановку звонка. Один запрос на пачку вместо трёх подряд.
+            if (voipRefreshPending) return;
+            voipRefreshPending = true;
+            setTimeout(async () => {
+                voipRefreshPending = false;
+                try {
+                    voipState = Object.assign(voipState, await voipApi('/api/voip/state'));
+                    voipRenderPhones();
+                    voipRenderProgress(voipState.progress);
+                } catch (e) {}
+            }, 150);
+        }
+
+        function voipRenderPhones() {
+            const box = document.getElementById('voip-d-phones');
+            if (!box) return;
+            const opts = voipSounds.map(s =>
+                `<option value="${s.name}">${s.name} · ${s.seconds}с</option>`).join('');
+
+            box.innerHTML = voipExtensions.map(ext => {
+                const line = voipState.lines[ext] || {};
+                const call = voipState.calls[ext] || {};
+                const armed = voipState.armed[ext];
+                const playing = voipState.audio && voipState.audio.extension === ext
+                                ? voipState.audio : null;
+
+                // Что показать словами. Порядок важен: то, что слышно в трубке,
+                // важнее того, что думает АТС.
+                let status = 'свободен', cls = 'idle';
+                if (playing) { status = 'играет ' + playing.sound; cls = 'busy'; }
+                else if (line.state === 'ringing') { status = 'звонит'; cls = 'ringing'; }
+                else if (call.busy) { status = call.detail || 'занят'; cls = 'busy'; }
+                else if (line.state === 'off-hook') { status = 'трубка снята'; cls = 'busy'; }
+                else if (call.detail) status = call.detail;
+
+                return `
+                <div class="voip-d-phone ${cls}">
+                    <div class="vdp-head">
+                        <span class="vdp-num">${ext}</span>
+                        <span class="vdp-state">${status}</span>
+                    </div>
+                    ${armed ? `<div class="vdp-armed">ждёт снятия: ${armed.sound}</div>` : ''}
+                    ${line.digits ? `<div class="vdp-digits">набрано: ${line.digits}</div>` : ''}
+                    <select class="vdp-sound" id="voip-d-snd-${ext}">${opts}</select>
+                    <!-- Две кнопки для двух состояний трубки, и перепутать их дорого:
+                         «позвонить» на уже снятую трубку обесточивает линию, которую
+                         человек держит в руке, и ломает вызов. Поэтому подписи
+                         говорят про трубку, а не про действие. -->
+                    <div class="vdp-btns">
+                        <button class="btn btn-plate btn-small" onclick="voipCall('${ext}')"
+                                title="Аппарат зазвонит. Когда трубку снимут — заиграет выбранный звук.">ПОЗВОНИТЬ</button>
+                        <button class="btn btn-small" onclick="voipPlay('${ext}')"
+                                title="Трубка уже снята и человек держит её у уха — играть сразу, без звонка.">В СНЯТУЮ</button>
+                        <button class="btn btn-small" onclick="voipStop('${ext}')" title="Заглушить звук в трубке">СТОП</button>
+                        <button class="btn btn-plate plate-yellow btn-small" onclick="voipFree('${ext}')"
+                                title="Завершает вызов и освобождает линию на шлюзе — для порта, который не отпускает">ОСВОБОДИТЬ</button>
+                    </div>
+                </div>`;
+            }).join('');
+        }
+
+        function voipSelectedSound(ext) {
+            const el = document.getElementById('voip-d-snd-' + ext);
+            return el ? el.value : '';
+        }
+
+        async function voipCall(ext) {
+            try { await voipPost('/api/voip/call', {extension: ext, sound: voipSelectedSound(ext)}); }
+            catch (e) { alert('Вызов не удался: ' + e.message); }
+        }
+
+        async function voipPlay(ext) {
+            try { await voipPost('/api/voip/audio/play', {extension: ext, sound: voipSelectedSound(ext)}); }
+            catch (e) { alert('Не удалось проиграть: ' + e.message); }
+        }
+
+        async function voipStop(ext) {
+            try { await voipPost('/api/voip/audio/stop', {extension: ext}); }
+            catch (e) { alert(e.message); }
+        }
+
+        async function voipFree(ext) {
+            try { await voipPost('/api/voip/hangup', {extension: ext}); }
+            catch (e) { alert('Не удалось освободить порт: ' + e.message); }
+        }
+
+        // Что означает упавшее звено и что с этим делать. Текст проверки приходит с
+        // сервера и говорит, ЧТО сломано; здесь — ЧТО ДЕЛАТЬ, потому что оператор
+        // стоит у стола посреди партии и разбираться ему некогда.
+        const VOIP_FIX = {
+            network: 'На интерфейсе нет адреса 192.168.100.2 — к нему привязан SIP. '
+                   + 'Проверьте кабель до шлюза; после перезагрузки Mac адрес слетает.',
+            pbx: 'АТС не запущена. Поднимите её: ./start.sh --local  (или voip/scripts/pbx.sh start)',
+            ami: 'АТС запущена, но не отвечает на управление. Перезапустите её.',
+            gateway: 'Шлюз не отвечает. Проверьте питание и кабель Ethernet до AP1100F.',
+            ports: 'Порты не читаются. Обычно это тот же обрыв до шлюза, что строкой выше.',
+        };
+
+        // Порядок цепочки: сеть → АТС → управление → шлюз → порты. Именно в этом
+        // порядке звенья и отказывают, поэтому первое сверху упавшее — почти всегда
+        // настоящая причина, а всё под ним — следствие.
+        const VOIP_CHAIN_ORDER = ['network', 'pbx', 'ami', 'gateway', 'ports'];
+
+        // Короткие подписи для узкой колонки пульта. Названия с сервера рассчитаны на
+        // широкую страницу /voip и здесь переносятся на вторую строку, разрывая ряд.
+        const VOIP_CHAIN_LABEL = {
+            network: 'Сеть', pbx: 'АТС', ami: 'Управление',
+            gateway: 'Шлюз', ports: 'Порты FXS',
+        };
+
+        async function voipLoadHealth() {
+            const box = document.getElementById('voip-d-checks');
+            if (!box) return;
+            // Проверка шлюза идёт по telnet и на неотвечающем устройстве упирается в
+            // таймаут — несколько секунд, в течение которых блок молчит. Молчание
+            // читается как «сломалось», поэтому ожидание названо вслух.
+            const summary = document.getElementById('voip-d-summary');
+            if (summary && !summary.dataset.filled) {
+                summary.className = 'voip-d-summary';
+                summary.textContent = 'Опрашиваю АТС и шлюз…';
+            }
+            try {
+                const h = await voipApi('/api/voip/health');
+                const checks = h.checks.slice().sort((a, b) =>
+                    VOIP_CHAIN_ORDER.indexOf(a.name) - VOIP_CHAIN_ORDER.indexOf(b.name));
+
+                // Первое упавшее звено — то, что чинят. Остальные упавшие ниже почти
+                // всегда просто повторяют его, и подсказка к каждому из них увела бы
+                // оператора чинить следствие.
+                const firstBad = checks.find(c => c.state === 'down');
+
+                box.innerHTML = checks.map(c => {
+                    const fix = (firstBad && c.name === firstBad.name) ? VOIP_FIX[c.name] : '';
+                    return `<li class="vdc ${c.state}">
+                        <span class="vdc-dot"></span>
+                        <span class="vdc-name">${VOIP_CHAIN_LABEL[c.name] || c.label}</span>
+                        <span class="vdc-detail">${c.detail || ''}</span>
+                        ${fix ? `<span class="vdc-fix">${fix}</span>` : ''}
+                    </li>`;
+                }).join('');
+
+                // Итог одной строкой: можно звонить или нет. Восемь зелёных точек
+                // читаются дольше, чем одна фраза.
+                const ok = h.overall === 'ok';
+                if (summary) {
+                    summary.dataset.filled = '1';
+                    summary.className = 'voip-d-summary ' + (ok ? 'ok' : 'bad');
+                    summary.textContent = ok
+                        ? 'Цепочка исправна — можно звонить.'
+                        : (firstBad
+                            ? 'Вызовы не пройдут: '
+                              + (VOIP_CHAIN_LABEL[firstBad.name] || firstBad.label).toLowerCase()
+                            : 'Вызовы могут не пройти.');
+                }
+            } catch (e) {
+                box.innerHTML = `<li class="vdc down"><span class="vdc-dot"></span>`
+                              + `<span class="vdc-name">Нет связи</span>`
+                              + `<span class="vdc-detail">${e.message}</span></li>`;
+                if (summary) {
+                    summary.dataset.filled = '1';
+                    summary.className = 'voip-d-summary bad';
+                    summary.textContent = 'Состояние неизвестно.';
+                }
+            }
+        }
+
+        function voipRenderProgress(p) {
+            const box = document.getElementById('voip-d-progress');
+            if (!box) return;
+            if (!p || !p.steps || !p.steps.length || p.done) { box.hidden = true; return; }
+            box.hidden = false;
+            document.getElementById('voip-d-progress-title').textContent = p.title;
+            document.getElementById('voip-d-progress-steps').innerHTML = p.steps.map(s =>
+                `<li class="vst-${s.state}">${s.label}${s.detail ? ' — ' + s.detail : ''}</li>`).join('');
+        }
+
+        function voipAddLog(event) {
+            if (event.kind === 'progress') return;
+            const log = document.getElementById('voip-d-log');
+            if (!log) return;
+            const div = document.createElement('div');
+            div.className = 'log-entry voip-lg-' + event.kind;
+            const who = event.extension && event.extension !== '-' ? event.extension : '—';
+            div.textContent = `${event.clock || ''}  ${who}  ${event.detail || event.kind}`;
+            log.prepend(div);
+            while (log.children.length > 100) log.lastChild.remove();
+        }
+
+        // ── дисковый телефон: какие номера набираются с диска ────────────────────
+        async function voipLoadSlots() {
+            const body = document.getElementById('voip-d-slots');
+            if (!body) return;
+            try {
+                const s = await voipApi('/api/voip/slots');
+                voipSounds = s.sounds || voipSounds;
+                body.innerHTML = s.slots.length
+                    ? s.slots.map(x => `
+                        <tr>
+                            <td class="vds-num">${x.number}</td>
+                            <td>${x.sound}</td>
+                            <td><button class="btn btn-small" onclick="voipRemoveSlot('${x.number}')">УБРАТЬ</button></td>
+                        </tr>`).join('')
+                    : `<tr><td colspan="3" class="hint">Ни один номер не назначен — набор с диска ничего не проиграет.</td></tr>`;
+                document.getElementById('voip-d-slot-number').innerHTML =
+                    (s.free || []).map(n => `<option value="${n}">${n}</option>`).join('');
+                document.getElementById('voip-d-slot-sound').innerHTML =
+                    (s.sounds || []).map(x => `<option value="${x.name}">${x.name} · ${x.seconds}с</option>`).join('');
+            } catch (e) {
+                body.innerHTML = `<tr><td colspan="3" class="hint">${e.message}</td></tr>`;
+            }
+        }
+
+        async function voipAddSlot() {
+            const number = document.getElementById('voip-d-slot-number').value;
+            const sound = document.getElementById('voip-d-slot-sound').value;
+            if (!number || !sound) return;
+            try { await voipPost('/api/voip/slots', {number, sound}); await voipLoadSlots(); }
+            catch (e) { alert(e.message); }
+        }
+
+        async function voipRemoveSlot(number) {
+            try { await voipPost('/api/voip/slots', {number, sound: ''}); await voipLoadSlots(); }
+            catch (e) { alert(e.message); }
+        }
+
+        async function voipResetPorts() {
+            if (!confirm('Прогнать циклом все восемь портов FXS? Идущие вызовы оборвутся.')) return;
+            try { await voipPost('/api/voip/reset-ports'); } catch (e) { alert(e.message); }
+        }
+
+        async function voipReboot() {
+            if (!confirm('Перезагрузить шлюз? Это займёт около минуты, все вызовы оборвутся, '
+                         + 'а несохранённые во flash настройки откатятся.')) return;
+            try { await voipPost('/api/voip/reboot'); } catch (e) { alert(e.message); }
         }
 
     </script>

@@ -1,0 +1,7 @@
+# Written by ./flash.sh from what it asks on the first run. Holds the Wi-Fi
+# password and the server token, so it stays on the machine that made it.
+src/config.local.h
+
+# The sketch directory flash.sh assembles from src/ before every build, plus
+# whatever arduino-cli leaves in it.
+build/

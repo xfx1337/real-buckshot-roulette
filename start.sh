@@ -20,8 +20,19 @@
 #   ./start.sh --sudo         разрешить sudo для добычи скрытого SSID (macOS 26+)
 #   ./start.sh --detach       поднять сервер в фоне (docker compose up -d)
 #   ./start.sh --down         остановить сервер (docker compose down) и выйти
+#   ./start.sh --local        запустить на хосте, без Docker, вместе с АТС
 #
-# Требования: docker + docker compose; для прошивки — arduino-cli и плата по USB.
+# Про --local. Телефония (voip/) работает только на хосте и в контейнер не
+# уводится: ей нужен адрес 192.168.100.2 на en6, к которому привязан SIP-
+# транспорт, telnet до шлюза на 192.168.100.3, интерфейс управления Asterisk
+# на 127.0.0.1:5038 и afplay, играющий в мини-джек — то есть в наушниковый
+# выход этой самой машины. Из контейнера нет ничего из перечисленного, и на
+# macOS этого не исправляет даже network_mode: host. Поэтому режим, в котором
+# телефоны работают, — этот: Asterisk поднимается через voip/scripts/pbx.sh, а
+# сервер игры запускается прямо здесь.
+#
+# Требования: docker + docker compose (кроме --local, которому нужен только
+# python3 и venv); для прошивки — arduino-cli и плата по USB.
 
 set -euo pipefail
 
@@ -33,6 +44,7 @@ DO_NET=1
 USE_SUDO=0
 DETACH=0
 DO_DOWN=0
+LOCAL=0
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --no-flash) DO_FLASH=0; shift ;;
@@ -40,25 +52,48 @@ while [[ $# -gt 0 ]]; do
     --sudo)     USE_SUDO=1; shift ;;
     --detach|-d) DETACH=1; shift ;;
     --down)     DO_DOWN=1; shift ;;
+    --local)    LOCAL=1; shift ;;
     -h|--help)  grep '^#' "$0" | sed 's/^# \{0,1\}//' | sed '/^!/d'; exit 0 ;;
     *) echo "Неизвестный аргумент: $1" >&2; exit 1 ;;
   esac
 done
 
 # ── docker compose: v2 (плагин) или legacy docker-compose ──
-if docker compose version >/dev/null 2>&1; then
-  DC=(docker compose)
-elif command -v docker-compose >/dev/null 2>&1; then
-  DC=(docker-compose)
-else
-  echo "❌ Не найден docker compose. Установи Docker Desktop / docker-compose." >&2
-  exit 1
+# Не в режиме --local: там Docker не участвует вовсе, и требовать его
+# установленным значило бы отказать в запуске машине, на которой всё нужное
+# для игры и телефонов уже есть.
+if [[ "$LOCAL" -eq 0 ]]; then
+  if docker compose version >/dev/null 2>&1; then
+    DC=(docker compose)
+  elif command -v docker-compose >/dev/null 2>&1; then
+    DC=(docker-compose)
+  else
+    echo "❌ Не найден docker compose. Установи Docker Desktop / docker-compose." >&2
+    echo "   Либо запусти без Docker:  ./start.sh --local" >&2
+    exit 1
+  fi
 fi
 
 # ── --down: остановить и выйти ──
 if [[ "$DO_DOWN" -eq 1 ]]; then
-  echo "▸ Останавливаю сервер…"
-  "${DC[@]}" down
+  if [[ "$LOCAL" -eq 1 ]]; then
+    echo "▸ Останавливаю сервер и АТС…"
+    pkill -f "app.server:app" 2>/dev/null || true
+    # Дождаться, пока процесс действительно уйдёт: pkill только шлёт сигнал, и
+    # без ожидания «✅ Остановлено» печатается, пока порт ещё занят — а следом
+    # запущенный ./start.sh --local падает на занятом 8000.
+    for _ in $(seq 1 10); do
+      pgrep -f "app.server:app" >/dev/null 2>&1 || break
+      sleep 0.5
+    done
+    pgrep -f "app.server:app" >/dev/null 2>&1 && \
+      echo "⚠️  Сервер не отвечает на TERM — добиваю." && \
+      pkill -9 -f "app.server:app" 2>/dev/null || true
+    bash "$ROOT_DIR/voip/scripts/pbx.sh" stop 2>&1 | sed 's/^/  /' || true
+  else
+    echo "▸ Останавливаю сервер…"
+    "${DC[@]}" down
+  fi
   echo "✅ Остановлено."
   exit 0
 fi
@@ -108,7 +143,11 @@ fi
 
 # ③  Сервер в Docker
 echo "───────────────────────────────────────────────"
-echo "③ Поднимаю сервер в Docker…"
+if [[ "$LOCAL" -eq 1 ]]; then
+  echo "③ Поднимаю АТС и сервер на этом хосте…"
+else
+  echo "③ Поднимаю сервер в Docker…"
+fi
 echo "───────────────────────────────────────────────"
 
 # Порт хоста для проброса берём из config.json (server.port). Внутри контейнера
@@ -152,6 +191,43 @@ open_browser() {
   elif command -v xdg-open >/dev/null 2>&1; then xdg-open "$url" >/dev/null 2>&1 || true
   fi
 }
+
+# ── --local: АТС и сервер на этом хосте, без Docker ──
+#
+# Здесь работают телефоны, и только здесь: SIP-транспорт привязан к
+# 192.168.100.2 на en6, шлюз управляется по telnet, а звук в трубку идёт из
+# наушникового выхода этой машины. Из контейнера ничего этого не видно.
+if [[ "$LOCAL" -eq 1 ]]; then
+  # Asterisk. Не смертельно, если не поднялся: игра работает и без телефонов,
+  # а панель телефонии скажет, чего именно не хватает, точнее любого сообщения
+  # отсюда — она проверяет каждое звено цепочки отдельно.
+  echo "▸ Запускаю АТС…"
+  bash "$ROOT_DIR/voip/scripts/pbx.sh" start 2>&1 | sed 's/^/  /' || \
+    echo "⚠️  АТС не поднялась — игра запустится, телефоны будут недоступны." >&2
+
+  # Звуки конвертируются заранее: библиотека читается при первом открытии
+  # панели, и перекодировать трёхминутный файл в тот момент — это пауза ровно
+  # там, где оператор ждёт список.
+  (cd "$ROOT_DIR/voip" && python3 scripts/sounds.py >/dev/null 2>&1) || true
+
+  # Интерпретатор: venv проекта, если он есть, иначе системный python3.
+  PY="$ROOT_DIR/venv/bin/python"
+  [[ -x "$PY" ]] || PY="$(command -v python3)"
+  [[ -n "$PY" ]] || { echo "❌ Не найден python3." >&2; exit 1; }
+
+  echo "▸ Запускаю сервер игры на порту $SERVER_PORT"
+  echo
+  (
+    for _ in $(seq 1 20); do
+      curl -s -o /dev/null "http://localhost:$SERVER_PORT/setup" && break
+      sleep 1
+    done
+    open_browser
+  ) &
+  # 0.0.0.0, а не localhost: на этот адрес стучится ESP32 со своим рычагом и
+  # диском, и телефоны игроков заходят на свои страницы оттуда же.
+  exec "$PY" -m uvicorn app.server:app --host 0.0.0.0 --port "$SERVER_PORT"
+fi
 
 if [[ "$DETACH" -eq 1 ]]; then
   "${DC[@]}" up --build -d
