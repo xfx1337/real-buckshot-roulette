@@ -1,0 +1,1211 @@
+/*
+ * One column on a phone, two on anything wider: the board of handsets beside
+ * the activity feed. The feed is the thing being watched, so it gets its own
+ * scroll and stays put while handsets change state next to it.
+ */
+
+:root {
+  color-scheme: light dark;
+
+  --bg: #f4f6f9;
+  --panel: #ffffff;
+  --line: #dfe3ea;
+  --ink: #11151a;
+  --ink-soft: #5b6572;
+  --accent: #1d4ed8;
+  --accent-ink: #ffffff;
+
+  /* One colour per handset state, used by the dot, the lamp and the card
+     edge so the three never disagree. Saturated on purpose: these are read
+     at a glance, often from across a desk. */
+  --idle: #94a0ae;
+  --ringing: #ea8a04;
+  --offhook: #12a150;
+  --stuck: #e0303a;
+
+  --radius: 12px;
+  --shadow: 0 1px 2px rgb(16 24 40 / 6%), 0 4px 12px rgb(16 24 40 / 5%);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0d1117;
+    --panel: #171d26;
+    --line: #2b323d;
+    --ink: #eef4fa;
+    --ink-soft: #9aa6b4;
+    --accent: #5b93ff;
+    /* Lamps and badges need more punch against a dark ground than the light
+       theme's values give. */
+    --ringing: #ffa41f;
+    --offhook: #2ecc71;
+    --stuck: #ff5b63;
+    --shadow: 0 1px 2px rgb(0 0 0 / 40%);
+  }
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font: 15px/1.5 ui-sans-serif, -apple-system, "Segoe UI", Roboto, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ── header ─────────────────────────────────────────────────────────── */
+
+.bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px 20px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--line);
+  position: sticky;
+  top: 0;
+  z-index: 5;
+}
+
+.bar h1 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.bar-right {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+/* ── tabs ───────────────────────────────────────────────────────────── */
+
+.tabs {
+  display: flex;
+  gap: 2px;
+  flex: 1;
+  margin: 0 8px;
+  overflow-x: auto;
+}
+
+.tab {
+  border: none;
+  background: transparent;
+  color: var(--ink-soft);
+  padding: 6px 12px;
+  border-radius: 7px;
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.tab:hover { background: color-mix(in srgb, var(--ink) 6%, transparent); }
+
+.tab.is-on {
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  color: var(--accent);
+  font-weight: 500;
+}
+
+/* Only one view is mounted at a time; the rest stay in the DOM so their
+   state survives switching away and back. */
+.view { display: none; }
+.view.is-on { display: grid; }
+
+.status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--ink-soft);
+}
+
+.dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--idle);
+  flex: none;
+}
+
+.status.live .dot { background: var(--offhook); }
+.status.down  .dot { background: var(--stuck); }
+
+/* A live connection is the normal state and should not blink for attention;
+   a broken one should. */
+.status.down .dot { animation: pulse 1.4s ease-in-out infinite; }
+
+@keyframes pulse {
+  50% { opacity: 0.25; }
+}
+
+/* ── layout ─────────────────────────────────────────────────────────── */
+
+main {
+  grid-template-columns: 1fr;
+  gap: 20px;
+  padding: 20px;
+  max-width: 1100px;
+  margin: 0 auto;
+}
+
+@media (min-width: 900px) {
+  /* Only the board view has two columns — the handsets and the feed beside
+     them. The administration views run one full-width column, because their
+     tables need the room. */
+  #view-board.is-on {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    align-items: start;
+  }
+}
+
+.col {
+  display: grid;
+  gap: 20px;
+  align-content: start;
+  min-width: 0;
+}
+
+/* Views without a second column let their single column run full width. */
+.col.wide { grid-column: 1 / -1; }
+
+/* ── tables ─────────────────────────────────────────────────────────── */
+
+/* Wide tables scroll inside their own box; the page body must never scroll
+   sideways. */
+.scroll-x { overflow-x: auto; }
+
+.grid {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.grid th {
+  text-align: left;
+  font-weight: 600;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--ink-soft);
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--line);
+  white-space: nowrap;
+}
+
+.grid td {
+  padding: 9px 12px;
+  border-bottom: 1px solid color-mix(in srgb, var(--line) 60%, transparent);
+  vertical-align: middle;
+}
+
+.grid tbody tr:last-child td { border-bottom: none; }
+.grid tbody tr:hover { background: color-mix(in srgb, var(--ink) 3%, transparent); }
+
+.grid td.muted { color: var(--ink-soft); text-align: center; padding: 18px; }
+
+.mono {
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-variant-numeric: tabular-nums;
+}
+
+.row-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+
+/* A port taken out of service is dimmed: it is configured, present, and
+   deliberately not working, which none of the state colours say on their own. */
+tr.is-shut td { opacity: 0.55; }
+
+.badge {
+  display: inline-block;
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--idle) 20%, transparent);
+  white-space: nowrap;
+}
+
+.badge.ok   { background: color-mix(in srgb, var(--offhook) 22%, transparent); }
+.badge.warn { background: color-mix(in srgb, var(--ringing) 25%, transparent); }
+.badge.bad  { background: color-mix(in srgb, var(--stuck) 25%, transparent); }
+
+.note {
+  margin: 0;
+  padding: 10px 14px;
+  font-size: 12px;
+  color: var(--ink-soft);
+  line-height: 1.5;
+}
+
+.note.inline { padding: 0; flex: 1; min-width: 180px; }
+
+.note code {
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  background: color-mix(in srgb, var(--ink) 8%, transparent);
+  padding: 1px 5px;
+  border-radius: 4px;
+}
+
+/* ── diagnostics output ─────────────────────────────────────────────── */
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 0 14px 12px;
+}
+
+.output {
+  margin: 0;
+  padding: 14px;
+  border-top: 1px solid var(--line);
+  background: color-mix(in srgb, var(--ink) 4%, transparent);
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  overflow-x: auto;
+  max-height: 60vh;
+  white-space: pre;
+  color: var(--ink);
+}
+
+/* ── settings sheet ─────────────────────────────────────────────────── */
+
+.wide-sheet { width: min(520px, calc(100vw - 32px)); }
+
+.fields {
+  display: grid;
+  gap: 12px;
+  max-height: 60vh;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.setting {
+  display: grid;
+  gap: 5px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid color-mix(in srgb, var(--line) 60%, transparent);
+}
+
+.setting:last-child { border-bottom: none; }
+
+.setting-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.setting-label { font-size: 13px; font-weight: 500; }
+
+.setting-help {
+  font-size: 11px;
+  color: var(--ink-soft);
+  line-height: 1.45;
+}
+
+.setting input[type="number"], .setting select {
+  font: inherit;
+  font-size: 13px;
+  color: var(--ink);
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  padding: 5px 8px;
+  width: 110px;
+}
+
+/* A switch reads as a state rather than as an action, which is what these
+   flags are. */
+.switch {
+  position: relative;
+  width: 38px;
+  height: 21px;
+  flex: none;
+  appearance: none;
+  background: color-mix(in srgb, var(--ink) 18%, transparent);
+  border: none;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: background 140ms ease;
+}
+
+.switch::after {
+  content: "";
+  position: absolute;
+  top: 2px; left: 2px;
+  width: 17px; height: 17px;
+  border-radius: 50%;
+  background: #fff;
+  transition: transform 140ms ease;
+}
+
+.switch:checked { background: var(--accent); }
+.switch:checked::after { transform: translateX(17px); }
+.switch:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.section-title {
+  margin: 0 0 10px;
+  font-size: 13px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--ink-soft);
+}
+
+/* ── maintenance banner ─────────────────────────────────────────────── */
+
+.banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 20px;
+  background: color-mix(in srgb, var(--ringing) 16%, var(--panel));
+  border-bottom: 1px solid color-mix(in srgb, var(--ringing) 35%, var(--line));
+  font-size: 13px;
+  position: sticky;
+  top: 53px;
+  z-index: 4;
+}
+
+.spinner {
+  width: 13px;
+  height: 13px;
+  border: 2px solid color-mix(in srgb, var(--ringing) 40%, transparent);
+  border-top-color: var(--ringing);
+  border-radius: 50%;
+  animation: spin 700ms linear infinite;
+  flex: none;
+}
+
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* ── progress ───────────────────────────────────────────────────────── */
+
+.progress {
+  position: sticky;
+  top: 53px;
+  z-index: 4;
+  background: var(--panel);
+  border-bottom: 1px solid var(--line);
+  padding: 12px 20px 14px;
+}
+
+.progress-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 8px;
+  font-size: 13px;
+}
+
+.track {
+  height: 5px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--ink) 12%, transparent);
+  overflow: hidden;
+}
+
+.fill {
+  height: 100%;
+  width: 0;
+  border-radius: 999px;
+  background: var(--accent);
+  transition: width 300ms ease, background 200ms ease;
+}
+
+.progress[data-done="ok"]   .fill { background: var(--offhook); }
+.progress[data-done="fail"] .fill { background: var(--stuck); }
+
+.steps {
+  list-style: none;
+  margin: 10px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.step {
+  display: grid;
+  grid-template-columns: 16px 1fr auto;
+  gap: 9px;
+  align-items: center;
+  font-size: 12px;
+  color: var(--ink-soft);
+}
+
+.step-mark {
+  width: 14px; height: 14px;
+  border-radius: 50%;
+  border: 2px solid color-mix(in srgb, var(--ink) 20%, transparent);
+  justify-self: center;
+}
+
+.step[data-state="running"] { color: var(--ink); font-weight: 500; }
+.step[data-state="running"] .step-mark {
+  border-color: var(--accent);
+  border-top-color: transparent;
+  animation: spin 700ms linear infinite;
+}
+.step[data-state="ok"] .step-mark {
+  background: var(--offhook);
+  border-color: var(--offhook);
+}
+.step[data-state="ok"] { color: var(--ink); }
+.step[data-state="fail"] .step-mark {
+  background: var(--stuck);
+  border-color: var(--stuck);
+}
+.step[data-state="fail"] { color: var(--stuck); }
+.step[data-state="skip"] { opacity: 0.45; }
+
+.step-detail { font-size: 11px; }
+
+/* ── LED panel ──────────────────────────────────────────────────────── */
+
+.leds {
+  list-style: none;
+  margin: 0;
+  padding: 0 14px 14px;
+  display: grid;
+  gap: 8px;
+}
+
+.led-row {
+  display: grid;
+  grid-template-columns: auto minmax(120px, auto) minmax(0, 1fr) minmax(0, 1.2fr);
+  gap: 12px;
+  align-items: center;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  font-size: 13px;
+}
+
+/* The on-screen lamp. Colour carries the state; a real LED that blinks is
+   mirrored by one that blinks here, so the two can be compared directly. */
+.lamp {
+  width: 13px; height: 13px;
+  border-radius: 50%;
+  flex: none;
+  background: var(--idle);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--idle) 18%, transparent);
+}
+
+/* The lamp copies the real LED: which colour it shows, and whether it
+   blinks. It is NOT a verdict — a dark lamp on a healthy free port stays
+   dark here, because that is what the operator sees on the case. Whether
+   that state is wanted is said by the text and by the row's left edge. */
+
+/* The AP1100F's LEDs are green and orange only; those two hex values are
+   the physical colours, not theme tokens, so they stay fixed in both
+   themes — a real lamp does not change colour with the page. */
+
+.led-row[data-lamp="off"] .lamp {
+  background: color-mix(in srgb, var(--ink) 22%, transparent);
+  box-shadow: inset 0 1px 2px rgb(0 0 0 / 25%);
+}
+
+.led-row[data-lamp="green"] .lamp {
+  background: #22c55e;
+  box-shadow: 0 0 0 3px color-mix(in srgb, #22c55e 20%, transparent),
+              0 0 12px color-mix(in srgb, #22c55e 65%, transparent);
+}
+
+.led-row[data-lamp="orange"] .lamp {
+  background: #f59e0b;
+  box-shadow: 0 0 0 3px color-mix(in srgb, #f59e0b 20%, transparent),
+              0 0 12px color-mix(in srgb, #f59e0b 70%, transparent);
+}
+
+/* Blinking is the LED's own behaviour, independent of colour: RUN blinks
+   green when healthy, a ringing port blinks green too. */
+.led-row[data-blink="blink"] .lamp {
+  animation: blink 1.1s steps(1, end) infinite;
+}
+
+@keyframes blink {
+  50% { opacity: 0.18; }
+}
+
+/* The left edge carries the verdict the lamp deliberately does not. */
+.led-row[data-state="warn"] { border-left: 3px solid var(--ringing); }
+.led-row[data-state="bad"]  { border-left: 3px solid var(--stuck); }
+.led-row[data-state="ok"]   { border-left: 3px solid transparent; }
+.led-row[data-state="off"]  { border-left: 3px solid transparent; opacity: 0.72; }
+
+.led-name {
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-weight: 600;
+  font-size: 12px;
+}
+
+.led-value { color: var(--ink); overflow-wrap: anywhere; }
+
+/* What the physical LED should be doing — the reference column. */
+.led-expect {
+  font-size: 11px;
+  color: var(--ink-soft);
+  line-height: 1.45;
+  border-left: 2px solid var(--line);
+  padding-left: 10px;
+}
+
+/* A value inferred rather than measured is marked, so a green lamp is not
+   read as a reading the software cannot actually take. */
+.inferred::after {
+  content: " (косвенно)";
+  font-size: 10px;
+  color: var(--ink-soft);
+}
+
+@media (max-width: 700px) {
+  .led-row { grid-template-columns: auto 1fr; }
+  .led-value, .led-expect { grid-column: 1 / -1; }
+  .led-expect { border-left: none; padding-left: 0; }
+}
+
+/* FXS lamps, laid out two columns wide like the device's own front panel. */
+.led-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+  gap: 8px;
+  padding: 0 14px 14px;
+}
+
+.fxs-led {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 10px;
+  align-items: center;
+  padding: 9px 11px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+
+.fxs-led .lamp { grid-row: 1 / 3; }
+.fxs-led .led-name { font-size: 12px; }
+.fxs-led .fxs-meaning { font-size: 11px; color: var(--ink-soft); }
+
+/* ── panels ─────────────────────────────────────────────────────────── */
+
+.panel {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  overflow: hidden;
+}
+
+.panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--line);
+}
+
+.panel-head h2 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--ink-soft);
+}
+
+.head-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.stamp {
+  font-size: 11px;
+  color: var(--ink-soft);
+  font-variant-numeric: tabular-nums;
+}
+
+.panel-foot {
+  display: flex;
+  gap: 8px;
+  padding: 12px 14px;
+  border-top: 1px solid var(--line);
+  flex-wrap: wrap;
+}
+
+/* ── status checks ──────────────────────────────────────────────────── */
+
+.checks {
+  list-style: none;
+  margin: 0;
+  padding: 6px;
+  display: grid;
+  gap: 2px;
+}
+
+.check-row {
+  display: grid;
+  grid-template-columns: auto minmax(90px, auto) 1fr;
+  gap: 10px;
+  align-items: baseline;
+  padding: 8px;
+  border-radius: 8px;
+  font-size: 13px;
+}
+
+.check-row:nth-child(odd) {
+  background: color-mix(in srgb, var(--ink) 3%, transparent);
+}
+
+.check-row.placeholder {
+  grid-template-columns: 1fr;
+  color: var(--ink-soft);
+}
+
+/* The status dot is the fastest read on the page, so its colour is the only
+   thing distinguishing the three states at a glance. */
+.check-row .dot { align-self: center; }
+.check-row[data-state="ok"]   .dot { background: var(--offhook); }
+.check-row[data-state="warn"] .dot { background: var(--ringing); }
+.check-row[data-state="down"] .dot { background: var(--stuck); }
+.check-row[data-state="down"] .dot { animation: pulse 1.4s ease-in-out infinite; }
+
+.check-name { font-weight: 500; }
+
+.check-detail {
+  color: var(--ink-soft);
+  overflow-wrap: anywhere;
+  min-width: 0;
+}
+
+/* A fix that has to be typed into a terminal is shown as one, so it can be
+   copied without guessing where it starts and ends. */
+.check-detail code {
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 12px;
+  background: color-mix(in srgb, var(--ink) 8%, transparent);
+  padding: 1px 5px;
+  border-radius: 4px;
+  user-select: all;
+}
+
+/* ── FXS ports ──────────────────────────────────────────────────────── */
+
+.ports {
+  list-style: none;
+  margin: 0;
+  padding: 0 14px 12px;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(112px, 1fr));
+  gap: 6px;
+}
+
+.port {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  font-size: 12px;
+  background: color-mix(in srgb, var(--ink) 2%, transparent);
+}
+
+.port .dot { flex: none; background: var(--offhook); }
+.port[data-usable="false"] .dot { background: var(--stuck); }
+
+.port-id {
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+
+.port-status {
+  color: var(--ink-soft);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ── handsets ───────────────────────────────────────────────────────── */
+
+.lines {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 10px;
+  /* Wide enough for two side-by-side buttons plus their padding; below this
+     the secondary actions were being clipped by the card edge. */
+  grid-template-columns: repeat(auto-fill, minmax(258px, 1fr));
+}
+
+.line {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--idle);
+  border-radius: var(--radius);
+  padding: 12px 14px;
+  box-shadow: var(--shadow);
+  display: grid;
+  gap: 10px;
+  transition: border-color 160ms ease;
+  /* A grid item refuses to shrink below its content by default, so a long
+     status line pushed the whole card past its column instead of wrapping
+     inside it. */
+  min-width: 0;
+}
+
+.line > * { min-width: 0; }
+
+.line[data-state="ringing"]  { border-left-color: var(--ringing); }
+.line[data-state="off-hook"] { border-left-color: var(--offhook); }
+
+/* The number and the state sit on one line while they fit, and the state
+   drops below when it does not — long labels like "трубка снята · звонят
+   нам" would otherwise push past the card's edge. */
+.line-top {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.line-top .state { flex-shrink: 0; }
+
+.ext {
+  font-size: 18px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+}
+
+/* Which FXS port carries this extension. Fixed by the wiring and never
+   changes, but it is what the gateway's own messages name, so it has to be
+   visible to connect the two. */
+.port-tag {
+  font-size: 11px;
+  color: var(--ink-soft);
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  margin-left: 7px;
+  font-weight: 400;
+}
+
+/* What the gateway says about the port, as against what the call events say
+   about the line. They disagree exactly when a port is stuck, which is the
+   case worth seeing. */
+.hw {
+  font-size: 11px;
+  color: var(--ink-soft);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.hw .dot { width: 6px; height: 6px; background: var(--offhook); }
+.hw[data-usable="false"] .dot { background: var(--stuck); }
+.hw[data-usable="false"] { color: var(--stuck); }
+
+.state {
+  font-size: 12px;
+  color: var(--ink-soft);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.state .dot { background: var(--idle); }
+.line[data-state="ringing"]  .state .dot { background: var(--ringing); }
+.line[data-state="off-hook"] .state .dot { background: var(--offhook); }
+
+/* A ringing handset is a transient state worth noticing at a glance. */
+.line[data-state="ringing"] .state .dot { animation: pulse 1s ease-in-out infinite; }
+
+/* Digits typed during the current call. Monospace so a long string stays
+   readable and does not reflow as it grows. */
+.digits {
+  min-height: 26px;
+  padding: 4px 8px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--ink) 6%, transparent);
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 14px;
+  letter-spacing: 0.14em;
+  word-break: break-all;
+  color: var(--ink);
+}
+
+.digits:empty::after {
+  content: "цифры не набирались";
+  letter-spacing: normal;
+  font-family: inherit;
+  font-size: 12px;
+  color: var(--ink-soft);
+}
+
+/* Three buttons need more room than one row of a narrow card gives, so they
+   wrap instead of overflowing it. "Позвонить" takes the full width and the
+   two secondary actions share the row below, which also keeps the primary
+   action the obvious one. */
+.line-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 7px;
+}
+
+.line-actions .primary { grid-column: 1 / -1; }
+
+/* "Я положил трубку" takes its own full-width row: it is a distinct action
+   from the two above it, and cramming it into half a row would read as a
+   variant of "Освободить". */
+.line-actions .wide { grid-column: 1 / -1; }
+
+/* ── buttons ────────────────────────────────────────────────────────── */
+
+button {
+  font: inherit;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  padding: 7px 12px;
+  cursor: pointer;
+  background: var(--panel);
+  color: var(--ink);
+  transition: background 120ms ease, opacity 120ms ease;
+}
+
+button:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--ink) 5%, var(--panel));
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-ink);
+  font-weight: 500;
+}
+
+.primary:hover:not(:disabled) {
+  background: color-mix(in srgb, #000 10%, var(--accent));
+}
+
+.ghost { background: transparent; }
+
+.small { font-size: 12px; padding: 5px 9px; }
+
+/* Rebooting is the one action here that cannot be taken back, so it is the
+   one button that does not look like the others. */
+.danger {
+  color: var(--stuck);
+  border-color: color-mix(in srgb, var(--stuck) 40%, var(--line));
+  background: transparent;
+}
+
+.danger:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--stuck) 12%, transparent);
+}
+
+.sheet menu .danger {
+  background: var(--stuck);
+  border-color: var(--stuck);
+  color: #fff;
+  font-weight: 500;
+}
+
+.sheet menu .danger:hover:not(:disabled) {
+  background: color-mix(in srgb, #000 12%, var(--stuck));
+}
+
+.warn-text {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+/* ── activity feed ──────────────────────────────────────────────────── */
+
+.feed {
+  display: flex;
+  flex-direction: column;
+  max-height: 78vh;
+}
+
+/* The feed stays put while the left column scrolls past it: it is the thing
+   being watched, and losing it off the top of the screen while a call is in
+   progress is exactly when it matters most. */
+@media (min-width: 900px) {
+  .feed {
+    position: sticky;
+    top: 73px;
+  }
+}
+
+.log {
+  list-style: none;
+  margin: 0;
+  padding: 6px;
+  overflow-y: auto;
+  flex: 1;
+}
+
+.entry {
+  display: grid;
+  grid-template-columns: auto auto 1fr;
+  gap: 10px;
+  align-items: baseline;
+  padding: 7px 8px;
+  border-radius: 8px;
+  font-size: 13px;
+}
+
+.entry:nth-child(odd) {
+  background: color-mix(in srgb, var(--ink) 3%, transparent);
+}
+
+/* Newly arrived entries flash once, so a change is visible even when the
+   feed is not being watched continuously. */
+.entry.fresh { animation: arrive 900ms ease-out; }
+
+@keyframes arrive {
+  from { background: color-mix(in srgb, var(--accent) 22%, transparent); }
+}
+
+.time {
+  color: var(--ink-soft);
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.tag {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 7px;
+  border-radius: 999px;
+  white-space: nowrap;
+  background: color-mix(in srgb, var(--idle) 18%, transparent);
+  color: var(--ink);
+}
+
+.tag.off-hook { background: color-mix(in srgb, var(--offhook) 22%, transparent); }
+.tag.on-hook  { background: color-mix(in srgb, var(--idle) 22%, transparent); }
+.tag.ringing  { background: color-mix(in srgb, var(--ringing) 25%, transparent); }
+.tag.digit    { background: color-mix(in srgb, var(--accent) 22%, transparent); }
+.tag.error    { background: color-mix(in srgb, var(--stuck) 25%, transparent); }
+
+.what { min-width: 0; overflow-wrap: anywhere; }
+
+.what b {
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-variant-numeric: tabular-nums;
+}
+
+/* A pressed key is the smallest event and the easiest to miss, so it is the
+   one thing in the feed drawn as a key. */
+.key {
+  display: inline-block;
+  min-width: 22px;
+  text-align: center;
+  padding: 1px 6px;
+  border: 1px solid var(--line);
+  border-bottom-width: 2px;
+  border-radius: 5px;
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-weight: 600;
+  background: var(--panel);
+}
+
+.empty {
+  margin: 0;
+  padding: 22px 14px;
+  text-align: center;
+  color: var(--ink-soft);
+  font-size: 13px;
+}
+
+/* ── call sheet ─────────────────────────────────────────────────────── */
+
+.sheet {
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 0;
+  background: var(--panel);
+  color: var(--ink);
+  width: min(380px, calc(100vw - 32px));
+  box-shadow: 0 12px 40px rgb(16 24 40 / 18%);
+}
+
+.sheet::backdrop {
+  background: rgb(12 16 22 / 45%);
+  backdrop-filter: blur(2px);
+}
+
+.sheet form {
+  padding: 18px;
+  display: grid;
+  gap: 14px;
+  margin: 0;
+}
+
+.sheet h2 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.field {
+  display: grid;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--ink-soft);
+}
+
+.field .row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.field .row input[type="range"] { flex: 1; accent-color: var(--accent); }
+
+.field output {
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+  min-width: 34px;
+}
+
+select {
+  font: inherit;
+  color: var(--ink);
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 8px 10px;
+  width: 100%;
+}
+
+.check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+}
+
+.check input { accent-color: var(--accent); }
+
+.hint {
+  margin: 0;
+  font-size: 12px;
+  color: var(--ink-soft);
+  min-height: 1em;
+}
+
+.sheet menu {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+}
+
+/* ── toast ──────────────────────────────────────────────────────────── */
+
+.toast {
+  position: fixed;
+  left: 50%;
+  bottom: 24px;
+  transform: translate(-50%, 20px);
+  background: var(--ink);
+  color: var(--bg);
+  padding: 10px 16px;
+  border-radius: 999px;
+  font-size: 13px;
+  box-shadow: var(--shadow);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 180ms ease, transform 180ms ease;
+  max-width: calc(100vw - 40px);
+}
+
+.toast.show {
+  opacity: 1;
+  transform: translate(-50%, 0);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* Per-handset switch for de-energising the line after each call. Sits under
+   the buttons, quieter than them: it is a setting, not an action. */
+.auto-power {
+  margin-top: 2px;
+  font-size: 11px;
+  color: var(--ink-soft);
+}
+
+.auto-power .switch { width: 30px; height: 17px; }
+.auto-power .switch::after { width: 13px; height: 13px; }
+.auto-power .switch:checked::after { transform: translateX(13px); }
+
+/* ── rotary telephone tab ──────────────────────────────────────────────
+   The call form here is laid out across the panel rather than down it: the
+   dialog's .fields is a column because a modal is narrow, and reusing that
+   shape on a full-width panel would leave three controls stretched over the
+   whole page. */
+.dial-call {
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  align-items: end;
+  /* .fields caps its height for the dialog, where the list can be long
+     enough to scroll. Three controls never need that, and the cap only adds
+     a scrollbar. */
+  max-height: none;
+  overflow: visible;
+}
+
+/* The row that adds a number. Its two selects size to their content instead
+   of splitting the width, so the button sits beside them rather than being
+   pushed to the far edge. */
+.dial-add {
+  align-items: end;
+  gap: 12px;
+}
+
+.dial-add .inline-field { flex: 0 0 auto; }
+.dial-add select { min-width: 150px; }
+
+/* Keeps the per-number controls on one line: the select and both buttons fit
+   side by side, and only wrap on a genuinely narrow screen. */
+#dial-slot-rows .row-actions {
+  flex-wrap: nowrap;
+  align-items: center;
+}
+
+#dial-slot-rows .row-actions select {
+  min-width: 160px;
+  max-width: 260px;
+}
+
+@media (max-width: 720px) {
+  #dial-slot-rows .row-actions { flex-wrap: wrap; }
+}

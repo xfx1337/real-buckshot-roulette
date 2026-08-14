@@ -17,5 +17,9 @@
       "protocol": 1,
       "bitlength": 24
     }
+  },
+  "voip_esp": {
+    "extension": "105",
+    "dialer_token": ""
   }
 }
