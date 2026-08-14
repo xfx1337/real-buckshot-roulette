@@ -1,0 +1,424 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Телефония</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+
+<header class="bar">
+  <h1>Телефония</h1>
+  <nav class="tabs" id="tabs">
+    <button class="tab is-on" data-tab="board" type="button">Аппараты</button>
+    <button class="tab" data-tab="panel" type="button">Индикаторы</button>
+    <button class="tab" data-tab="gateway" type="button">Шлюз</button>
+    <button class="tab" data-tab="pbx" type="button">АТС</button>
+    <button class="tab" data-tab="dial" type="button">Дисковый телефон</button>
+    <button class="tab" data-tab="tools" type="button">Диагностика</button>
+  </nav>
+  <div class="status" id="link">
+    <span class="dot" id="link-dot"></span>
+    <span id="link-text">подключение…</span>
+  </div>
+</header>
+
+<!-- Shown only while the gateway is rebooting or being reset: the whole
+     board is unreliable during it, and saying so once is clearer than eight
+     handsets each reporting their own confusion. -->
+<div class="banner" id="maintenance" hidden>
+  <span class="spinner"></span>
+  <span id="maintenance-text">Обслуживание шлюза…</span>
+</div>
+
+<!-- Progress of whatever long operation is running. Sits under the header on
+     every tab, because a call started from one view finishes while the
+     operator is looking at another. -->
+<section class="progress" id="progress" hidden>
+  <div class="progress-head">
+    <strong id="progress-title">—</strong>
+    <button class="ghost small" id="progress-hide" type="button">Скрыть</button>
+  </div>
+  <div class="track"><div class="fill" id="progress-fill"></div></div>
+  <ol class="steps" id="progress-steps"></ol>
+</section>
+
+<!-- ══ Аппараты ══════════════════════════════════════════════════════ -->
+<main class="view is-on" id="view-board">
+  <section class="col">
+    <section class="panel" aria-label="Состояние системы">
+      <div class="panel-head">
+        <h2>Состояние системы</h2>
+        <div class="head-actions">
+          <span class="stamp" id="health-stamp"></span>
+          <button class="ghost small" id="refresh" type="button">Обновить</button>
+        </div>
+      </div>
+      <ul class="checks" id="checks">
+        <li class="check-row placeholder">проверка…</li>
+      </ul>
+      <div class="panel-foot">
+        <button class="ghost" id="reset-ports" type="button">Сбросить порты</button>
+        <button class="danger" id="reboot" type="button">Перезагрузить шлюз</button>
+      </div>
+
+      <!-- Automatic release. Acts only on the one thing a real call can
+           never look like: busy on the gateway with no channel on the PBX. -->
+      <div class="panel-foot watchdog">
+        <label class="check">
+          <input type="checkbox" class="switch" id="watchdog-on">
+          <span>Автоматически освобождать залипшие порты</span>
+        </label>
+        <span class="note inline" id="watchdog-note">
+          Освобождает порт, занятый дольше 20 секунд без вызова — признак
+          замыкания в линии, а не разговора. Живые вызовы не затрагивает.
+        </span>
+      </div>
+    </section>
+
+    <section aria-label="Аппараты">
+      <h2 class="section-title">Аппараты</h2>
+      <ul class="lines" id="lines"></ul>
+    </section>
+  </section>
+
+  <section class="panel feed" aria-label="События">
+    <div class="panel-head">
+      <h2>События</h2>
+      <button class="ghost small" id="clear" type="button">Очистить</button>
+    </div>
+    <ol class="log" id="log"></ol>
+    <p class="empty" id="log-empty">Пока пусто. Снимите трубку или позвоните на аппарат.</p>
+  </section>
+</main>
+
+<!-- ══ Индикаторы ════════════════════════════════════════════════════ -->
+<main class="view" id="view-panel">
+  <section class="col wide">
+    <section class="panel" aria-label="Индикаторы шлюза">
+      <div class="panel-head">
+        <h2>Передняя панель AP1100F</h2>
+        <div class="head-actions">
+          <span class="stamp" id="panel-stamp"></span>
+          <button class="ghost small" id="panel-refresh" type="button">Обновить</button>
+        </div>
+      </div>
+      <p class="note">
+        Слева — что показывает шлюз сейчас. Справа — каким должен быть
+        настоящий светодиод на корпусе, если всё исправно. Сравнивая две
+        колонки, можно понять неисправность, не открывая руководство.
+      </p>
+      <ul class="leds" id="led-rows"></ul>
+    </section>
+
+    <section class="panel" aria-label="Индикаторы FXS">
+      <div class="panel-head"><h2>Порты FXS</h2></div>
+      <div class="led-grid" id="fxs-leds"></div>
+    </section>
+
+    <section class="panel" aria-label="Доступ к шлюзу">
+      <div class="panel-head"><h2>Подключение к шлюзу</h2></div>
+      <ul class="checks" id="access-rows"></ul>
+    </section>
+  </section>
+</main>
+
+<!-- ══ Шлюз ══════════════════════════════════════════════════════════ -->
+<main class="view" id="view-gateway">
+  <section class="col wide">
+    <section class="panel" aria-label="Порты шлюза">
+      <div class="panel-head">
+        <h2>Порты FXS</h2>
+        <button class="ghost small" id="ports-refresh" type="button">Обновить</button>
+      </div>
+      <div class="scroll-x">
+        <table class="grid" id="port-table">
+          <thead>
+            <tr>
+              <th>Абонент</th><th>Порт</th><th>Состояние</th>
+              <th>Режим</th><th>Переполюсовка</th><th>Действия</th>
+            </tr>
+          </thead>
+          <tbody id="port-rows">
+            <tr><td colspan="6" class="muted">загрузка…</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="panel" aria-label="Маршрутизация">
+      <div class="panel-head">
+        <h2>Маршрутизация номеров (dial-peer)</h2>
+      </div>
+      <p class="note">
+        Определяет, на какой физический разъём шлюза приходит вызов номера.
+        Один порт может принадлежать только одному абоненту.
+      </p>
+      <div class="scroll-x">
+        <table class="grid">
+          <thead>
+            <tr><th>dial-peer</th><th>Номер</th><th>Порт</th><th>Изменить</th></tr>
+          </thead>
+          <tbody id="peer-rows">
+            <tr><td colspan="4" class="muted">загрузка…</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="panel-foot">
+        <button class="danger" id="save-flash" type="button">Сохранить во flash</button>
+        <span class="note inline">
+          До сохранения любые изменения откатываются перезагрузкой шлюза по питанию.
+        </span>
+      </div>
+    </section>
+  </section>
+</main>
+
+<!-- ══ АТС ═══════════════════════════════════════════════════════════ -->
+<main class="view" id="view-pbx">
+  <section class="col wide">
+    <section class="panel" aria-label="Состояние АТС">
+      <div class="panel-head">
+        <h2>Asterisk</h2>
+        <button class="ghost small" id="pbx-refresh" type="button">Обновить</button>
+      </div>
+      <ul class="checks" id="pbx-checks"></ul>
+    </section>
+
+    <section class="panel" aria-label="Что можно набрать с телефона">
+      <div class="panel-head">
+        <h2>Набор с аппарата</h2>
+        <button class="ghost small" id="dialplan-reload" type="button">Перезагрузить план</button>
+      </div>
+      <p class="note">
+        Номера, которые абонент может набрать, сняв трубку. Меняются в
+        <code>etc/extensions.conf</code>, применяются кнопкой выше без разрыва
+        разговоров.
+      </p>
+      <div class="scroll-x">
+        <table class="grid">
+          <thead><tr><th>Номер</th><th>Что происходит</th></tr></thead>
+          <tbody id="dialplan-rows">
+            <tr><td colspan="2" class="muted">загрузка…</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="panel" aria-label="Активные каналы">
+      <div class="panel-head"><h2>Активные вызовы</h2></div>
+      <ul class="checks" id="channel-rows">
+        <li class="check-row placeholder">нет активных вызовов</li>
+      </ul>
+    </section>
+  </section>
+</main>
+
+<!-- ══ Дисковый телефон ══════════════════════════════════════════════ -->
+<!--
+  Both directions for the TA-1132, on one tab, because they are two halves of
+  the same thing and setting one up while the other is on another tab makes
+  neither easy to reason about.
+
+  Calling the handset is the PBX ringing it. Dialling from the handset is the
+  ESP32 in esp/ reading the disc and posting to /api/dialer, which is the
+  direction that works on a line whose loop is too faulty for the gateway to
+  read.
+-->
+<main class="view" id="view-dial">
+  <section class="col wide">
+
+    <!-- Direction one: the PBX rings the handset. -->
+    <section class="panel" aria-label="Позвонить на телефон">
+      <div class="panel-head">
+        <h2>Позвонить на телефон</h2>
+      </div>
+      <p class="note">
+        АТС наберёт аппарат, и когда трубку снимут — заиграет выбранный звук.
+        Звонок работает от линии шлюза, поэтому телефон звенит независимо от
+        того, подключён ли к нему считыватель диска.
+      </p>
+      <div class="fields dial-call">
+        <label class="field">
+          <span>Аппарат</span>
+          <select id="dial-ext"></select>
+        </label>
+        <label class="field">
+          <span>Звук</span>
+          <select id="dial-sound" required></select>
+        </label>
+        <label class="field">
+          <span>Длительность вызова</span>
+          <div class="row">
+            <input type="range" id="dial-ring" min="5" max="60" step="5" value="30">
+            <output id="dial-ring-out">30 с</output>
+          </div>
+        </label>
+      </div>
+      <div class="panel-foot">
+        <label class="check">
+          <input type="checkbox" id="dial-loop">
+          <span>Повторять, пока не положат трубку</span>
+        </label>
+        <div class="row-actions">
+          <button class="ghost" id="dial-hangup" type="button">Сбросить вызов</button>
+          <button class="primary" id="dial-call-go" type="button">Позвонить</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- Direction two: the handset dials. -->
+    <section class="panel" aria-label="Номера для набора с диска">
+      <div class="panel-head">
+        <h2>Номера для набора с диска</h2>
+        <div class="head-actions">
+          <span class="stamp" id="dial-slots-stamp"></span>
+          <button class="ghost small" id="dial-slots-refresh" type="button">Обновить</button>
+        </div>
+      </div>
+      <p class="note">
+        Снимите трубку, наберите номер на диске — заиграет назначенный звук.
+        Номера можно добавлять и убирать здесь же: диалплан АТС ловит весь
+        диапазон одним правилом, поэтому изменения действуют со следующего
+        вызова и перезагружать ничего не нужно.
+      </p>
+
+      <div class="scroll-x">
+        <table class="grid">
+          <thead>
+            <tr><th>Номер</th><th>Что играет</th><th>Изменить</th></tr>
+          </thead>
+          <tbody id="dial-slot-rows">
+            <tr><td colspan="3" class="muted">загрузка…</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="panel-foot dial-add">
+        <label class="field inline-field">
+          <span>Новый номер</span>
+          <select id="dial-new-number"></select>
+        </label>
+        <label class="field inline-field">
+          <span>Звук</span>
+          <select id="dial-new-sound"></select>
+        </label>
+        <button class="primary small" id="dial-add" type="button">Добавить</button>
+      </div>
+    </section>
+
+    <!-- What the reader is doing, filtered out of the same event stream the
+         board tab shows in full: on this tab only this handset matters. -->
+    <section class="panel feed" aria-label="Что делает диск">
+      <div class="panel-head">
+        <h2>Диск и трубка</h2>
+        <button class="ghost small" id="dial-clear" type="button">Очистить</button>
+      </div>
+      <p class="note">
+        События от считывателя на ESP32: снятие трубки, каждая набранная
+        цифра и готовый номер. Если здесь пусто, а диск крутится — считыватель
+        не долетает до сервера.
+      </p>
+      <ol class="log" id="dial-log"></ol>
+      <p class="empty" id="dial-log-empty">
+        Пока пусто. Снимите трубку на дисковом аппарате.
+      </p>
+    </section>
+  </section>
+</main>
+
+<!-- ══ Диагностика ═══════════════════════════════════════════════════ -->
+<main class="view" id="view-tools">
+  <section class="col wide">
+    <section class="panel" aria-label="Диагностика">
+      <div class="panel-head">
+        <h2>Команды шлюза</h2>
+      </div>
+      <p class="note">
+        Только чтение. Список закрыт — интерфейс не передаёт на шлюз
+        произвольные команды.
+      </p>
+      <div class="chips" id="diag-buttons"></div>
+      <pre class="output" id="diag-output">Выберите команду.</pre>
+    </section>
+  </section>
+</main>
+
+<!-- Call form -->
+<dialog class="sheet" id="dialog">
+  <form method="dialog" id="call-form">
+    <h2>Вызов на <span id="dialog-ext">—</span></h2>
+    <label class="field">
+      <span>Звук</span>
+      <select id="sound" required></select>
+    </label>
+    <label class="field">
+      <span>Длительность вызова</span>
+      <div class="row">
+        <input type="range" id="ring" min="5" max="60" step="5" value="30">
+        <output id="ring-out">30 с</output>
+      </div>
+    </label>
+    <label class="check">
+      <input type="checkbox" id="loop">
+      <span>Повторять, пока не положат трубку</span>
+    </label>
+    <p class="hint" id="dialog-hint"></p>
+    <menu>
+      <button class="ghost" value="cancel" type="submit">Отмена</button>
+      <button class="primary" id="go" value="call" type="submit">Позвонить</button>
+    </menu>
+  </form>
+</dialog>
+
+<!-- Port settings -->
+<dialog class="sheet wide-sheet" id="port-sheet">
+  <form method="dialog" id="port-form">
+    <h2>Порт <span id="port-sheet-id">—</span> · абонент <span id="port-sheet-ext">—</span></h2>
+    <div id="port-fields" class="fields"></div>
+    <p class="hint" id="port-hint"></p>
+    <menu>
+      <button class="ghost" value="close" type="submit">Закрыть</button>
+    </menu>
+  </form>
+</dialog>
+
+<!-- Reboot confirmation -->
+<dialog class="sheet" id="confirm">
+  <form method="dialog" id="confirm-form">
+    <h2>Перезагрузить шлюз?</h2>
+    <p class="warn-text">
+      Шлюз AP1100F уйдёт в перезагрузку. Все текущие разговоры прервутся,
+      связь пропадёт примерно на минуту.
+    </p>
+    <p class="hint">Несохранённые изменения конфигурации будут потеряны.</p>
+    <menu>
+      <button class="ghost" value="cancel" type="submit">Отмена</button>
+      <button class="danger" value="reboot" type="submit">Перезагрузить</button>
+    </menu>
+  </form>
+</dialog>
+
+<!-- Flash write confirmation -->
+<dialog class="sheet" id="confirm-save">
+  <form method="dialog" id="confirm-save-form">
+    <h2>Сохранить конфигурацию во flash?</h2>
+    <p class="warn-text">
+      Текущая конфигурация станет постоянной. До этого момента перезагрузка
+      шлюза по питанию возвращала последнее сохранённое состояние — это
+      единственный откат, который есть у AP1100F.
+    </p>
+    <p class="hint">Сохраняйте только после проверки звонком.</p>
+    <menu>
+      <button class="ghost" value="cancel" type="submit">Отмена</button>
+      <button class="danger" value="save" type="submit">Сохранить</button>
+    </menu>
+  </form>
+</dialog>
+
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+<script src="/app.js"></script>
+</body>
+</html>

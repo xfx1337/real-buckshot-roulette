@@ -38,7 +38,7 @@ from app.game_engine import (
 from app import sound_config
 from app import video_config
 from app import audio_engine
-from app import voip
+from app import voip_service
 from app.sound_director import director as sound_director, loop_for_state
 
 import socket
@@ -337,6 +337,10 @@ async def lifespan(app: FastAPI):
         yield
     finally:
         audio_engine.stop()
+        # Телефония поднимается лениво, при первом обращении к панели, но
+        # останавливать её надо всегда: монитор AMI и сторож портов — живые
+        # потоки с открытыми сокетами, и без этого uvicorn не выйдет.
+        voip_service.stop()
 
 app = FastAPI(
     title="Buckshot Roulette IRL",
@@ -2858,25 +2862,31 @@ async def tv_state():
 
 # ── VoIP: телефоны через АТС и шлюз AddPac ───────────────────────────────
 #
-# Панель /voip показывает всю цепочку Asterisk → шлюз → трубка и даёт по ней
-# кликать. Вся работа с железом живёт в app/voip.py; здесь только HTTP и
-# WebSocket поверх неё.
+# Подсистема телефонии живёт в voip/: свой Asterisk, шлюз AddPac AP1100F,
+# восемь дисковых аппаратов на портах FXS и ESP32, читающий рычаг и диск.
+# Раньше у неё был собственный сервер на Flask (voip/scripts/web.py, порт
+# 8080), поднимавшийся отдельно от игры; теперь всё то же состояние держит
+# app/voip_service.py в этом процессе, а роуты ниже — его HTTP-поверхность.
 #
-# Каждый вызов туда — блокирующие сокеты (AMI и telnet), поэтому все они
-# уходят в asyncio.to_thread: молчащий шлюз не должен вешать игровой цикл.
+# Пути сохранены такими, какими их знал Flask, с префиксом /api/voip: панель
+# телефонов и прошивка ESP обращаются по знакомым именам, а /api/dialer
+# продолжает отвечать и по старому адресу — см. dialer_legacy ниже.
+#
+# Каждый вызов в voip_service — блокирующие сокеты (AMI и telnet), поэтому
+# все они уходят в asyncio.to_thread: молчащий шлюз не должен вешать игровой
+# цикл, в котором крутится сама игра.
 
 voip_ws_list: list[WebSocket] = []
 
-# Последние события телефонов — чтобы вкладка, открытая после набора, не
-# начинала с пустого лога.
-voip_events: list[dict] = []
-VOIP_EVENTS_MAX = 200
-
-_voip_watcher = None
+_voip_loop: Optional[asyncio.AbstractEventLoop] = None
 
 
 async def broadcast_voip(payload: dict) -> None:
-    """Разослать событие всем открытым панелям /voip."""
+    """Разослать событие всем, кто смотрит на телефоны.
+
+    Получателей двое: отдельная страница /voip и вкладка «Телефоны» в панели
+    дилера. Обе висят на одном сокете /ws/voip, поэтому рассылка одна.
+    """
     message = json.dumps(payload, ensure_ascii=False)
     for ws in list(voip_ws_list):
         try:
@@ -2887,13 +2897,11 @@ async def broadcast_voip(payload: dict) -> None:
 
 
 def _voip_on_event(payload: dict) -> None:
-    """Колбэк потока DigitWatcher — из его треда, не из event loop.
+    """Колбэк потока монитора — из его треда, не из игрового цикла.
 
-    Поэтому отправка в сокеты идёт через run_coroutine_threadsafe: трогать
-    WebSocket из чужого треда нельзя.
+    Монитор AMI читает события в своём потоке, поэтому отправка в сокеты идёт
+    через run_coroutine_threadsafe: трогать WebSocket из чужого треда нельзя.
     """
-    voip_events.append(payload)
-    del voip_events[:-VOIP_EVENTS_MAX]
     loop = _voip_loop
     if loop is None:
         return
@@ -2903,143 +2911,439 @@ def _voip_on_event(payload: dict) -> None:
         pass
 
 
-_voip_loop: Optional[asyncio.AbstractEventLoop] = None
+def _voip_ensure_started() -> None:
+    """Поднять монитор AMI и сторож портов, если они ещё не подняты.
 
-
-def _voip_ensure_watcher() -> None:
-    """Поднять слушателя AMI, если он ещё не запущен.
-
-    Запускается при первом открытии панели, а не на старте сервера: игра
-    обычно крутится и без АТС, и лишний тред с бесконечными попытками
-    подключения ей не нужен. Сам DigitWatcher переживает перезапуск Asterisk
-    и переподключается сам.
+    Запускается при первом обращении к телефонам, а не на старте сервера:
+    игра обычно крутится и без АТС, и лишний тред с бесконечными попытками
+    подключения ей не нужен. Сам монитор переживает перезапуск Asterisk и
+    переподключается сам.
     """
-    global _voip_watcher, _voip_loop
+    global _voip_loop
     _voip_loop = asyncio.get_running_loop()
-    if _voip_watcher is None:
-        _voip_watcher = voip.DigitWatcher(_voip_on_event)
-    _voip_watcher.start()
+    voip_service.set_sink(_voip_on_event)
+    voip_service.start()
+
+
+def _voip_fail(exc: voip_service.VoipError) -> HTTPException:
+    """Отказ подсистемы телефонии в виде ответа HTTP."""
+    return HTTPException(status_code=exc.status, detail=str(exc))
 
 
 @app.get("/voip", response_class=HTMLResponse, tags=["VoIP"], summary="Панель телефонов", include_in_schema=False)
 async def voip_page(request: Request):
     """Страница управления телефонами: порты, статусы цепочки, звонки, цифры."""
-    _voip_ensure_watcher()
+    _voip_ensure_started()
     return templates.TemplateResponse("voip.html", {
         "request": request,
-        "ports": [
-            {
-                "exten": exten,
-                "slot": slot,
-                "known_bad": exten in voip.KNOWN_BAD_PORTS,
-            }
-            for exten, slot in voip.PORT_NAMES.items()
+        "extensions": [
+            {"exten": str(101 + i), "slot": slot}
+            for i, slot in enumerate(voip_service.gateway.PORTS)
         ],
-        "targets": list(voip.CALL_TARGETS.keys()),
+        "slot_range": {"first": voip_service.SLOT_FIRST,
+                       "last": voip_service.SLOT_LAST},
     })
 
 
-@app.get("/api/voip/status", tags=["VoIP"], summary="Состояние АТС, шлюза и портов", include_in_schema=False)
-async def voip_status(gateway: bool = True):
-    """Снимок всей цепочки.
+@app.get("/api/voip/state", tags=["VoIP"], summary="Снимок состояния телефонов", include_in_schema=False)
+async def voip_state():
+    """Всё, что нужно панели, чтобы нарисоваться с нуля.
 
-    `gateway=false` пропускает telnet-опрос: он занимает несколько секунд на
-    неотвечающем шлюзе, а страница при этом должна успевать обновлять
-    остальное.
+    Дёшево: только состояние процесса, ни одного обращения к железу. Панель
+    берёт это при открытии, а дальше живёт на событиях из /ws/voip.
     """
-    return await asyncio.to_thread(voip.collect_status, gateway)
+    _voip_ensure_started()
+    return voip_service.snapshot()
+
+
+@app.get("/api/voip/health", tags=["VoIP"], summary="Состояние АТС, шлюза и портов", include_in_schema=False)
+async def voip_health():
+    """Каждое звено цепочки отдельно: сервер, сеть, АТС, шлюз, порты.
+
+    Читается по частям намеренно: неудача в одном звене снаружи выглядит как
+    неудача в другом, а вызов, который не проходит из-за лежащей АТС, из-за
+    пропавшего адреса на интерфейсе и из-за залипшего порта — три разные
+    поломки с тремя разными починками.
+    """
+    _voip_ensure_started()
+    return await asyncio.to_thread(voip_service.system_health)
+
+
+@app.get("/api/voip/ports", tags=["VoIP"], summary="Порты FXS глазами шлюза", include_in_schema=False)
+async def voip_ports(fresh: bool = False):
+    """Сводка по портам. fresh=1 обходит кэш ценой telnet-логина."""
+    _voip_ensure_started()
+    try:
+        return await asyncio.to_thread(voip_service.ports_state, fresh)
+    except voip_service.VoipError as exc:
+        raise _voip_fail(exc)
+
+
+@app.get("/api/voip/sounds", tags=["VoIP"], summary="Библиотека звуков", include_in_schema=False)
+async def voip_sounds():
+    try:
+        return await asyncio.to_thread(voip_service.sound_library)
+    except voip_service.VoipError as exc:
+        raise _voip_fail(exc)
 
 
 @app.post("/api/voip/call", tags=["VoIP"], summary="Позвонить на трубку", include_in_schema=False)
 async def voip_call(request: Request):
+    """Позвонить на аппарат и проиграть в него звук.
+
+    Возвращается сразу: сам вызов идёт в фоновом потоке до тридцати секунд, и
+    держать на нём запрос значило бы держать браузер.
+    """
+    _voip_ensure_started()
     data = await request.json()
-    exten = str(data.get("exten", ""))
-    target = str(data.get("target", "lobby"))
-    timeout_ms = int(data.get("timeout_ms", 30000))
     try:
-        result = await asyncio.to_thread(voip.originate, exten, target, timeout_ms)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
-    except (OSError, voip.AMIError) as exc:
-        raise HTTPException(status_code=503, detail=str(exc))
-    await broadcast_voip({"kind": "action", "action": "call", **result, "at": time.time()})
-    return result
+        return await asyncio.to_thread(
+            voip_service.place_call,
+            str(data.get("extension", "")).strip(),
+            str(data.get("sound", "")).strip(),
+            bool(data.get("loop", False)),
+            data.get("ring"),
+        )
+    except voip_service.VoipError as exc:
+        raise _voip_fail(exc)
 
 
-@app.post("/api/voip/hangup", tags=["VoIP"], summary="Сбросить звонок", include_in_schema=False)
+@app.post("/api/voip/audio/play", tags=["VoIP"], summary="Проиграть звук в снятую трубку", include_in_schema=False)
+async def voip_audio_play(request: Request):
+    _voip_ensure_started()
+    data = await request.json()
+    try:
+        return await asyncio.to_thread(
+            voip_service.play_audio,
+            str(data.get("extension", "")).strip(),
+            str(data.get("sound", "")).strip(),
+            bool(data.get("loop", False)),
+        )
+    except voip_service.VoipError as exc:
+        raise _voip_fail(exc)
+
+
+@app.post("/api/voip/audio/stop", tags=["VoIP"], summary="Заглушить трубку", include_in_schema=False)
+async def voip_audio_stop(request: Request):
+    data = await request.json()
+    extension = str(data.get("extension", "")).strip() or None
+    try:
+        return await asyncio.to_thread(voip_service.stop_audio, extension)
+    except voip_service.VoipError as exc:
+        raise _voip_fail(exc)
+
+
+@app.get("/api/voip/audio", tags=["VoIP"], summary="Что играет и куда", include_in_schema=False)
+async def voip_audio_state():
+    return await asyncio.to_thread(voip_service.audio_state)
+
+
+@app.post("/api/voip/hangup", tags=["VoIP"], summary="Освободить порт трубки", include_in_schema=False)
 async def voip_hangup(request: Request):
-    data = await request.json()
-    exten = str(data.get("exten", ""))
-    channel = str(data.get("channel", ""))
-    try:
-        result = await asyncio.to_thread(voip.hangup, exten, channel)
-    except (OSError, voip.AMIError) as exc:
-        raise HTTPException(status_code=503, detail=str(exc))
-    await broadcast_voip({"kind": "action", "action": "hangup", "exten": exten,
-                          **result, "at": time.time()})
-    return result
+    """Завершить вызов циклом порта на шлюзе.
 
-
-@app.post("/api/voip/reset-port", tags=["VoIP"], summary="Сбросить залипший порт", include_in_schema=False)
-async def voip_reset_port(request: Request):
-    """Принудительно вернуть порт в Idle через shutdown/no shutdown на шлюзе.
-
-    Нужно, когда порт застрял в Disconnecting: шлюз считает линию занятой,
-    входящие получают 503, набор не читается, и само это не проходит.
-    Единственная пишущая команда, которую панель шлёт на шлюз, — поэтому она
-    отдельным роутом, а не через /api/voip/cli, который остаётся только на
-    чтение.
+    Это и завершает разговор, и оставляет порт свободным за один приём, тогда
+    как одно только снятие канала может оставить порт в застрявшем состоянии,
+    которое блокирует следующий вызов.
     """
     data = await request.json()
-    exten = str(data.get("exten", ""))
     try:
-        result = await asyncio.to_thread(voip.reset_port, exten)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
-    except (OSError, voip.AMIError) as exc:
-        raise HTTPException(status_code=503, detail=str(exc))
-    await broadcast_voip({"kind": "action", "action": "reset-port",
-                          **result, "at": time.time()})
-    return result
+        return await asyncio.to_thread(
+            voip_service.hangup_port, str(data.get("extension", "")).strip())
+    except voip_service.VoipError as exc:
+        raise _voip_fail(exc)
 
 
-@app.post("/api/voip/cli", tags=["VoIP"], summary="Команда на шлюз AddPac", include_in_schema=False)
-async def voip_cli(request: Request):
-    """Выполнить команду в CLI шлюза по telnet.
-
-    Список ограничен читающими командами: панель — пульт наблюдения, а
-    `configure terminal` с опечаткой из браузера уронит порты молча.
-    """
+@app.post("/api/voip/hangup-call", tags=["VoIP"], summary="Сбросить вызов через АТС", include_in_schema=False)
+async def voip_hangup_call(request: Request):
+    """Обычный способ завершить идущий разговор, не трогая порт."""
     data = await request.json()
-    command = str(data.get("command", "")).strip()
-    if command not in VOIP_CLI_COMMANDS:
-        raise HTTPException(status_code=400, detail=f"команда не разрешена: {command}")
     try:
-        replies = await asyncio.to_thread(voip.gateway_run, [command], 8.0)
-    except OSError as exc:
-        raise HTTPException(status_code=503, detail=str(exc))
-    return {"ok": True, "command": command, "output": replies[0][1] if replies else ""}
+        return await asyncio.to_thread(
+            voip_service.hangup_call, str(data.get("extension", "")).strip())
+    except voip_service.VoipError as exc:
+        raise _voip_fail(exc)
 
 
-# Что можно запускать на шлюзе из браузера — только чтение состояния.
-VOIP_CLI_COMMANDS = [
-    "show voice port summary",
-    "show call active",
-    "show sip",
-    "show interface",
-    "show running-config",
-]
+@app.post("/api/voip/on-hook", tags=["VoIP"], summary="Обесточить линию", include_in_schema=False)
+async def voip_on_hook(request: Request):
+    """«Я положил трубку» — для аппарата, чьи ключи держат шлейф замкнутым."""
+    data = await request.json()
+    try:
+        return await asyncio.to_thread(
+            voip_service.on_hook,
+            str(data.get("extension", "")).strip(),
+            data.get("seconds", 6.0),
+        )
+    except voip_service.VoipError as exc:
+        raise _voip_fail(exc)
 
 
-@app.get("/api/voip/cli/commands", tags=["VoIP"], summary="Разрешённые команды шлюза", include_in_schema=False)
-async def voip_cli_commands():
-    return {"commands": VOIP_CLI_COMMANDS}
+@app.post("/api/voip/reset-ports", tags=["VoIP"], summary="Сбросить все порты FXS", include_in_schema=False)
+async def voip_reset_ports():
+    """Прогнать циклом shutdown/no shutdown по всем восьми портам.
+
+    Мягкий ремонт: возвращает в Idle порты, которые прошивка оставила в
+    «Disconnecting». Порт, который не освободился и после этого, почти всегда
+    держит снятая трубка, и это будет названо в событии.
+    """
+    _voip_ensure_started()
+    try:
+        return await asyncio.to_thread(voip_service.reset_ports)
+    except voip_service.VoipError as exc:
+        raise _voip_fail(exc)
+
+
+@app.post("/api/voip/reboot", tags=["VoIP"], summary="Перезагрузить шлюз", include_in_schema=False)
+async def voip_reboot():
+    """Перезагрузить шлюз целиком.
+
+    Занимает около минуты, роняет каждый идущий вызов и откатывает всё, что не
+    сохранено во flash, — поэтому в интерфейсе кнопка спрашивает подтверждение.
+    """
+    _voip_ensure_started()
+    try:
+        return await asyncio.to_thread(voip_service.reboot_gateway)
+    except voip_service.VoipError as exc:
+        raise _voip_fail(exc)
+
+
+# ── считыватель диска: сюда шлёт ESP32 ──────────────────────────────────
+
+async def _voip_dialer(request: Request) -> dict:
+    """Одно событие от считывателя рычага и диска.
+
+    Прошивка отправляет и идёт дальше — ответ она не разбирает, поэтому отказ
+    здесь звучит в трубке сигналом «занято», а не остаётся кодом состояния.
+    Формат тела и заголовок токена — те же, что принимал Flask: прошивка не
+    менялась.
+    """
+    _voip_ensure_started()
+    token = voip_service.DIALER_TOKEN
+    if token and request.headers.get("X-Dialer-Token", "") != token:
+        raise HTTPException(status_code=403, detail="неверный токен")
+
+    try:
+        data = await request.json()
+    except Exception:
+        data = {}
+    if not isinstance(data, dict):
+        data = {}
+
+    try:
+        return await asyncio.to_thread(
+            voip_service.dialer_event,
+            str(data.get("extension", "")).strip(),
+            str(data.get("kind", "")).strip(),
+            str(data.get("detail", "")).strip(),
+        )
+    except voip_service.VoipError as exc:
+        raise _voip_fail(exc)
+
+
+@app.post("/api/voip/dialer", tags=["VoIP"], summary="Событие от считывателя диска", include_in_schema=False)
+async def voip_dialer(request: Request):
+    return await _voip_dialer(request)
+
+
+@app.post("/api/dialer", tags=["VoIP"], summary="Событие от считывателя диска (старый адрес)", include_in_schema=False)
+async def voip_dialer_legacy(request: Request):
+    """Адрес, по которому ESP стучался во Flask на порту 8080.
+
+    Оставлен рабочим: прошивка, залитая до переезда телефонии в этот сервер,
+    продолжает работать, если ей сменили только порт. Тело, заголовки и ответ
+    те же — это тот же обработчик.
+    """
+    return await _voip_dialer(request)
+
+
+# ── программируемые номера 510–529 ──────────────────────────────────────
+
+@app.get("/api/voip/slots", tags=["VoIP"], summary="Программируемые номера", include_in_schema=False)
+async def voip_slots():
+    """Какие номера набираются с трубки и что каждый играет."""
+    return await asyncio.to_thread(voip_service.slots_state)
+
+
+@app.post("/api/voip/slots", tags=["VoIP"], summary="Назначить звук на номер", include_in_schema=False)
+async def voip_slots_set(request: Request):
+    """Добавить номер, сменить звук или убрать номер пустым значением."""
+    data = await request.json()
+    try:
+        return await asyncio.to_thread(
+            voip_service.slots_set,
+            str(data.get("number", "")).strip(),
+            str(data.get("sound", "")).strip(),
+        )
+    except voip_service.VoipError as exc:
+        raise _voip_fail(exc)
+
+
+# ── автоматика: обесточивание после отбоя и сторож портов ───────────────
+
+@app.get("/api/voip/auto-power", tags=["VoIP"], summary="Автообесточивание линий", include_in_schema=False)
+async def voip_auto_power():
+    return voip_service.auto_power_state()
+
+
+@app.post("/api/voip/auto-power", tags=["VoIP"], summary="Включить автообесточивание", include_in_schema=False)
+async def voip_auto_power_set(request: Request):
+    data = await request.json()
+    try:
+        return await asyncio.to_thread(
+            voip_service.auto_power_set,
+            str(data.get("extension", "")).strip(),
+            bool(data.get("enabled", False)),
+        )
+    except voip_service.VoipError as exc:
+        raise _voip_fail(exc)
+
+
+@app.get("/api/voip/watchdog", tags=["VoIP"], summary="Сторож залипших портов", include_in_schema=False)
+async def voip_watchdog():
+    return await asyncio.to_thread(voip_service.watchdog_state)
+
+
+@app.post("/api/voip/watchdog", tags=["VoIP"], summary="Настроить сторож портов", include_in_schema=False)
+async def voip_watchdog_set(request: Request):
+    """Включить автосброс и выбрать порты, которые он покрывает."""
+    _voip_ensure_started()
+    data = await request.json()
+    try:
+        return await asyncio.to_thread(
+            voip_service.watchdog_set,
+            data.get("ports"),
+            data.get("grace"),
+            data.get("enabled"),
+        )
+    except voip_service.VoipError as exc:
+        raise _voip_fail(exc)
+
+
+# ── АТС ─────────────────────────────────────────────────────────────────
+
+@app.get("/api/voip/pbx", tags=["VoIP"], summary="Состояние Asterisk", include_in_schema=False)
+async def voip_pbx():
+    """Каналы, магистральная точка и что можно набрать с аппарата."""
+    return await asyncio.to_thread(voip_service.pbx_state)
+
+
+@app.post("/api/voip/pbx/reload", tags=["VoIP"], summary="Перечитать план набора", include_in_schema=False)
+async def voip_pbx_reload():
+    try:
+        return await asyncio.to_thread(voip_service.pbx_reload)
+    except voip_service.VoipError as exc:
+        raise _voip_fail(exc)
+
+
+# ── администрирование шлюза ─────────────────────────────────────────────
+#
+# Ни один из этих роутов не передаёт строку оператора в CLI шлюза. Параметр
+# ищется в белом списке voip/scripts/admin.py, значение проверяется по
+# диапазону, который сообщает сама прошивка, и команда собирается из частей,
+# которыми владеет тот файл: у шлюза нет понятия ограниченной учётной записи,
+# и telnet-сессия может стереть конфигурацию.
+
+@app.get("/api/voip/admin/ports", tags=["VoIP"], summary="Порты и их настройки", include_in_schema=False)
+async def voip_admin_ports():
+    try:
+        return await asyncio.to_thread(voip_service.admin_ports)
+    except voip_service.VoipError as exc:
+        raise _voip_fail(exc)
+
+
+@app.get("/api/voip/admin/port/{port:path}", tags=["VoIP"], summary="Настройки одного порта", include_in_schema=False)
+async def voip_admin_port(port: str):
+    try:
+        return await asyncio.to_thread(voip_service.admin_port, port)
+    except voip_service.VoipError as exc:
+        raise _voip_fail(exc)
+
+
+@app.post("/api/voip/admin/port/{port:path}/state", tags=["VoIP"], summary="Включить или выключить порт", include_in_schema=False)
+async def voip_admin_port_state(port: str, request: Request):
+    data = await request.json()
+    try:
+        return await asyncio.to_thread(
+            voip_service.admin_port_state, port, bool(data.get("up", True)))
+    except voip_service.VoipError as exc:
+        raise _voip_fail(exc)
+
+
+@app.post("/api/voip/admin/port/{port:path}", tags=["VoIP"], summary="Изменить параметр порта", include_in_schema=False)
+async def voip_admin_set_port(port: str, request: Request):
+    data = await request.json()
+    try:
+        return await asyncio.to_thread(
+            voip_service.admin_set_port, port,
+            str(data.get("key", "")), data.get("value"))
+    except voip_service.VoipError as exc:
+        raise _voip_fail(exc)
+
+
+@app.get("/api/voip/admin/probe/{port:path}", tags=["VoIP"], summary="Готов ли порт принять вызов", include_in_schema=False)
+async def voip_admin_probe(port: str):
+    try:
+        return await asyncio.to_thread(voip_service.admin_probe, port)
+    except voip_service.VoipError as exc:
+        raise _voip_fail(exc)
+
+
+@app.post("/api/voip/admin/dial-peer", tags=["VoIP"], summary="Перевести номер на другой порт", include_in_schema=False)
+async def voip_admin_dial_peer(request: Request):
+    data = await request.json()
+    try:
+        return await asyncio.to_thread(
+            voip_service.admin_dial_peer, data.get("tag", 0),
+            str(data.get("port", "")))
+    except voip_service.VoipError as exc:
+        raise _voip_fail(exc)
+
+
+@app.get("/api/voip/admin/diagnostics", tags=["VoIP"], summary="Доступные диагностики шлюза", include_in_schema=False)
+async def voip_admin_diagnostics():
+    return voip_service.admin_diagnostics_list()
+
+
+@app.get("/api/voip/admin/diagnostics/{name}", tags=["VoIP"], summary="Диагностика шлюза", include_in_schema=False)
+async def voip_admin_diagnostic(name: str):
+    try:
+        return await asyncio.to_thread(voip_service.admin_diagnostic, name)
+    except voip_service.VoipError as exc:
+        raise _voip_fail(exc)
+
+
+@app.post("/api/voip/admin/save", tags=["VoIP"], summary="Сохранить конфигурацию во flash", include_in_schema=False)
+async def voip_admin_save():
+    """Записать текущую конфигурацию шлюза в постоянную память.
+
+    До этого шага любое изменение откатывается выключением питания — это
+    единственный откат, который есть у устройства. Панель спрашивает
+    подтверждение.
+    """
+    try:
+        return await asyncio.to_thread(voip_service.admin_save)
+    except voip_service.VoipError as exc:
+        raise _voip_fail(exc)
+
+
+@app.get("/api/voip/panel", tags=["VoIP"], summary="Панель индикации шлюза", include_in_schema=False)
+async def voip_panel():
+    try:
+        return await asyncio.to_thread(voip_service.panel)
+    except voip_service.VoipError as exc:
+        raise _voip_fail(exc)
 
 
 @app.get("/api/voip/events", tags=["VoIP"], summary="Последние события телефонов", include_in_schema=False)
 async def voip_recent_events(limit: int = 50):
-    return {"events": voip_events[-limit:]}
+    return {"events": voip_service.history()[-limit:]}
 
+
+# ── статистика занятости каналов ────────────────────────────────────────
+#
+# Отдельный слой поверх событий: app/busy_tracker.py пишет вызовы в SQLite,
+# чтобы по ним можно было посмотреть историю и статистику после игры.
 
 @app.get("/api/voip/busy/history", tags=["VoIP"], summary="История занятости каналов", include_in_schema=False)
 async def voip_busy_history(
@@ -3049,7 +3353,7 @@ async def voip_busy_history(
     limit: int = 100
 ):
     """История звонков с фильтрацией.
-    
+
     - exten: фильтр по расширению (101-108)
     - since: начало периода (unix timestamp)
     - until: конец периода (unix timestamp)
@@ -3064,7 +3368,7 @@ async def voip_busy_history(
 @app.get("/api/voip/busy/statistics", tags=["VoIP"], summary="Статистика по звонкам", include_in_schema=False)
 async def voip_busy_statistics(since: Optional[float] = None):
     """Статистика по звонкам за период.
-    
+
     - since: начало периода (unix timestamp), если не указан - вся история
     """
     from app.busy_tracker import get_tracker
@@ -3156,18 +3460,23 @@ async def ws_player(ws: WebSocket, player_id: str):
 
 @app.websocket("/ws/voip")
 async def ws_voip(ws: WebSocket):
-    """Поток событий телефонов для панели /voip.
+    """Поток событий телефонов — для страницы /voip и вкладки в панели дилера.
 
-    Сервер шлёт: {"kind": "digit"|"dialled"|"call"|"ami"|"action", ...}.
-    Клиент — только keep-alive.
+    Сервер шлёт события трубок в том же виде, в каком их порождает монитор:
+    {"kind": "off-hook"|"on-hook"|"digit"|"call-ended"|"info"|"warn"|"error",
+     "extension": "101", "detail": "...", "at": ..., "clock": "...",
+     "direction": "inbound"|"outbound"}.
+
+    Отдельным видом идёт "progress" — разбивка долгой операции по шагам, у
+    неё вместо detail поле progress. Клиент — только keep-alive.
     """
     await ws.accept()
     voip_ws_list.append(ws)
-    _voip_ensure_watcher()
+    _voip_ensure_started()
     try:
         # Свежеоткрытая вкладка догоняет уже случившееся, иначе лог пуст до
         # первого нажатия на трубке.
-        for event in voip_events[-30:]:
+        for event in voip_service.history()[-30:]:
             await ws.send_text(json.dumps(event, ensure_ascii=False))
         while True:
             await ws.receive_text()

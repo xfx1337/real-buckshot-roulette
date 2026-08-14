@@ -1,0 +1,171 @@
+/* Панель телефонии.
+ *
+ * Поверх общей палитры игры (static/style.css) — только то, чего в ней нет:
+ * карточки аппаратов, журнал событий и разбивка долгой операции по шагам.
+ * Цвета берутся переменными оттуда, чтобы страница не разъезжалась с панелью
+ * дилера, из вкладки которой она и открывается.
+ *
+ * Смысл страницы — с одного взгляда понять, какое звено оборвалось, поэтому
+ * состояния крупные и цветные, а не строчкой мелкого текста.
+ */
+
+body { padding: 16px 20px 40px; }
+
+.voip-head {
+    display: flex; align-items: baseline; gap: 16px;
+    margin-bottom: 14px; flex-wrap: wrap;
+}
+.voip-head h1 {
+    font-family: var(--font-mono); color: var(--green);
+    font-size: 1.2rem; letter-spacing: 2px; text-transform: uppercase;
+}
+.voip-head .sub { color: var(--text-dim); font-size: 0.8rem; }
+.voip-head .spacer { margin-left: auto; }
+
+.voip-link { display: flex; align-items: center; gap: 7px; font-size: 0.8rem; color: var(--text-dim); }
+.voip-link .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--text-dark); }
+.voip-link.ok .dot { background: var(--green); box-shadow: 0 0 8px var(--green-glow); }
+.voip-link.ok { color: var(--green); }
+.voip-link.bad .dot { background: var(--red-bright); }
+.voip-link.bad { color: var(--red-bright); }
+
+/* ── вкладки ─────────────────────────────────────────────────────────── */
+.voip-tabs { display: flex; gap: 4px; margin-bottom: 14px; flex-wrap: wrap; }
+.voip-tab {
+    background: var(--bg-panel); border: 1px solid var(--border-light);
+    color: var(--text-dim); font-family: var(--font-mono); font-size: 0.75rem;
+    letter-spacing: 1px; text-transform: uppercase;
+    padding: 8px 14px; cursor: pointer;
+}
+.voip-tab:hover { color: var(--text-bright); }
+.voip-tab.is-on { color: var(--green); border-color: var(--green-dim); background: var(--bg-elevated); }
+
+.voip-view { display: none; }
+.voip-view.is-on { display: block; }
+
+.voip-grid { display: grid; gap: 14px; grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr); }
+@media (max-width: 980px) { .voip-grid { grid-template-columns: 1fr; } }
+
+/* ── панели ──────────────────────────────────────────────────────────── */
+.voip-panel {
+    border: 1px solid var(--border-light); background: var(--bg-panel);
+    padding: 12px 14px; margin-bottom: 14px;
+}
+.vp-head { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; flex-wrap: wrap; }
+.vp-head h2 {
+    font-family: var(--font-mono); font-size: 0.8rem; letter-spacing: 2px;
+    text-transform: uppercase; color: var(--text-bright);
+}
+.vp-head .spacer { margin-left: auto; }
+.vp-head .stamp { color: var(--text-dark); font-size: 0.7rem; }
+.vp-foot { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 10px; }
+.vp-check { display: flex; align-items: center; gap: 8px; margin-top: 10px; font-size: 0.8rem; color: var(--text); }
+
+.voip-title {
+    font-family: var(--font-mono); font-size: 0.8rem; letter-spacing: 2px;
+    text-transform: uppercase; color: var(--text-dim); margin: 4px 0 8px;
+}
+
+.dim { color: var(--text-dim); }
+.small { font-size: 0.72rem; line-height: 1.5; }
+.mono { font-family: var(--font-mono); }
+.ok { color: var(--green); }
+.warn { color: var(--amber-bright); }
+
+/* ── проверки цепочки ────────────────────────────────────────────────── */
+.checks { list-style: none; display: flex; flex-direction: column; gap: 5px; }
+.check { display: flex; align-items: baseline; gap: 8px; font-size: 0.78rem; }
+.chk-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--text-dark); flex: 0 0 auto; }
+.check.ok .chk-dot { background: var(--green); box-shadow: 0 0 6px var(--green-glow); }
+.check.down .chk-dot { background: var(--red-bright); }
+.check.warn .chk-dot { background: var(--amber-bright); }
+.chk-name { color: var(--text-bright); min-width: 90px; }
+.chk-detail { color: var(--text-dim); font-size: 0.72rem; }
+
+/* ── карточки аппаратов ──────────────────────────────────────────────── */
+.phones { display: grid; gap: 10px; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); }
+.phone {
+    border: 1px solid var(--border-light); background: var(--bg-panel);
+    padding: 11px; display: flex; flex-direction: column; gap: 7px;
+}
+.phone.idle { border-color: var(--green-dim); }
+.phone.busy { border-color: var(--amber); background: var(--bg-elevated); }
+/* Мигание, а не статичный цвет: звонящий аппарат нужно заметить боковым
+   зрением, не вчитываясь в карточку. */
+.phone.ringing { border-color: var(--amber-bright); animation: voipRing 1s steps(2) infinite; }
+@keyframes voipRing { 50% { border-color: var(--border-light); } }
+
+.ph-head { display: flex; align-items: baseline; gap: 8px; }
+.ph-num { font-family: var(--font-mono); font-size: 1.1rem; color: var(--green); letter-spacing: 1px; }
+.ph-slot { font-size: 0.68rem; color: var(--text-dark); margin-left: auto; }
+.ph-status { font-size: 0.78rem; color: var(--text-bright); min-height: 1.1em; }
+.ph-armed { font-size: 0.7rem; color: var(--amber-bright); }
+.ph-digits { font-family: var(--font-mono); font-size: 0.72rem; color: var(--text-dim); }
+.ph-actions { display: flex; gap: 4px; flex-wrap: wrap; }
+.ph-auto { display: flex; align-items: center; gap: 6px; font-size: 0.68rem; color: var(--text-dim); }
+
+.voip-select {
+    background: var(--bg-input); border: 1px solid var(--border-light);
+    color: var(--text-bright); font-family: var(--font-mono); font-size: 0.72rem;
+    padding: 5px 6px; width: 100%;
+}
+
+/* ── журнал ──────────────────────────────────────────────────────────── */
+.feed { display: flex; flex-direction: column; max-height: 78vh; }
+.voip-log {
+    list-style: none; overflow-y: auto; flex: 1;
+    display: flex; flex-direction: column; gap: 2px;
+}
+.lg {
+    display: grid; grid-template-columns: 58px 40px minmax(0, 1fr); gap: 6px;
+    font-size: 0.72rem; padding: 3px 0; border-bottom: 1px solid var(--border);
+}
+.lg-time { color: var(--text-dark); font-family: var(--font-mono); }
+.lg-who { color: var(--green); font-family: var(--font-mono); }
+.lg-what { color: var(--text); word-break: break-word; }
+.lg-error .lg-what { color: var(--red-bright); }
+.lg-warn .lg-what { color: var(--amber-bright); }
+.lg-off-hook .lg-what, .lg-digit .lg-what { color: var(--text-bright); }
+
+/* ── прогресс долгой операции ────────────────────────────────────────── */
+.voip-progress {
+    border: 1px solid var(--amber); background: var(--bg-elevated);
+    padding: 10px 12px; margin-bottom: 12px;
+}
+.pr-head { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+.pr-head strong { font-family: var(--font-mono); font-size: 0.8rem; color: var(--amber-bright); letter-spacing: 1px; }
+.pr-head .btn { margin-left: auto; }
+.pr-track { height: 3px; background: var(--border); margin-bottom: 8px; }
+.pr-fill { height: 100%; background: var(--green); transition: width 0.3s; }
+.pr-steps { list-style: none; display: flex; flex-direction: column; gap: 3px; font-size: 0.72rem; }
+.pr-steps li { color: var(--text-dim); }
+.pr-steps li::before { content: '○ '; }
+.st-running { color: var(--amber-bright) !important; }
+.st-running::before { content: '◐ '; }
+.st-ok { color: var(--green) !important; }
+.st-ok::before { content: '● '; }
+.st-fail { color: var(--red-bright) !important; }
+.st-fail::before { content: '✕ '; }
+.st-skip::before { content: '– '; }
+
+.voip-banner {
+    border: 1px solid var(--amber); background: var(--bg-elevated);
+    color: var(--amber-bright); padding: 8px 12px; margin-bottom: 12px;
+    font-size: 0.78rem;
+}
+
+/* ── таблицы ─────────────────────────────────────────────────────────── */
+.voip-table { width: 100%; border-collapse: collapse; font-size: 0.75rem; }
+.voip-table th {
+    text-align: left; color: var(--text-dim); font-weight: normal;
+    font-size: 0.68rem; letter-spacing: 1px; text-transform: uppercase;
+    padding: 5px 6px; border-bottom: 1px solid var(--border-light);
+}
+.voip-table td { padding: 5px 6px; border-bottom: 1px solid var(--border); color: var(--text); }
+
+.voip-pre {
+    background: var(--bg-input); border: 1px solid var(--border);
+    padding: 10px; font-family: var(--font-mono); font-size: 0.7rem;
+    color: var(--text); overflow-x: auto; max-height: 60vh; margin-top: 10px;
+    white-space: pre;
+}

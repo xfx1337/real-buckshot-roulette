@@ -256,12 +256,40 @@ _gateway_lock = threading.Lock()
 _gateway: Optional[Gateway] = None
 
 
+# Seconds a port is held down inside reset_port's bounce, between `shutdown` and
+# `no shutdown`. This is the single most valuable number here, because it decides
+# how long the port stays usable afterwards. Measured on a latched port:
+#
+#   hold down 0 s   ->  Idle for ~18 s
+#   hold down 3 s   ->  Idle for 9-12 s, and the line is not actually ready:
+#                       an INVITE sent in the same second is still refused
+#   hold down 10 s  ->  Idle for ~30 s, and calls go through
+#
+# The port has to stay down long enough to drop its line feed and forget the
+# off-hook it wrongly believes in; brought back too soon it comes up still
+# believing it. Ten seconds is slow but it is the difference between a port that
+# takes a call and one that does not.
+RESET_DOWN_SECONDS = 10.0
+
+# Seconds between dropping the PBX side of a call and bouncing the port. The
+# gateway is still tearing the call down for a moment after the BYE, and a
+# bounce landing inside that window is undone by it.
+HANGUP_SETTLE_SECONDS = 1.5
+
+# A pseudo-command meaning "wait here", so a sequence that needs a pause in the
+# middle can still be sent as one locked session. reset_port needs this: the
+# port has to be held down for a few seconds between shutdown and no shutdown.
+_SLEEP_STEP = "\x00sleep"
+
+
 def gateway_run(commands: list[str], limit: float = 8.0) -> list[tuple[str, str]]:
     """Run CLI commands on the gateway, reusing one telnet session.
 
     Returns (command, output) pairs. A dropped session is reconnected once —
     the gateway closes idle telnet on its own, so the first command after a
     quiet spell would otherwise always fail.
+
+    _SLEEP_STEP is not sent to the gateway; it pauses the sequence in place.
     """
     global _gateway
     with _gateway_lock:
@@ -270,7 +298,13 @@ def gateway_run(commands: list[str], limit: float = 8.0) -> list[tuple[str, str]
                 if _gateway is None:
                     _gateway = Gateway()
                     _gateway.login()
-                return [(cmd, _gateway.run(cmd, limit)) for cmd in commands]
+                out = []
+                for cmd in commands:
+                    if cmd == _SLEEP_STEP:
+                        time.sleep(RESET_DOWN_SECONDS)
+                        continue
+                    out.append((cmd, _gateway.run(cmd, limit)))
+                return out
             except OSError:
                 if _gateway is not None:
                     _gateway.close()
@@ -525,6 +559,53 @@ def collect_status(with_gateway: bool = True) -> dict:
 
 # ── Actions ──────────────────────────────────────────────────────────────
 
+# How many times to place the call before giving up. The gateway occupies an
+# idle line with a call of its own within a second or two on any port whose
+# loop it reads as closed, and an INVITE that lands during one is refused.
+# Three attempts covers the usual case without making a dead port take long
+# to report.
+ORIGINATE_ATTEMPTS = 3
+
+# How long to watch the port after an async Originate before deciding the
+# gateway refused it. Ringing shows up as Busy well inside this.
+CALL_HOLD_TIMEOUT = 4.0
+CALL_HOLD_POLL = 0.5
+
+
+def _call_took_hold(exten: str) -> bool:
+    """Did the call we just placed actually reach the handset?
+
+    Async Originate returns as soon as the request is queued, so success has
+    to be read off the gateway. A ringing port reports Busy; one that refused
+    the INVITE falls back to Idle or latches in Disconnecting. Asterisk
+    holding a channel for the extension counts too, and is checked first
+    because it is the cheaper question.
+    """
+    slot = PORT_NAMES.get(exten)
+    deadline = time.monotonic() + CALL_HOLD_TIMEOUT
+    while time.monotonic() < deadline:
+        try:
+            ami = _ami_connect()
+            try:
+                for entry in _active_channels(ami):
+                    if _exten_from_channel(entry["channel"]) == exten:
+                        return True
+            finally:
+                ami.close()
+        except (OSError, AMIError):
+            pass
+
+        if slot:
+            try:
+                summary = gateway_run(["show voice port summary"], limit=6.0)
+                if parse_port_summary(summary[0][1]).get(slot, {}).get("state") == "Busy":
+                    return True
+            except (OSError, AMIError, IndexError):
+                pass
+
+        time.sleep(CALL_HOLD_POLL)
+    return False
+
 
 def originate(exten: str, target: str = "lobby", timeout_ms: int = 30000) -> dict:
     """Ring a handset, and play it something when it answers.
@@ -551,39 +632,82 @@ def originate(exten: str, target: str = "lobby", timeout_ms: int = 30000) -> dic
         state = parse_port_summary(summary[0][1]).get(PORT_NAMES[exten], {})
         if state.get("state") in ("Disconnecting", "Busy"):
             # Drop the PBX side too, so Asterisk is not left holding a channel
-            # against a port that just went away underneath it.
-            hangup(exten=exten)
+            # against a port that just went away underneath it. release=False:
+            # the reset_port below is the same bounce, and doing it twice only
+            # doubles the wait.
+            hangup(exten=exten, release=False)
             reset_port(exten)
     except (OSError, AMIError, IndexError):
         pass  # The gateway may be unreachable; let Originate report that.
 
-    ami = _ami_connect()
-    try:
-        packets = ami.action(
-            "Originate",
-            limit=6.0,
-            Channel=f"PJSIP/{exten}@addpac",
-            Context=context,
-            Exten=target_exten,
-            Priority=1,
-            CallerID=f"PBX <{exten}>",
-            Timeout=timeout_ms,
-            # Without this the action blocks until the call is answered or the
-            # timeout expires, and the HTTP request blocks with it.
-            Async="true",
-        )
-    finally:
-        ami.close()
+    last_error = ""
+    for attempt in range(ORIGINATE_ATTEMPTS):
+        ami = _ami_connect()
+        try:
+            packets = ami.action(
+                "Originate",
+                limit=6.0,
+                Channel=f"PJSIP/{exten}@addpac",
+                Context=context,
+                Exten=target_exten,
+                Priority=1,
+                CallerID=f"PBX <{exten}>",
+                Timeout=timeout_ms,
+                # Without this the action blocks until the call is answered or
+                # the timeout expires, and the HTTP request blocks with it.
+                Async="true",
+            )
+        finally:
+            ami.close()
 
-    for packet in packets:
-        if packet.get("response") == "Error":
-            raise AMIError(packet.get("message", "originate refused"))
-    return {"ok": True, "exten": exten, "target": target}
+        for packet in packets:
+            if packet.get("response") == "Error":
+                raise AMIError(packet.get("message", "originate refused"))
+
+        # Async Originate only reports that the request was accepted, so
+        # whether the gateway actually took the call has to be read back.
+        #
+        # A line the gateway believes is off-hook starts a call of its own
+        # every second or two — "show call history all" records them as
+        # Local:InterdigitTimerExpired — and one that lands between the reset
+        # above and this INVITE gets it refused with 486 or 503. There is no
+        # setting that stops those: the retry exists to land in the next gap.
+        if _call_took_hold(exten):
+            return {"ok": True, "exten": exten, "target": target,
+                    "attempts": attempt + 1}
+
+        last_error = "порт занят собственным вызовом шлюза"
+        if attempt + 1 < ORIGINATE_ATTEMPTS:
+            hangup(exten=exten, release=False)
+            try:
+                # Deliberately *not* reset_port here. The full bounce holds the
+                # port down for RESET_DOWN_SECONDS, and a port held down for ten
+                # seconds is a port the gateway's own call has ten seconds to
+                # seize the moment it comes back — the retry then fails for the
+                # very reason it exists. Clearing the call number is quick and
+                # leaves the port up, so the next INVITE goes out into the gap
+                # rather than after it.
+                clear_port_call(exten)
+            except (OSError, AMIError, ValueError):
+                pass
+
+    return {"ok": False, "exten": exten, "target": target,
+            "attempts": ORIGINATE_ATTEMPTS, "error": last_error}
 
 
-def hangup(exten: str = "", channel: str = "") -> dict:
+def hangup(exten: str = "", channel: str = "", release: bool = True) -> dict:
     """Drop a call — by channel name if known, otherwise every channel on the
-    given extension."""
+    given extension.
+
+    Dropping the PBX side is not enough on its own. The gateway latches the FXS
+    port when a call ends on it, so unless the port is released here the *next*
+    call to that handset is refused, and the caller has no way to tell why. With
+    release=True the port is bounced afterwards, which is what makes a handset
+    take a second call.
+
+    Pass release=False when a bounce would be wasted or harmful: originate()
+    does, because it resets the port itself as part of its retry loop.
+    """
     ami = _ami_connect()
     try:
         targets = [channel] if channel else []
@@ -593,23 +717,67 @@ def hangup(exten: str = "", channel: str = "") -> dict:
                 if not exten or _exten_from_channel(name) == exten or \
                         entry["connected"] == exten or entry["caller"] == exten:
                     targets.append(name)
-        if not targets:
+        if not targets and not (release and exten):
             return {"ok": True, "hung_up": [], "note": "no matching channel"}
         for name in targets:
             ami.action("Hangup", limit=3.0, Channel=name)
-        return {"ok": True, "hung_up": targets}
     finally:
         ami.close()
+
+    result = {"ok": True, "hung_up": targets}
+    if not (release and exten):
+        return result
+
+    # The gateway needs a moment to notice the BYE before the bounce, or the
+    # port comes back up and is immediately re-latched by the call it was still
+    # tearing down.
+    time.sleep(HANGUP_SETTLE_SECONDS)
+    try:
+        result["released"] = reset_port(exten)["status"]
+    except (OSError, AMIError, ValueError) as exc:
+        # A handset that cannot be released is still hung up; say so rather than
+        # failing the whole call.
+        result["release_error"] = str(exc)
+    return result
+
+
+def clear_port_call(exten: str) -> dict:
+    """Drop whatever call the gateway is holding on a port, without bouncing it.
+
+    The cheap half of reset_port: one command, no hold-down, port stays up. Use
+    it between originate retries, where the ten-second bounce would hand the
+    port straight back to the gateway's own call.
+
+    It does not fix a latched port on its own — the port picks a new call number
+    within a few seconds (173 → 175 → 181 was measured). It only buys the gap an
+    INVITE needs.
+    """
+    slot = PORT_NAMES.get(exten)
+    if slot is None:
+        raise ValueError(f"unknown extension {exten!r}")
+    gateway_run([f"clear voice-port {slot}"], limit=8.0)
+    return {"ok": True, "exten": exten, "slot": slot}
 
 
 def reset_port(exten: str) -> dict:
     """Force an FXS port back to Idle by bouncing it on the gateway.
 
-    A port latches in "Disconnecting" when the gateway still sees the loop
-    closed after a call ended — a handset left off-hook, a converter wired
-    across the line, a bad cable. While it is latched the port refuses
-    incoming calls with 503 and ignores anything dialled on it, and it does
-    not recover on its own. `shutdown` / `no shutdown` clears it.
+    A port latches after a call completes on it: it goes Busy with a call
+    number of its own, then Disconnecting, and starts generating `local` calls
+    that `show call history all` records as Local:InterdigitTimerExpired. While
+    it is latched it refuses incoming calls with 503 and does not recover on its
+    own. This is what makes a handset take one call and then no more.
+
+    Three steps, in this order, and all three matter:
+
+      1. `clear voice-port` kills the call the port has started for itself.
+         Bouncing a port while one of those is live is what makes `shutdown`
+         look like it is being ignored — the config takes, the port keeps
+         running.
+      2. `shutdown`, then a pause. The port has to stay down long enough to
+         drop its line feed; see RESET_DOWN_SECONDS.
+      3. `no shutdown`, then wait for Idle, because `no shutdown` returns before
+         the port is usable.
 
     This is the one write the panel makes to the gateway. It is spelled out
     here rather than allowed through gateway_run's command list on purpose:
@@ -620,10 +788,16 @@ def reset_port(exten: str) -> dict:
     if slot is None:
         raise ValueError(f"unknown extension {exten!r}")
 
+    # One gateway_run, with the pause expressed as a command, so the whole
+    # sequence stays inside a single locked telnet session. Split across two
+    # calls another thread's poll could land between them and be answered in
+    # configure mode, where "show voice port summary" is not a command.
     replies = gateway_run([
+        f"clear voice-port {slot}",
         "configure terminal",
         f"voice-port {slot}",
         "shutdown",
+        _SLEEP_STEP,
         "no shutdown",
         "exit",
         "exit",
@@ -641,6 +815,55 @@ def reset_port(exten: str) -> dict:
     status = _await_port_idle(slot)
 
     return {"ok": True, "exten": exten, "slot": slot, "status": status}
+
+
+# A reboot took 32, 36, 43 and 53 seconds to answer ping across four measured
+# runs, and the ports need a few seconds beyond that before they read Idle.
+# Waiting is the point of this call — the panel wants to know when the gateway
+# is usable again, not merely that the command was sent.
+REBOOT_TIMEOUT = 120.0
+REBOOT_POLL = 3.0
+
+
+def reboot_gateway() -> dict:
+    """Restart the whole gateway and wait until its ports are usable again.
+
+    This is the only known way to clear the fault where a port takes one call
+    and then refuses every later one with 486/503 — see "The open problem" in
+    voip/README.md. Bouncing the individual port does *not* clear it; the
+    gateway's own call log fills with Local:InterdigitTimerExpired within
+    seconds either way.
+
+    Every call in progress dies with the gateway, so the caller is expected to
+    have asked the operator first.
+    """
+    # The gateway drops the telnet session as it goes down, so the command
+    # never gets a reply and the usual "did it take" check cannot apply.
+    try:
+        gateway_run(["reboot"], limit=5.0)
+    except (OSError, AMIError):
+        pass
+    gateway_disconnect()
+
+    started = time.monotonic()
+    # Give it a moment to actually go down first: pinging too early answers
+    # from the gateway that is still on its way out.
+    time.sleep(REBOOT_POLL * 2)
+
+    deadline = started + REBOOT_TIMEOUT
+    while time.monotonic() < deadline:
+        try:
+            summary = gateway_run(["show voice port summary"], limit=6.0)
+            ports = parse_port_summary(summary[0][1])
+            if ports and all(p.get("state") == "Idle" for p in ports.values()):
+                return {"ok": True, "seconds": round(time.monotonic() - started, 1),
+                        "ports": len(ports)}
+        except (OSError, AMIError, IndexError):
+            gateway_disconnect()
+        time.sleep(REBOOT_POLL)
+
+    return {"ok": False, "seconds": round(time.monotonic() - started, 1),
+            "error": "шлюз не поднялся за отведённое время"}
 
 
 # How long to wait for a bounced port to come back. The gateway's own line-feed
@@ -669,6 +892,65 @@ def _await_port_idle(slot: str, timeout: float = PORT_IDLE_TIMEOUT) -> str:
         if status == "Idle" or time.monotonic() >= deadline:
             return status
         time.sleep(PORT_IDLE_POLL)
+
+
+# ── Releasing a port after every call ────────────────────────────────────
+#
+# The fault this exists for: a port that has carried one call starts reporting
+# the loop closed when it is not. It goes Busy with a call number of its own,
+# then Disconnecting, logs `local` calls as Local:InterdigitTimerExpired, and
+# refuses every INVITE after that. Nothing on the gateway prevents it — the
+# firmware is from 2008 and its own timers, tone detection and forced-clear-down
+# were all tried and either do nothing or make it worse (see voip/README.md).
+#
+# What does work is bouncing the port, and the moment to do it is the end of a
+# call. Asterisk knows when that happens; the gateway never volunteers it.
+
+# Extensions with a release in flight, so a burst of Hangup events for the two
+# legs of one call does not bounce the same port twice.
+_releasing: set[str] = set()
+_releasing_lock = threading.Lock()
+
+
+def _release_port_async(exten: str) -> None:
+    """Bounce a port after a call on it ended, off the AMI thread.
+
+    reset_port takes several seconds — the hold-down plus the wait for Idle —
+    and the AMI reader must not stall for that long or events pile up behind it.
+    Failures are swallowed on purpose: this is best-effort housekeeping, and the
+    next originate() resets the port again anyway.
+    """
+    if exten not in PORT_NAMES:
+        return
+    with _releasing_lock:
+        if exten in _releasing:
+            return
+        _releasing.add(exten)
+
+    def work() -> None:
+        try:
+            time.sleep(HANGUP_SETTLE_SECONDS)
+            # Another call may have started on the port in the meantime — a
+            # handset picked straight back up, or the panel dialling again.
+            # Bouncing then would cut a live call.
+            try:
+                ami = _ami_connect()
+                try:
+                    for entry in _active_channels(ami):
+                        if _exten_from_channel(entry["channel"]) == exten:
+                            return
+                finally:
+                    ami.close()
+            except (OSError, AMIError):
+                pass
+            reset_port(exten)
+        except (OSError, AMIError, ValueError):
+            pass
+        finally:
+            with _releasing_lock:
+                _releasing.discard(exten)
+
+    threading.Thread(target=work, daemon=True).start()
 
 
 # ── DTMF event stream ────────────────────────────────────────────────────
@@ -780,6 +1062,12 @@ class DigitWatcher:
                     "channel": channel,
                     "exten": exten,
                 }, cause=event.get("cause-txt", ""))
+                # The gateway latches the port when a call ends on it, whoever
+                # ended it, and never says so. This is the only moment the PBX
+                # knows a call is over, so it is where the port gets released —
+                # otherwise the next call to that handset is refused with 503
+                # and nothing explains why.
+                _release_port_async(exten)
             elif name == "Newstate":
                 # Трекер: изменение состояния
                 tracker.on_channel_state_change({
