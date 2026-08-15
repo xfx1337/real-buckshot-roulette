@@ -51,6 +51,32 @@
             opacity: 0.5;
             font-size: 18px;
         }
+        /* Телефонные карточки. Номер читают через комнату и набирают на диске,
+           поэтому он крупнее всего остального на экране, а цифры разрежены —
+           слитные легко перепутать при наборе. */
+        .phone-line {
+            font-size: 28px;
+            color: var(--text-color);
+            letter-spacing: 2px;
+            margin-bottom: 24px;
+        }
+        .phone-number {
+            font-size: 140px;
+            line-height: 1;
+            letter-spacing: 18px;
+            color: var(--green-bright);
+            text-shadow: 0 0 24px var(--green-glow);
+        }
+        .phone-timer {
+            margin-top: 28px;
+            font-size: 20px;
+            color: var(--text-color);
+            opacity: 0.65;
+        }
+        /* Входящий: мигает, потому что аппарат звонит и экран должен
+           говорить то же самое, что и звонки. */
+        .phone-ringing { animation: phone-blink 1s steps(2, start) infinite; }
+        @keyframes phone-blink { to { opacity: 0.25; } }
     </style>
 </head>
 <body class="page-player">
@@ -70,6 +96,14 @@
         <div id="result-view" class="hidden">
             <div class="player-name" id="result-player-name"></div>
             <div class="msg-display" id="result-msg"></div>
+        </div>
+
+        <!-- Телефонные карточки: показывается сразу, без нажатия. -->
+        <div id="phone-view" class="hidden">
+            <div class="player-name" id="phone-player-name"></div>
+            <div class="phone-line" id="phone-line"></div>
+            <div class="phone-number" id="phone-number"></div>
+            <div class="phone-timer" id="phone-timer"></div>
         </div>
     </div>
 
@@ -104,7 +138,14 @@
 
             ws.onmessage = (e) => {
                 const data = JSON.parse(e.data);
-                if (data.message) {
+                if (!data.message) return;
+                // instant — сообщение телефонной карточки. Скрывать его не от
+                // кого: игрок всё равно пойдёт набирать номер на глазах у
+                // стола, а лишнее нажатие съедает время, которое этому номеру
+                // отведено.
+                if (data.instant) {
+                    showPhone(data.player_name, data.message, data.item, data.seconds || 0);
+                } else {
                     showPrompt(data.player_name, data.message);
                 }
             };
@@ -117,9 +158,56 @@
         }
 
         function showIdle() {
+            stopPhoneTimer();
             document.getElementById('idle-view').classList.remove('hidden');
             document.getElementById('prompt-view').classList.add('hidden');
             document.getElementById('result-view').classList.add('hidden');
+            document.getElementById('phone-view').classList.add('hidden');
+        }
+
+        // ── телефонные карточки ──────────────────────────────────────────
+        let phoneTimer = null;
+
+        function stopPhoneTimer() {
+            if (phoneTimer) { clearInterval(phoneTimer); phoneTimer = null; }
+        }
+
+        function showPhone(playerName, msg, item, seconds) {
+            stopPhoneTimer();
+            document.getElementById('idle-view').classList.add('hidden');
+            document.getElementById('prompt-view').classList.add('hidden');
+            document.getElementById('result-view').classList.add('hidden');
+            document.getElementById('phone-view').classList.remove('hidden');
+
+            document.getElementById('phone-player-name').textContent = `For: ${playerName}`;
+
+            // Номер отделяется от текста, чтобы его можно было напечатать
+            // крупно: строка приходит как «НАБЕРИ НОМЕР 427», и цифры в конце
+            // — это то, что игрок будет крутить на диске.
+            const digits = (msg.match(/(\d{3,})\s*$/) || [])[1] || '';
+            const line = digits ? msg.slice(0, msg.length - digits.length).trim() : msg;
+
+            document.getElementById('phone-line').textContent = line;
+            const numberEl = document.getElementById('phone-number');
+            numberEl.textContent = digits;
+            // Входящий вызов номера не имеет: мигает сама строка, заодно с
+            // звонками аппарата.
+            document.getElementById('phone-line').classList.toggle(
+                'phone-ringing', item === 'magnifying_glass');
+
+            if (navigator.vibrate) navigator.vibrate(200);
+
+            const timerEl = document.getElementById('phone-timer');
+            if (!seconds) { timerEl.textContent = ''; return; }
+
+            let left = seconds;
+            const tick = () => {
+                timerEl.textContent = left > 0 ? `${left} с` : '';
+                if (left <= 0) { stopPhoneTimer(); showIdle(); return; }
+                left -= 1;
+            };
+            tick();
+            phoneTimer = setInterval(tick, 1000);
         }
 
         let currentMessage = '';

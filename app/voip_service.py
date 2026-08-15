@@ -30,6 +30,7 @@ import time
 from pathlib import Path
 from typing import Callable, Optional
 
+from app import phone_output
 from app.busy_tracker import get_tracker
 from app.voip_bridge import (
     VOIP_ROOT,
@@ -162,6 +163,17 @@ _history_lock = threading.Lock()
 _started = False
 _start_lock = threading.Lock()
 
+# Кто разбирает набранный номер до того, как это сделает АТС.
+#
+# Номера, которые набирают игроки, выдаёт игра и знает о них только она: они
+# не заведены ни в плане набора, ни в базе Asterisk. Так что телефония
+# спрашивает — «этот твой?» — и играет то, что ей вернут; None означает «не
+# мой», и номер идёт прежним путём, к слотам оператора.
+#
+# Ставится сервером игры (app/tts_bridge.py). Пока не поставлен, эта сторона
+# работает ровно как раньше, поэтому подсистему voip можно поднять и без игры.
+_game_number_handler: Optional[Callable[[str, str], Optional[dict]]] = None
+
 
 # ── рассылка событий ────────────────────────────────────────────────────
 
@@ -170,6 +182,17 @@ def set_sink(sink: Optional[Callable[[dict], None]]) -> None:
     global _sink
     with _sink_lock:
         _sink = sink
+
+
+def set_game_number_handler(
+        handler: Optional[Callable[[str, str], Optional[dict]]]) -> None:
+    """Назначить разбор набранных номеров игрой.
+
+    Вызывается с (трубка, номер) и возвращает результат, если номер игровой,
+    либо None, если нет.
+    """
+    global _game_number_handler
+    _game_number_handler = handler
 
 
 def _log_label(kind: str) -> str:
@@ -474,6 +497,13 @@ def start() -> None:
     board.subscribe(_on_handset_event)
     board.subscribe(_on_tracked_event)
     audio.player.on_finish = _on_audio_finish
+
+    # Звук трубки — на своё устройство, выбранное оператором. Без этого он идёт
+    # туда же, куда всё остальное: afplay играет только в системное устройство
+    # по умолчанию, а капсюль воткнут в ноутбук отдельным кабелем и по
+    # умолчанию почти никогда не является.
+    phone_output.install(audio)
+
     board.start()
 
     # Находки сторожа уходят в тот же поток событий, за которым уже следит
@@ -748,6 +778,105 @@ def play_audio(extension: str, choice: str, loop: bool = False) -> dict:
                            f"играет {sound.name} (без вызова)",
                            direction="outbound"))
     return {"ok": True, "playing": playing.as_dict()}
+
+
+# ── звуки, сгенерированные игрой ────────────────────────────────────────
+#
+# Синтезированная реплика — не файл из библиотеки оператора. Её никто не
+# бросал в voip/sounds/, её незачем там показывать, и живёт она ровно один
+# вызов: подсказка, названная вслух, после этого вызова не значит ничего.
+#
+# Поэтому она обходит sounds.resolve() и приходит сюда готовым путём. Всё
+# остальное — тот же тракт: тот же плеер, тот же капсюль, те же события на
+# панели, потому что для трубки разницы между синтезом и записью нет.
+
+def _generated(name: str, path: Path) -> "sounds.Sound":
+    """Обернуть готовый файл так, как остальной тракт ожидает звук.
+
+    sounds.Sound — это описание, а не владение файлом: путь, имя и
+    длительность. Синтезированная реплика уже имеет всё три, так что
+    конвертировать и публиковать её незачем — она и так в нужном формате
+    (tts/engine.py пишет 8 кГц моно), а публикация нужна только Asterisk,
+    который в этой ветке не участвует.
+    """
+    if not path.is_file():
+        raise VoipError(f"нет синтезированного файла: {path}", 500)
+    return sounds.Sound(name=name, source=path, converted=path,
+                        seconds=sounds._ffprobe_seconds(path))
+
+
+def play_generated(extension: str, name: str, path: Path, detail: str = "",
+                   ringback: bool = True) -> dict:
+    """Проиграть готовый файл в уже поднятую трубку.
+
+    Путь набора: человек держит трубку и только что набрал номер. Шлюз здесь
+    не нужен вовсе — звук идёт из джека, — а КПВ перед репликой нужен, потому
+    что набор без гудков звучит как номер, который не соединился.
+    """
+    check_extension(extension)
+    sound = _generated(name, path)
+
+    with _calls_lock:
+        _calls[extension] = {"busy": True, "sound": sound.name,
+                             "started": time.time(),
+                             "detail": detail or "идут гудки"}
+
+    _fan_out(monitor.Event("info", extension, detail or f"играет {sound.name}",
+                           direction="inbound"))
+
+    def answered(ext: str, played: str) -> None:
+        with _calls_lock:
+            _calls.setdefault(ext, {}).update(detail="говорит")
+        _fan_out(monitor.Event("info", ext, "соединено — говорит",
+                               direction="inbound"))
+
+    try:
+        if ringback:
+            audio.player.start_sequence(extension, tones.ringback(),
+                                        RINGBACK_SECONDS, sound.name,
+                                        sound.source, loop=False,
+                                        on_answer=answered)
+        else:
+            audio.player.start(extension, sound.name, sound.source, loop=False)
+    except (audio.AudioError, OSError) as exc:
+        with _calls_lock:
+            _calls.setdefault(extension, {}).update(
+                busy=False, ok=False, detail=str(exc), finished=time.time())
+        raise VoipError(f"звук не пошёл: {exc}", 500) from exc
+
+    return {"ok": True, "extension": extension, "sound": sound.name,
+            "ringback": RINGBACK_SECONDS if ringback else 0}
+
+
+def call_generated(extension: str, name: str, path: Path,
+                   ring: Optional[int] = None) -> dict:
+    """Позвонить на трубку и проиграть в неё готовый файл при ответе.
+
+    Единственное, ради чего шлюз здесь остаётся: вызывное напряжение на линии.
+    Звонки аппарата больше нечем зазвонить — считыватель на ESP только читает
+    рычаг и диск, выходов у него нет, — так что входящий вызов идёт прежним
+    путём, через _run_call.
+    """
+    check_extension(extension)
+    sound = _generated(name, path)
+    ring = int(ring if ring is not None else call.RING_SECONDS)
+
+    if _maintenance["busy"]:
+        raise VoipError("шлюз занят обслуживанием", 409)
+
+    with _calls_lock:
+        if _calls.get(extension, {}).get("busy"):
+            raise VoipError(f"на {extension} уже идёт вызов", 409)
+        _calls[extension] = {"busy": True, "sound": sound.name,
+                             "started": time.time(),
+                             "detail": "освобождение порта"}
+
+    _fan_out(monitor.Event("info", extension, "входящий вызов от игры",
+                           direction="outbound"))
+
+    threading.Thread(target=_run_call, args=(extension, sound, False, ring),
+                     name=f"call-{extension}", daemon=True).start()
+    return {"ok": True, "extension": extension, "sound": sound.name}
 
 
 def stop_audio(extension: Optional[str] = None) -> dict:
@@ -1082,6 +1211,28 @@ def dialer_event(extension: str, kind: str, detail: str = "") -> dict:
 
     # kind == "number": готовый номер, то есть просьба о звуке.
     #
+    # Сначала — номера, выданные игрой. Их не существует ни в плане набора, ни
+    # в базе АТС: игрок получил три цифры с экрана, и что они значат, решает
+    # игровой процесс. Поэтому проверка идёт до всего, что смотрит в Asterisk,
+    # — иначе выданный игрой номер отвергался бы как «не программируется»
+    # раньше, чем кто-нибудь спросил бы, чей он.
+    #
+    # Не игровой номер падает ниже, в прежний путь со слотами: оператору его
+    # оставили как есть — это то, чем проверяют тракт, когда игры нет.
+    if _game_number_handler is not None:
+        try:
+            handled = _game_number_handler(extension, detail)
+        except Exception as exc:                                # noqa: BLE001
+            # Игровая сторона не должна ронять телефонию: звонящий держит
+            # трубку, и отказ, который он слышит, лучше исключения, которое
+            # видит только журнал.
+            _fan_out(monitor.Event("error", extension,
+                                   f"игровой номер {detail}: {exc}",
+                                   direction="inbound"))
+            handled = None
+        if handled is not None:
+            return handled
+
     # Отказать можно тремя способами, и звонящий во всех трёх слышит одно и то
     # же, потому что из капсюля они одно и то же: номер ничего не играет. Какой
     # именно из трёх — принадлежит журналу, где оператор может на это

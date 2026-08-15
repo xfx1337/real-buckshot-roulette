@@ -10,6 +10,7 @@ import os
 import copy
 import platform
 import queue
+import random
 import re
 import sys
 import time
@@ -38,7 +39,9 @@ from app.game_engine import (
 from app import sound_config
 from app import video_config
 from app import audio_engine
-from app import voip_service
+from app import tts_bridge, voice_farm, voip_service
+
+import tts
 from app.sound_director import director as sound_director, loop_for_state
 
 import socket
@@ -279,6 +282,11 @@ def _sync_tv_mute():
         # музыку прямо поверх ролика. Выкидываем их, они уже неактуальны.
         _drain_sound_queue()
         for ch in sound_config.OUTPUT_CHANNELS:
+            # Кроме трубки: она звучит в одно ухо и к ролику на экране
+            # отношения не имеет. Глушить её здесь значило бы обрывать
+            # подсказку на полуслове у того, кто держит трубку.
+            if ch == "phone":
+                continue
             audio_engine.stop_channel(ch)
         sound_director.loop_key = None
     elif game and sound_director.enabled:
@@ -289,10 +297,25 @@ def _sync_tv_mute():
         except Exception as e:
             print(f"[audio] не удалось вернуть фон после ролика: {e}")
 
-async def notify_showscreen(message: str, player_name: str, item: str):
+async def notify_showscreen(message: str, player_name: str, item: str,
+                            instant: bool = False, seconds: int = 0):
+    """Показать сообщение на телевизоре.
+
+    instant=True выводит его сразу, без «нажми, чтобы прочитать». Тот шаг
+    существует ради секретности: подсказку читает один игрок, и экран не
+    должен выдать её всему столу раньше времени. Телефонные карточки секрета
+    не несут — номер, который надо набрать, всё равно услышит вся комната,
+    когда диск застучит, — а лишнее нажатие стоит игроку времени, которое
+    отсчитывает выданный номер.
+
+    seconds, если задано, — сколько номеру ещё жить: экран рисует по нему
+    обратный отсчёт, чтобы игрок видел, что тянуть нельзя.
+    """
     if not showscreen_ws_list:
         return
-    data = json.dumps({"message": message, "player_name": player_name, "item": item}, ensure_ascii=False)
+    data = json.dumps({"message": message, "player_name": player_name,
+                       "item": item, "instant": instant, "seconds": seconds},
+                      ensure_ascii=False)
     dead = []
     for ws in showscreen_ws_list:
         try:
@@ -861,6 +884,9 @@ async def create_game(
     elif game_mode == "story_one_round":
         game.config.rounds = [dict(r) for r in STORY_ONE_ROUND_DEFAULT_ROUNDS]
     undo_stack.clear()
+    # Номера прошлой игры не должны переживать её: они называют патроны из
+    # магазина, которого больше нет.
+    tts_bridge.end_round(None)
 
     # При старте новой игры переводим привязки компаса на символические цели,
     # чтобы калибровка оставалась действительной для новых UUID игроков и Дилера
@@ -1087,6 +1113,73 @@ async def shoot(target_id: str = Form(..., description="ID игрока-цели
         raise HTTPException(400, str(e))
 
 
+# ── телефонные карточки ─────────────────────────────────────────────────
+#
+# Телефон и лупа больше ничего не пишут на экран. Обе стали телефонным
+# звонком, и различаются они только тем, в какую сторону он идёт: телефон
+# заставляет игрока набрать номер, лупа звонит ему сама.
+#
+# Игровая часть от этого не изменилась: какой патрон раскрывается, решает
+# game_engine, как и раньше. Здесь только то, как игрок об этом узнаёт.
+#
+# Отказ телефонии не отменяет использование карточки. Предмет уже потрачен, и
+# откатывать ход из-за того, что шлюз не отозвался, было бы хуже: дилер видит,
+# что случилось, и может назвать подсказку голосом. Поэтому всё, что ниже,
+# сообщает об ошибке в ответе и на экране, но не поднимает её.
+
+async def _burner_number(player_id: str, result: dict) -> dict:
+    """Выдать игроку номер и показать его на телевизоре."""
+    player = game.players[player_id]
+    silent = result.get("index", 0) == -1
+
+    try:
+        ticket = await asyncio.to_thread(
+            tts_bridge.issue_number,
+            player_id=player_id, player_number=player.number,
+            round_id=game.current_round,
+            position=result.get("position", 0), total=result.get("total", 0),
+            shell=result.get("shell", ""), silent=silent,
+        )
+    except Exception as exc:                                    # noqa: BLE001
+        print(f"[tts] телефон: не удалось выдать номер: {exc}")
+        await notify_showscreen("ТЕЛЕФОН НЕ ОТВЕЧАЕТ", player.name,
+                                "burner_phone", instant=True)
+        return {"phone_error": str(exc)}
+
+    await notify_showscreen(tts.phrases.dial_instruction(ticket.number),
+                            player.name, "burner_phone", instant=True,
+                            seconds=int(ticket.seconds_left))
+    # Дилеру — тот же номер, что и игроку. Он сидит спиной к телевизору, а
+    # игрок, ошибившийся диском, спросит именно у него.
+    if game.last_burner_result:
+        game.last_burner_result = f"{game.last_burner_result} (номер {ticket.number})"
+    game._log(f">> #{player.number}: номер {ticket.number} на экране", "item")
+    return {"number": ticket.number, "seconds_left": ticket.seconds_left}
+
+
+async def _magnifier_call(player_id: str, result: dict) -> dict:
+    """Позвонить игроку и приготовить фразу про патрон в стволе."""
+    player = game.players[player_id]
+
+    try:
+        called = await asyncio.to_thread(
+            tts_bridge.ring_player,
+            player_id=player_id, player_number=player.number,
+            round_id=game.current_round, shell=result.get("shell", ""),
+        )
+    except Exception as exc:                                    # noqa: BLE001
+        print(f"[tts] лупа: не удалось позвонить: {exc}")
+        await notify_showscreen("ЛИНИЯ МОЛЧИТ", player.name,
+                                "magnifying_glass", instant=True)
+        return {"phone_error": str(exc)}
+
+    await notify_showscreen(tts.phrases.incoming_instruction(), player.name,
+                            "magnifying_glass", instant=True,
+                            seconds=tts_bridge.RING_SECONDS)
+    game._log(f">> #{player.number}: телефон звонит", "item")
+    return {"calling": called.get("extension", "")}
+
+
 @app.post(
     "/api/use_item",
     tags=["Dealer Actions"],
@@ -1134,8 +1227,7 @@ async def use_item(
             game.use_item_handcuffs(player_id, target_id)
         elif item == "magnifying_glass":
             result = game.use_item_magnifying_glass(player_id)
-            player_name = game.players[player_id].name
-            await notify_showscreen(f"Лупа показала:\n{result['display']}", player_name, "magnifying_glass")
+            result.update(await _magnifier_call(player_id, result))
         elif item == "cigarettes":
             game.use_item_cigarettes(player_id)
         elif item == "adrenaline":
@@ -1144,8 +1236,7 @@ async def use_item(
             result = game.use_item_adrenaline(player_id, target_id, stolen_item)
         elif item == "burner_phone":
             result = game.use_item_burner_phone(player_id)
-            player_name = game.players[player_id].name
-            await notify_showscreen(f"Телефон сообщил:\n{result['display']}", player_name, "burner_phone")
+            result.update(await _burner_number(player_id, result))
         elif item == "inverter":
             game.use_item_inverter(player_id)
         elif item == "medicine_vodka":
@@ -1270,7 +1361,12 @@ async def next_round():
     if not game:
         raise HTTPException(400, "Игра не создана")
     prev = copy.deepcopy(game)
+    ended = game.current_round
     game.next_round()
+    # Номера, выданные в закончившемся раунде, умирают вместе с ним: они
+    # называют патрон из магазина, которого больше нет, и набранный в новом
+    # раунде такой номер соврал бы игроку с полной уверенностью.
+    tts_bridge.end_round(ended)
     push_undo(prev)
     await broadcast_state()
     return {"ok": True}
@@ -2922,6 +3018,10 @@ def _voip_ensure_started() -> None:
     global _voip_loop
     _voip_loop = asyncio.get_running_loop()
     voip_service.set_sink(_voip_on_event)
+    # Разбор набранных номеров игрой. Ставится здесь, а не при импорте:
+    # обработчик имеет смысл только когда телефония поднята, и снимать его не
+    # приходится — он сам отвечает «не мой» на всё, чего игра не выдавала.
+    tts_bridge.install()
     voip_service.start()
 
 
@@ -2954,6 +3054,259 @@ async def voip_state():
     """
     _voip_ensure_started()
     return voip_service.snapshot()
+
+
+@app.get("/api/tts/state", tags=["VoIP"], summary="Голос и выданные номера", include_in_schema=False)
+async def tts_state():
+    """Готов ли синтез и какие номера сейчас можно набрать.
+
+    Дилеру нужно и то, и другое: голос, который не готов, — это карточка,
+    которая ничего не сделает, и знать об этом надо до игры, а не в тот
+    момент, когда игрок стоит у аппарата.
+    """
+    return await asyncio.to_thread(tts_bridge.status)
+
+
+@app.post("/api/tts/test", tags=["VoIP"], summary="Проверить голос в трубке", include_in_schema=False)
+async def tts_test(request: Request):
+    """Проиграть в трубку одну фразу тем голосом, которым говорит информатор.
+
+    Проверка всего тракта одним действием: файл, джек, капсюль. Играет без
+    гудков — трубку для этого поднимают заранее.
+
+    Произвольный текст сюда больше не передать: голос клонированный, и вся
+    озвучка сгенерирована заранее на машине с видеокартой (tts/pregenerate.py).
+    Поэтому дилер выбирает из тех фраз, которые игра и так умеет говорить, а
+    без выбора берётся случайная — этого достаточно, чтобы услышать, тот ли
+    это голос и доходит ли он до уха.
+    """
+    _voip_ensure_started()
+    try:
+        data = await request.json()
+    except Exception:
+        data = {}
+
+    voice = str(data.get("voice", "")).strip() or None
+    text = str(data.get("text", "")).strip()
+    if not text:
+        text = random.choice(tts.corpus.lines()).text
+
+    extension = str(data.get("extension", "")).strip() or tts_bridge.extension()
+
+    def run() -> dict:
+        speech = tts.engine.speak(text, voice=voice)
+        voip_service.play_generated(extension, name=speech.path.stem,
+                                    path=speech.path,
+                                    detail="проверка голоса", ringback=False)
+        return {"ok": True, "engine": speech.engine, "voice": speech.voice,
+                "text": speech.text, "extension": extension}
+
+    try:
+        return await asyncio.to_thread(run)
+    except tts.TTSError as exc:
+        raise HTTPException(500, str(exc))
+    except voip_service.VoipError as exc:
+        raise _voip_fail(exc)
+
+
+@app.get("/api/tts/voices", tags=["VoIP"], summary="Установленные голоса", include_in_schema=False)
+async def tts_voices():
+    """Какими голосами эта машина умеет говорить.
+
+    Голос — это каталог заранее сгенерированных фраз, скопированный с машины,
+    где есть видеокарта. Поэтому здесь же видно, сколько фраз реально лежит на
+    диске против того, сколько их должно быть: скопированный наполовину голос
+    молчит ровно на той фразе, которой не хватает, и узнать об этом надо до
+    игры.
+    """
+    return await asyncio.to_thread(tts.engine.available)
+
+
+@app.post("/api/tts/voice", tags=["VoIP"], summary="Выбрать голос", include_in_schema=False)
+async def tts_voice(request: Request):
+    """Переключить информатора на другой голос.
+
+    Действует со следующей фразы. То, что уже выдано и лежит взведённым в
+    телефонии, доиграет прежним голосом — переигрывать это на полпути значило
+    бы менять голос посреди подсказки.
+    """
+    try:
+        data = await request.json()
+    except Exception:
+        data = {}
+    name = str(data.get("voice", "")).strip()
+    if not name:
+        raise HTTPException(400, "Не указан голос")
+
+    def run() -> dict:
+        tts.use_voice(name)
+        absent = tts.engine.missing(name)
+        return {"ok": True, "voice": name, "missing": len(absent)}
+
+    try:
+        return await asyncio.to_thread(run)
+    except tts.TTSError as exc:
+        raise HTTPException(400, str(exc))
+
+
+# ── Клонирование голосов ───────────────────────────────────────────────────
+#
+# Всё, что ниже, — тонкая передача на машину с видеокартой (app/voice_farm.py).
+# Игровой сервер сам не клонирует и модель не грузит: он в этом разговоре
+# посредник между вкладкой дилера и фермой.
+
+@app.get("/api/voices/farm", tags=["VoIP"], summary="Состояние машины с видеокартой", include_in_schema=False)
+async def voices_farm():
+    """Есть ли ферма, на чём она считает и что умеет.
+
+    Отвечает и когда фермы нет: «не настроена» и «не отвечает» — разные беды,
+    и для того, кто смотрит в панель, разница решает, чинить сеть или вписать
+    адрес.
+    """
+    try:
+        return await asyncio.to_thread(voice_farm.health)
+    except voice_farm.FarmError as exc:
+        return {"ok": False, "configured": voice_farm.configured(),
+                "url": voice_farm.FARM, "error": str(exc)}
+
+
+@app.get("/api/voices/jobs", tags=["VoIP"], summary="Голоса в работе", include_in_schema=False)
+async def voices_jobs():
+    """Что происходит с каждым голосом на ферме, и какие уже стоят здесь."""
+    try:
+        state = await asyncio.to_thread(voice_farm.voices)
+    except voice_farm.FarmError as exc:
+        state = {"jobs": [], "installed": [], "configured": voice_farm.configured(),
+                 "error": str(exc)}
+    # Голоса, установленные за столом, — отдельный факт: голос может быть готов
+    # на ферме и ещё не скачан сюда, и наоборот.
+    state["local"] = await asyncio.to_thread(tts.engine.available)
+    return state
+
+
+@app.post("/api/voices/upload", tags=["VoIP"], summary="Загрузить запись голоса", include_in_schema=False)
+async def voices_upload(name: str = Form(...), file: UploadFile = File(...),
+                        song: str = Form("0"), seconds: int = Form(30)):
+    """Отправить запись на ферму и вырезать из неё образец.
+
+    Отсюда голос ещё не звучит: образец — это то, на что XTTS будет опираться,
+    и услышать надо не его, а пробные фразы, которые он породит.
+    """
+    content = await file.read()
+    if not content:
+        raise HTTPException(400, "Пустой файл")
+    if len(content) > 200 * 1024 * 1024:
+        raise HTTPException(400, f"Файл больше 200 МБ: {len(content) // 1024 // 1024} МБ")
+
+    try:
+        return await asyncio.to_thread(
+            voice_farm.upload, name, file.filename or "voice.mp3", content,
+            song=song in ("1", "true", "on"), seconds=seconds)
+    except voice_farm.FarmError as exc:
+        raise HTTPException(502, str(exc))
+
+
+@app.post("/api/voices/audition", tags=["VoIP"], summary="Сгенерировать пробные фразы", include_in_schema=False)
+async def voices_audition(request: Request):
+    """Наговорить несколько фраз этим голосом, чтобы было что послушать.
+
+    Сколько именно — решает дилер: по одной фразе не всегда видно, повезло
+    клону или он действительно похож, и обычная причина нажать ещё раз —
+    что предыдущих не хватило, чтобы решить.
+    """
+    data = await request.json()
+    name = str(data.get("name", "")).strip()
+    count = int(data.get("count", 3))
+    if not name:
+        raise HTTPException(400, "Не указан голос")
+    try:
+        return await asyncio.to_thread(voice_farm.audition, name, count)
+    except voice_farm.FarmError as exc:
+        raise HTTPException(502, str(exc))
+
+
+@app.post("/api/voices/approve", tags=["VoIP"], summary="Утвердить голос и генерировать всё", include_in_schema=False)
+async def voices_approve(request: Request):
+    """Дилер сказал «да». Ферма начинает всю тысячу фраз."""
+    data = await request.json()
+    name = str(data.get("name", "")).strip()
+    if not name:
+        raise HTTPException(400, "Не указан голос")
+    try:
+        return await asyncio.to_thread(voice_farm.approve, name)
+    except voice_farm.FarmError as exc:
+        raise HTTPException(502, str(exc))
+
+
+@app.post("/api/voices/reject", tags=["VoIP"], summary="Перерезать образец заново", include_in_schema=False)
+async def voices_reject(request: Request):
+    """Не тот кусок записи. Взять другой и переслушать.
+
+    Обычный ход, а не ошибка: с первого раза попадает не всегда, и вернуться
+    на шаг назад должно стоить одного нажатия.
+    """
+    data = await request.json()
+    name = str(data.get("name", "")).strip()
+    if not name:
+        raise HTTPException(400, "Не указан голос")
+    try:
+        return await asyncio.to_thread(voice_farm.reject, name,
+                                       data.get("seconds"))
+    except voice_farm.FarmError as exc:
+        raise HTTPException(502, str(exc))
+
+
+@app.post("/api/voices/fetch", tags=["VoIP"], summary="Забрать готовый голос за стол", include_in_schema=False)
+async def voices_fetch(request: Request):
+    """Скачать сгенерированный голос с фермы и поставить его здесь.
+
+    До этого момента голос существует только на машине с видеокартой. Скачать
+    его — это и есть «поставить за стол»: дальше игра говорит им уже без сети.
+    """
+    data = await request.json()
+    name = str(data.get("name", "")).strip()
+    if not name:
+        raise HTTPException(400, "Не указан голос")
+    try:
+        return await asyncio.to_thread(voice_farm.fetch, name)
+    except voice_farm.FarmError as exc:
+        raise HTTPException(502, str(exc))
+
+
+@app.get("/api/voices/audition/{name}/{filename}", tags=["VoIP"], summary="Проиграть пробную фразу", include_in_schema=False)
+async def voices_audition_file(name: str, filename: str):
+    """Отдать пробную фразу браузеру.
+
+    Через игровой сервер, а не напрямую с фермы: браузер дилера может не
+    видеть ферму вовсе — она бывает за туннелем, — а сервер её видит по
+    определению, иначе ничего из этого не работало бы.
+    """
+    def run() -> Response:
+        url = voice_farm.audition_url(name, filename)
+        with urllib.request.urlopen(url, timeout=60) as response:
+            return Response(content=response.read(), media_type="audio/wav")
+
+    try:
+        return await asyncio.to_thread(run)
+    except voice_farm.FarmError as exc:
+        raise HTTPException(502, str(exc))
+    except Exception as exc:                                    # noqa: BLE001
+        raise HTTPException(502, f"не получить пробную фразу: {exc}")
+
+
+@app.delete("/api/voices/{name}", tags=["VoIP"], summary="Забыть голос в работе", include_in_schema=False)
+async def voices_forget(name: str):
+    """Убрать недоделанный голос с фермы. Готовые фразы это не трогает."""
+    try:
+        return await asyncio.to_thread(voice_farm.forget, name)
+    except voice_farm.FarmError as exc:
+        raise HTTPException(502, str(exc))
+
+
+@app.post("/api/tts/clear", tags=["VoIP"], summary="Сбросить выданные номера", include_in_schema=False)
+async def tts_clear():
+    """Убить все живые номера. Для дилера, когда что-то пошло не так."""
+    return {"ok": True, "cleared": await asyncio.to_thread(tts_bridge.end_round, None)}
 
 
 @app.get("/api/voip/health", tags=["VoIP"], summary="Состояние АТС, шлюза и портов", include_in_schema=False)

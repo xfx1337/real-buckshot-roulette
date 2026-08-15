@@ -4442,6 +4442,8 @@
                         title="Принудительно щёлкнуть соленоидом на плате">⚡</button>
                     <button class="btn btn-plate plate-teal btn-small" onclick="openAudioConfig()"
                         title="Настройки звука / озвучки">🔊</button>
+                    <button class="btn btn-plate plate-teal btn-small" onclick="openVoiceConfig()"
+                        title="Голоса информатора: клонирование и выбор">🎙</button>
                     <button class="btn btn-plate plate-teal btn-small" onclick="openServerConfig()"
                         title="Настройки сервера и ESP32">⚙</button>
                     <button class="btn btn-danger btn-small" onclick="forceEnd()">ЗАВЕРШИТЬ</button>
@@ -5219,6 +5221,34 @@
                             </div>
                             <p class="scfg-note" id="aud-server-note">Загрузка…</p>
                         </div>
+                        <!-- Трубка телефона: свой кабель в ноутбук, свой выход. -->
+                        <div class="aud-outs" id="aud-phone-box">
+                            <div class="aud-outs-head">
+                                <span>ТЕЛЕФОННАЯ ТРУБКА</span>
+                                <button class="btn btn-small btn-tiny" onclick="refreshPhoneOutput()"
+                                    title="Обновить список устройств">⟲</button>
+                            </div>
+                            <div class="scfg-row aud-out-row">
+                                <label for="aud-srv-phone">Капсюль трубки</label>
+                                <select id="aud-srv-phone" onchange="onServerDeviceChange('phone', this)">
+                                    <option value="">Системное по умолчанию</option>
+                                </select>
+                                <button class="btn btn-small btn-tiny" onclick="testPhoneOutput()"
+                                    title="Сказать проверочную фразу в трубку">▶</button>
+                            </div>
+                            <!-- Чьим голосом говорит информатор. Каталог заранее
+                                 сгенерированных фраз; см. tts/README.md. -->
+                            <div class="scfg-row aud-out-row">
+                                <label for="aud-phone-voice">Голос информатора</label>
+                                <select id="aud-phone-voice" onchange="onVoiceChange(this)">
+                                    <option value="">Загрузка…</option>
+                                </select>
+                                <button class="btn btn-small btn-tiny" onclick="speakToPhone()"
+                                    title="Сказать случайную игровую фразу в трубку">▶</button>
+                            </div>
+                            <p class="scfg-note" id="aud-voice-note">Загрузка…</p>
+                            <p class="scfg-note" id="aud-phone-note">Загрузка…</p>
+                        </div>
                         <!-- Раздельный вывод: эффекты в наушники, видеоролики в динамики. -->
                         <div class="aud-outs">
                             <div class="aud-outs-head">
@@ -5274,6 +5304,78 @@
                     <div class="scfg-foot">
                         <span class="scfg-note" style="flex:1; text-align:center;">Очередь выстрелов (сверху
                             вниз)</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Модалка «Голоса информатора».
+                 Клонирование идёт на машине с видеокартой, здесь только разговор
+                 с ней: загрузить запись, послушать, утвердить, забрать. -->
+            <div id="voice-config-modal" class="scfg-overlay" style="display:none; z-index:210;">
+                <div class="scfg-box" style="width:620px; max-height:86vh; overflow-y:auto;">
+                    <div class="scfg-head">
+                        <h2>ГОЛОСА ИНФОРМАТОРА</h2>
+                        <button class="btn btn-small btn-tiny" onclick="refreshVoicePanel()"
+                            title="Обновить">⟲</button>
+                        <button class="btn btn-small" onclick="closeVoiceConfig()">✕</button>
+                    </div>
+                    <div class="scfg-body">
+                        <p class="scfg-note" id="vc-farm-note" style="margin-bottom:12px;">Загрузка…</p>
+
+                        <!-- Готовые голоса: те, которыми игра умеет говорить прямо сейчас. -->
+                        <div class="aud-outs">
+                            <div class="aud-outs-head"><span>УСТАНОВЛЕНЫ ЗА СТОЛОМ</span></div>
+                            <div id="vc-installed" style="display:flex; flex-direction:column; gap:6px;">
+                                <p class="scfg-note">Загрузка…</p>
+                            </div>
+                        </div>
+
+                        <!-- Голоса в работе: от загруженной записи до готовой тысячи фраз. -->
+                        <div class="aud-outs" style="margin-top:12px;">
+                            <div class="aud-outs-head"><span>В РАБОТЕ НА ФЕРМЕ</span></div>
+                            <div id="vc-jobs" style="display:flex; flex-direction:column; gap:10px;">
+                                <p class="scfg-note">Загрузка…</p>
+                            </div>
+                        </div>
+
+                        <!-- Новый голос. Отсюда начинается весь путь. -->
+                        <div class="aud-outs" style="margin-top:12px;">
+                            <div class="aud-outs-head"><span>ДОБАВИТЬ ГОЛОС</span></div>
+                            <div class="scfg-row aud-out-row">
+                                <label for="vc-name">Имя</label>
+                                <input type="text" id="vc-name" placeholder="dealer"
+                                    style="flex:1; min-width:0;">
+                            </div>
+                            <div class="scfg-row aud-out-row">
+                                <label for="vc-file">Запись</label>
+                                <input type="file" id="vc-file" accept="audio/*,video/*"
+                                    style="flex:1; min-width:0;">
+                            </div>
+                            <div class="scfg-row aud-out-row"
+                                style="align-items:center; justify-content:flex-start; gap:8px;">
+                                <input type="checkbox" id="vc-song"
+                                    style="width:16px; height:16px; margin:0; cursor:pointer;">
+                                <label for="vc-song"
+                                    style="cursor:pointer; user-select:none; margin:0; font-size:13px;">
+                                    Это песня — отделить голос от музыки</label>
+                            </div>
+                            <div class="scfg-row aud-out-row">
+                                <label for="vc-seconds">Длина образца</label>
+                                <input type="number" id="vc-seconds" value="30" min="6" max="90"
+                                    style="width:70px;">
+                                <span class="scfg-note" style="flex:1;">секунд чистой речи</span>
+                                <button class="btn btn-small" id="vc-upload-btn"
+                                    onclick="uploadVoice()">ЗАГРУЗИТЬ</button>
+                            </div>
+                            <p class="scfg-note" id="vc-upload-note">
+                                Годится разговор или песня, 1–3 минуты. Чем чище запись, тем
+                                похожее клон. Голос должен говорить по-русски: акцент тянется
+                                из образца.
+                            </p>
+                        </div>
+                    </div>
+                    <div class="scfg-foot">
+                        <span class="scfg-note" id="vc-msg" style="flex:1;">&nbsp;</span>
                     </div>
                 </div>
             </div>
@@ -6548,6 +6650,8 @@
             loadAudioConfig();
             refreshAudioOutputs();
             refreshServerAudio();
+            refreshPhoneOutput();
+            refreshVoices();
         }
         function closeAudioConfig() {
             document.getElementById('audio-config-modal').style.display = 'none';
@@ -6635,6 +6739,461 @@
             note.textContent = msg;
         }
 
+        // ── Телефонная трубка ──
+        // Капсюль подключён к ноутбуку своим кабелем и по умолчанию системным
+        // устройством не является, поэтому у него отдельный выход. Он работает
+        // независимо от галки «звук из Python»: голос в трубку в любом случае
+        // играет сервер — браузер к этому кабелю доступа не имеет.
+        async function refreshPhoneOutput() {
+            const sel = document.getElementById('aud-srv-phone');
+            const note = document.getElementById('aud-phone-note');
+            const box = document.getElementById('aud-phone-box');
+            if (!sel || !note) return;
+            let d;
+            try {
+                const r = await fetch('/api/audio/server?t=' + Date.now());
+                d = await r.json();
+            } catch (e) {
+                note.textContent = '✗ Не удалось получить список устройств: ' + e.message;
+                return;
+            }
+
+            const eng = (d.director && d.director.engine) || {};
+            if (eng.error) {
+                box.classList.add('unsupported');
+                sel.disabled = true;
+                note.textContent = 'Выбор устройства недоступен: ' + eng.error
+                    + '. Без него трубка играет в системное устройство по умолчанию.';
+                return;
+            }
+            box.classList.remove('unsupported');
+            sel.disabled = false;
+
+            const devices = d.devices || [];
+            const want = (d.outputs && d.outputs.phone) || '';
+            sel.innerHTML = '<option value="">Системное по умолчанию</option>'
+                + devices.map(x => `<option value="${x.name}">${x.name}</option>`).join('');
+            if (want && !devices.some(x => x.name === want)) {
+                sel.innerHTML += `<option value="${want}">⚠ ${want} (недоступно)</option>`;
+            }
+            sel.value = want;
+
+            const ch = (eng.channels && eng.channels.phone) || {};
+            note.textContent = ch.open
+                ? '▶ Голос в трубке идёт на: ' + (ch.device || 'системное устройство по умолчанию')
+                + '. Сюда же уходят гудки, КПВ и сигнал «занято».'
+                : '✗ Канал трубки не открылся' + (ch.error ? ': ' + ch.error : '')
+                + ' — звук уйдёт в системное устройство по умолчанию.';
+        }
+
+        // Сказать в трубку одну игровую фразу. Произвольный текст сюда не
+        // передать: голос клонированный, вся озвучка сгенерирована заранее на
+        // машине с видеокартой, и фразы, которой нет на диске, не существует.
+        // Без выбора сервер берёт случайную — этого хватает, чтобы услышать,
+        // тот ли это голос и доходит ли он до уха.
+        async function speakToPhone() {
+            const sel = document.getElementById('aud-phone-voice');
+            const voice = sel ? sel.value : '';
+            try {
+                const r = await fetch('/api/tts/test', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(voice ? { voice } : {}),
+                });
+                if (!r.ok) {
+                    const err = await r.json().catch(() => ({}));
+                    throw new Error(err.detail || ('HTTP ' + r.status));
+                }
+                const d = await r.json();
+                audioMsg('▶ ' + (d.voice || '—') + ': «' + (d.text || '')
+                    + '». Снимите трубку.', true);
+            } catch (e) {
+                audioMsg('✗ ' + e.message, false);
+            }
+        }
+
+        function testPhoneOutput() {
+            return speakToPhone();
+        }
+
+        // Какими голосами машина умеет говорить. Голос — это каталог заранее
+        // сгенерированных фраз, скопированный с машины с видеокартой, поэтому
+        // здесь же видно недокопированный: у него на диске меньше фраз, чем
+        // игра может произнести, и молчать он начнёт ровно на недостающей.
+        async function refreshVoices() {
+            const sel = document.getElementById('aud-phone-voice');
+            const note = document.getElementById('aud-voice-note');
+            if (!sel || !note) return;
+            try {
+                const r = await fetch('/api/tts/voices');
+                if (!r.ok) throw new Error('HTTP ' + r.status);
+                const d = await r.json();
+                const voices = d.voices || [];
+
+                if (!voices.length) {
+                    sel.innerHTML = '<option value="">Нет голосов</option>';
+                    sel.disabled = true;
+                    note.textContent = '✗ Ни одного голоса не установлено. Голоса'
+                        + ' готовятся заранее на машине с видеокартой и копируются'
+                        + ' в ' + (d.cache || 'tts/cache/') + ' — см. tts/README.md.';
+                    return;
+                }
+
+                sel.disabled = false;
+                sel.innerHTML = voices.map(v => {
+                    const short = v.expected && v.phrases < v.expected
+                        ? ' ⚠ ' + v.phrases + '/' + v.expected : '';
+                    return `<option value="${v.name}">${v.name}${short}</option>`;
+                }).join('');
+                sel.value = d.voice || voices[0].name;
+
+                const active = voices.find(v => v.active) || {};
+                const lack = (d.expected || 0) - (d.phrases || 0);
+                note.textContent = d.ready
+                    ? '▶ Голос «' + (d.voice || '—') + '»: все ' + d.expected
+                      + ' фраз на месте' + (active.source ? ', образец ' + active.source : '') + '.'
+                    : '⚠ Голосу «' + (d.voice || '—') + '» не хватает ' + lack
+                      + ' фраз из ' + d.expected + '. Игрок услышит сбой на той,'
+                      + ' которой нет — перегенерируйте голос и скопируйте каталог целиком.';
+            } catch (e) {
+                sel.innerHTML = '<option value="">Ошибка</option>';
+                note.textContent = '✗ Не удалось получить список голосов: ' + e.message;
+            }
+        }
+
+        // ── Вкладка голосов ────────────────────────────────────────────
+        //
+        // Клонирование идёт на машине с видеокартой. Здесь — разговор с ней:
+        // загрузить запись, послушать, что вышло, утвердить или перерезать
+        // образец, и забрать готовое за стол. Пока голос считается, вкладка
+        // сама себя перечитывает: генерация тысячи фраз идёт десятки минут, и
+        // сидеть над кнопкой «обновить» всё это время незачем.
+
+        let voicePollTimer = null;
+
+        function voiceMsg(text, ok) {
+            const el = document.getElementById('vc-msg');
+            if (!el) return;
+            el.textContent = text;
+            el.style.color = ok ? 'var(--green,#3fef6a)' : 'var(--orange,#ffa438)';
+        }
+
+        function openVoiceConfig() {
+            document.getElementById('voice-config-modal').style.display = 'flex';
+            if (window.SoundEngine) SoundEngine.play('ui_settings_open');
+            refreshVoicePanel();
+        }
+
+        function closeVoiceConfig() {
+            document.getElementById('voice-config-modal').style.display = 'none';
+            if (voicePollTimer) { clearTimeout(voicePollTimer); voicePollTimer = null; }
+            if (window.SoundEngine) SoundEngine.play('ui_settings_close');
+        }
+
+        // Что стадия значит для того, кто на неё смотрит. Словами, а не кодом:
+        // «sample» ничего не говорит, «образец готов — послушайте» говорит всё.
+        const VOICE_STAGES = {
+            uploaded:    ['Запись загружена', 'ждёт нарезки'],
+            preparing:   ['Готовлю образец', 'отделяю голос и режу кусок'],
+            sample:      ['Образец готов', 'сделайте пробные фразы и послушайте'],
+            auditioning: ['Наговариваю пробные фразы', ''],
+            review:      ['Ждёт вашего решения', 'послушайте и утвердите'],
+            generating:  ['Генерирую всю озвучку', 'это десятки минут'],
+            ready:       ['Готов на ферме', 'заберите за стол'],
+            failed:      ['Ошибка', ''],
+        };
+
+        async function refreshVoicePanel() {
+            const modal = document.getElementById('voice-config-modal');
+            if (!modal || modal.style.display === 'none') return;
+
+            try {
+                const r = await fetch('/api/voices/jobs');
+                if (!r.ok) throw new Error('HTTP ' + r.status);
+                const d = await r.json();
+
+                renderFarmNote(d);
+                renderInstalled(d.local || {});
+                renderJobs(d.jobs || []);
+
+                // Пока что-то считается — перечитывать само. Три секунды:
+                // прослушивание занимает секунд десять на фразу, и на пяти
+                // прогресс успевает выглядеть застывшим.
+                const busy = (d.jobs || []).some(j => j.busy);
+                if (voicePollTimer) clearTimeout(voicePollTimer);
+                voicePollTimer = busy ? setTimeout(refreshVoicePanel, 3000) : null;
+            } catch (e) {
+                document.getElementById('vc-farm-note').textContent =
+                    '✗ Не получить состояние: ' + e.message + ' — пробую снова';
+                // Один обрыв не должен останавливать всё: без этого панель
+                // замирает на том, что успела показать, и голос выглядит
+                // потерянным, хотя на ферме он считается дальше.
+                if (voicePollTimer) clearTimeout(voicePollTimer);
+                voicePollTimer = setTimeout(refreshVoicePanel, 5000);
+            }
+        }
+
+        function renderFarmNote(d) {
+            const note = document.getElementById('vc-farm-note');
+            if (d.configured === false) {
+                note.textContent = '✗ Машина с видеокартой не настроена. Запустите на ней'
+                    + ' `python -m tts.farm` и укажите её адрес в TTS_FARM на игровом сервере.'
+                    + ' Без неё новые голоса добавить нельзя, а уже установленные работают.';
+                return;
+            }
+            if (d.error) { note.textContent = '✗ Ферма не отвечает: ' + d.error; return; }
+            note.textContent = '▶ Ферма на связи. Клонирование и генерация идут там,'
+                + ' за столом остаются только готовые фразы.';
+        }
+
+        function renderInstalled(local) {
+            const box = document.getElementById('vc-installed');
+            const list = local.voices || [];
+            if (!list.length) {
+                box.innerHTML = '<p class="scfg-note">Ни одного голоса. Игра будет молчать'
+                    + ' на телефоне и лупе.</p>';
+                return;
+            }
+            box.innerHTML = list.map(v => {
+                const short = v.expected && v.phrases < v.expected;
+                const mark = v.active ? '● ' : '○ ';
+                const state = short
+                    ? `<span style="color:var(--orange,#ffa438);">⚠ ${v.phrases}/${v.expected}</span>`
+                    : `<span style="color:var(--green,#3fef6a);">${v.phrases} фраз</span>`;
+                return `<div class="scfg-row aud-out-row" style="align-items:center;">
+                    <label style="flex:1;">${mark}${v.name}</label>
+                    ${state}
+                    <button class="btn btn-small btn-tiny" onclick="playVoiceSample('${v.name}')"
+                        title="Сказать случайную игровую фразу в трубку">▶</button>
+                    <button class="btn btn-small btn-tiny" onclick="pickVoice('${v.name}')"
+                        title="Сделать голосом информатора">✓</button>
+                </div>`;
+            }).join('');
+        }
+
+        // Что в этом списке видно глазу. Перерисовка на каждом опросе сбрасывает
+        // загрузку <audio> и рвёт воспроизведение, а опрос идёт раз в три
+        // секунды — то есть пробную фразу нельзя было бы дослушать. Поэтому
+        // рисуем, только когда что-то действительно изменилось.
+        let voiceJobsSignature = '';
+
+        function renderJobs(list) {
+            const box = document.getElementById('vc-jobs');
+            if (!list.length) {
+                if (voiceJobsSignature !== 'empty') {
+                    box.innerHTML = '<p class="scfg-note">Пусто. Загрузите запись ниже.</p>';
+                    voiceJobsSignature = 'empty';
+                }
+                return;
+            }
+
+            const signature = list.map(j => [j.name, j.stage, j.progress, j.total,
+                (j.auditions || []).join(','), j.error].join('|')).join(';;');
+            if (signature === voiceJobsSignature) return;
+            voiceJobsSignature = signature;
+
+            box.innerHTML = list.map(j => {
+                const [title, hint] = VOICE_STAGES[j.stage] || [j.stage, ''];
+                const progress = j.total
+                    ? ` — ${j.progress}/${j.total} (${j.percent}%)` : '';
+                const error = j.error
+                    ? `<p class="scfg-note" style="color:var(--orange,#ffa438);">${j.error}</p>` : '';
+
+                // Пробные фразы: слушать прямо здесь, вместе с текстом — иначе
+                // непонятно, голос плохой или фраза попалась неудачная.
+                // Пока идёт наговаривание, плееры не показываем вовсе: фраза
+                // на середине генерации проигрывается обрезанной, и это читается
+                // как испорченный голос, а не как незаконченная работа.
+                const auditions = j.stage === 'auditioning' ? '' :
+                    (j.auditions || []).map((f, i) => `
+                    <div style="display:flex; align-items:center; gap:8px; margin-top:4px;">
+                        <audio controls preload="none" style="height:30px; flex:0 0 220px;"
+                            src="/api/voices/audition/${j.name}/${f}"></audio>
+                        <span class="scfg-note" style="flex:1; font-size:11px;">
+                            ${(j.audition_texts || [])[i] || ''}</span>
+                    </div>`).join('');
+
+                let actions = '';
+                if (j.stage === 'sample' || j.stage === 'review') {
+                    actions = `
+                        <button class="btn btn-small btn-tiny" onclick="auditionVoice('${j.name}', 3)">
+                            ПРОБНЫЕ ФРАЗЫ</button>
+                        <button class="btn btn-small btn-tiny" onclick="auditionVoice('${j.name}', 6)"
+                            title="Больше фраз — по одной не всегда понятно">ЕЩЁ 6</button>`;
+                    if (j.stage === 'review') {
+                        actions += `
+                        <button class="btn btn-small" onclick="approveVoice('${j.name}')"
+                            title="Начать генерацию всей озвучки">УТВЕРДИТЬ</button>
+                        <button class="btn btn-small btn-tiny" onclick="rejectVoice('${j.name}')"
+                            title="Взять другой кусок записи">ПЕРЕРЕЗАТЬ</button>`;
+                    }
+                } else if (j.stage === 'ready') {
+                    actions = `<button class="btn btn-small" onclick="fetchVoice('${j.name}')">
+                        ЗАБРАТЬ ЗА СТОЛ</button>`;
+                } else if (j.stage === 'failed') {
+                    actions = `<button class="btn btn-small btn-tiny" onclick="rejectVoice('${j.name}')">
+                        ПОПРОБОВАТЬ СНОВА</button>`;
+                }
+                actions += `<button class="btn btn-small btn-tiny" onclick="forgetVoice('${j.name}')"
+                    title="Убрать с фермы">✕</button>`;
+
+                return `<div style="border-left:2px solid var(--green,#3fef6a); padding-left:8px;">
+                    <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+                        <strong style="flex:0 0 auto;">${j.name}</strong>
+                        <span class="scfg-note" style="flex:1;">${title}${progress}
+                            ${hint ? '— ' + hint : ''}</span>
+                        ${actions}
+                    </div>
+                    ${error}${auditions}
+                </div>`;
+            }).join('');
+        }
+
+        async function voicePost(url, payload, okText) {
+            try {
+                const r = await fetch(url, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload),
+                });
+                if (!r.ok) {
+                    const err = await r.json().catch(() => ({}));
+                    throw new Error(err.detail || ('HTTP ' + r.status));
+                }
+                voiceMsg(okText, true);
+                refreshVoicePanel();
+                return await r.json();
+            } catch (e) {
+                voiceMsg('✗ ' + e.message, false);
+            }
+        }
+
+        const auditionVoice = (name, count) =>
+            voicePost('/api/voices/audition', { name, count },
+                '▶ Наговариваю ' + count + ' фраз(ы) — послушайте, когда появятся');
+
+        const approveVoice = (name) =>
+            voicePost('/api/voices/approve', { name },
+                '▶ Пошла генерация всей озвучки. Это десятки минут.');
+
+        const rejectVoice = (name) =>
+            voicePost('/api/voices/reject', { name },
+                '▶ Режу образец заново из другого места записи');
+
+        const fetchVoice = (name) =>
+            voicePost('/api/voices/fetch', { name },
+                '▶ Качаю голос за стол. Тысяча фраз — это не мгновенно.');
+
+        async function forgetVoice(name) {
+            if (!confirm('Убрать голос «' + name + '» с фермы?\n\n'
+                + 'Уже сгенерированные и скачанные за стол фразы это не тронет.')) return;
+            try {
+                const r = await fetch('/api/voices/' + name, { method: 'DELETE' });
+                if (!r.ok) throw new Error('HTTP ' + r.status);
+                voiceMsg('✓ Убран: ' + name, true);
+                refreshVoicePanel();
+            } catch (e) {
+                voiceMsg('✗ ' + e.message, false);
+            }
+        }
+
+        async function uploadVoice() {
+            const name = document.getElementById('vc-name').value.trim();
+            const file = document.getElementById('vc-file').files[0];
+            const button = document.getElementById('vc-upload-btn');
+            if (!name) { voiceMsg('✗ Введите имя голоса', false); return; }
+            if (!file) { voiceMsg('✗ Выберите файл с записью', false); return; }
+
+            const fd = new FormData();
+            fd.append('name', name);
+            fd.append('file', file);
+            fd.append('song', document.getElementById('vc-song').checked ? '1' : '0');
+            fd.append('seconds', document.getElementById('vc-seconds').value || '30');
+
+            button.disabled = true;
+            voiceMsg('▶ Отправляю запись на ферму…', true);
+            try {
+                const r = await fetch('/api/voices/upload', { method: 'POST', body: fd });
+                if (!r.ok) {
+                    const err = await r.json().catch(() => ({}));
+                    throw new Error(err.detail || ('HTTP ' + r.status));
+                }
+                voiceMsg('✓ Загружено. Режу образец — потом сделайте пробные фразы.', true);
+                document.getElementById('vc-file').value = '';
+                refreshVoicePanel();
+            } catch (e) {
+                voiceMsg('✗ ' + e.message, false);
+            } finally {
+                button.disabled = false;
+            }
+        }
+
+        // Сказать этим голосом случайную игровую фразу в трубку. То же, что
+        // кнопка в блоке звука, но не переключая текущий голос информатора:
+        // послушать чужой голос и начать им говорить — разные решения.
+        async function playVoiceSample(name) {
+            try {
+                const r = await fetch('/api/tts/test', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ voice: name }),
+                });
+                if (!r.ok) {
+                    const err = await r.json().catch(() => ({}));
+                    throw new Error(err.detail || ('HTTP ' + r.status));
+                }
+                const d = await r.json();
+                voiceMsg('▶ ' + name + ': «' + (d.text || '') + '». Снимите трубку.', true);
+            } catch (e) {
+                voiceMsg('✗ ' + e.message, false);
+            }
+        }
+
+        async function pickVoice(name) {
+            try {
+                const r = await fetch('/api/tts/voice', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ voice: name }),
+                });
+                if (!r.ok) {
+                    const err = await r.json().catch(() => ({}));
+                    throw new Error(err.detail || ('HTTP ' + r.status));
+                }
+                const d = await r.json();
+                voiceMsg(d.missing
+                    ? '⚠ Информатор: ' + name + ', но не хватает ' + d.missing + ' фраз'
+                    : '✓ Информатор говорит голосом: ' + name, !d.missing);
+                refreshVoicePanel();
+                refreshVoices();
+            } catch (e) {
+                voiceMsg('✗ ' + e.message, false);
+            }
+        }
+
+        async function onVoiceChange(sel) {
+            const name = sel.value;
+            if (!name) return;
+            try {
+                const r = await fetch('/api/tts/voice', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ voice: name }),
+                });
+                if (!r.ok) {
+                    const err = await r.json().catch(() => ({}));
+                    throw new Error(err.detail || ('HTTP ' + r.status));
+                }
+                const d = await r.json();
+                audioMsg(d.missing
+                    ? '⚠ Голос: ' + name + ', но не хватает ' + d.missing + ' фраз'
+                    : '✓ Голос: ' + name, !d.missing);
+                refreshVoices();
+            } catch (e) {
+                audioMsg('✗ ' + e.message, false);
+            }
+        }
+
         async function onSoundModeChange(useServer) {
             const fd = new FormData();
             fd.append('mode', useServer ? 'server' : 'browser');
@@ -6662,11 +7221,13 @@
                     const err = await r.json().catch(() => ({}));
                     throw new Error(err.detail || ('HTTP ' + r.status));
                 }
-                audioMsg('✓ Серверный звук → ' + (sel.value || 'системное по умолчанию'), true);
+                audioMsg((channel === 'phone' ? '✓ Трубка → ' : '✓ Серверный звук → ')
+                    + (sel.value || 'системное по умолчанию'), true);
             } catch (e) {
                 audioMsg('✗ ' + e.message, false);
             }
             refreshServerAudio();
+            refreshPhoneOutput();
         }
 
         async function testServerAudio(channel) {
@@ -6692,6 +7253,7 @@
                 audioMsg('✗ ' + e.message, false);
             }
             refreshServerAudio();
+            refreshPhoneOutput();
         }
 
         // ── Раздельный вывод звука (игра / видео) ──
