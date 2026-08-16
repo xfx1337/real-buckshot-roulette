@@ -1,0 +1,539 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Телефоны — VoIP</title>
+    <link rel="stylesheet" href="/static/style.css">
+    <link rel="stylesheet" href="/static/voip.css">
+</head>
+<body>
+
+<div class="voip-head">
+    <h1>Телефония</h1>
+    <span class="sub">Asterisk → шлюз AP1100F → аппараты 101–108</span>
+    <span class="spacer"></span>
+    <span class="voip-link" id="link"><span class="dot"></span><span id="link-text">подключение…</span></span>
+</div>
+
+<!--
+  Обслуживание шлюза. Пока идёт сброс или перезагрузка, вся панель ненадёжна,
+  и сказать об этом один раз понятнее, чем дать восьми аппаратам сообщать
+  каждому о своём замешательстве.
+-->
+<div class="voip-banner" id="maintenance" hidden><span id="maintenance-text"></span></div>
+
+<!--
+  Прогресс долгой операции. Висит под шапкой на всех вкладках: вызов, начатый
+  из одной, заканчивается, когда оператор смотрит в другую.
+-->
+<div class="voip-progress" id="progress" hidden>
+    <div class="pr-head">
+        <strong id="progress-title">—</strong>
+        <button class="btn btn-small" onclick="document.getElementById('progress').hidden=true">Скрыть</button>
+    </div>
+    <div class="pr-track"><div class="pr-fill" id="progress-fill"></div></div>
+    <ol class="pr-steps" id="progress-steps"></ol>
+</div>
+
+<div class="voip-tabs" id="tabs">
+    <button class="voip-tab is-on" data-tab="board">Аппараты</button>
+    <button class="voip-tab" data-tab="dial">Номера с диска</button>
+    <button class="voip-tab" data-tab="pbx">АТС и шлюз</button>
+    <button class="voip-tab" data-tab="tools">Диагностика</button>
+</div>
+
+<!-- ══ Аппараты ══════════════════════════════════════════════════════ -->
+<section class="voip-view is-on" id="view-board">
+    <div class="voip-grid">
+        <div>
+            <div class="voip-panel">
+                <div class="vp-head">
+                    <h2>Состояние цепочки</h2>
+                    <span class="spacer"></span>
+                    <span class="stamp" id="health-stamp"></span>
+                    <button class="btn btn-small" onclick="loadHealth()">Обновить</button>
+                </div>
+                <ul class="checks" id="checks"><li class="dim">проверка…</li></ul>
+                <div class="vp-foot">
+                    <button class="btn btn-plate plate-yellow btn-small" onclick="resetPorts()">Сбросить порты FXS</button>
+                    <button class="btn btn-danger btn-small" onclick="rebootGateway()">Перезагрузить шлюз</button>
+                </div>
+                <!--
+                  Автосброс действует только на то, чем настоящий вызов быть не
+                  может: порт занят на шлюзе, а канала на АТС нет. Живой
+                  разговор такой парой не выглядит никогда.
+                -->
+                <label class="vp-check">
+                    <input type="checkbox" id="watchdog-on" onchange="setWatchdog(this.checked)">
+                    <span>Автоматически освобождать залипшие порты</span>
+                </label>
+                <p class="dim small">Освобождает порт, занятый дольше 20 секунд без вызова — признак замыкания в линии, а не разговора.</p>
+            </div>
+
+            <h2 class="voip-title">Аппараты</h2>
+            <div class="phones" id="phones"></div>
+        </div>
+
+        <div class="voip-panel feed">
+            <div class="vp-head">
+                <h2>События</h2>
+                <span class="spacer"></span>
+                <button class="btn btn-small" onclick="clearLog()">Очистить</button>
+            </div>
+            <ol class="voip-log" id="log"></ol>
+            <p class="dim small" id="log-empty">Пока пусто. Снимите трубку или позвоните на аппарат.</p>
+        </div>
+    </div>
+</section>
+
+<!-- ══ Номера с диска ════════════════════════════════════════════════ -->
+<section class="voip-view" id="view-dial">
+    <div class="voip-panel">
+        <div class="vp-head">
+            <h2>Программируемые номера</h2>
+            <span class="spacer"></span>
+            <button class="btn btn-small" onclick="loadSlots()">Обновить</button>
+        </div>
+        <!--
+          Это направление работает на линии, чей аппарат не может принимать
+          входящие: человек поднимает трубку и набирает сам, а для этого от
+          шлюза не нужно ничего, в чём замкнутый шлейф мог бы отказать.
+        -->
+        <p class="dim small">
+            Номер, набранный на диске аппарата, играет назначенный звук. Хранится
+            в базе АТС и действует со следующего вызова — без перезагрузки.
+            Доступны {{ slot_range.first }}–{{ slot_range.last }}.
+        </p>
+        <table class="voip-table" id="slots-table">
+            <thead><tr><th>Номер</th><th>Звук</th><th></th></tr></thead>
+            <tbody id="slots-body"></tbody>
+        </table>
+        <div class="vp-foot">
+            <select id="slot-new-number" class="voip-select"></select>
+            <select id="slot-new-sound" class="voip-select"></select>
+            <button class="btn btn-plate btn-small" onclick="addSlot()">Назначить</button>
+        </div>
+    </div>
+</section>
+
+<!-- ══ АТС и шлюз ════════════════════════════════════════════════════ -->
+<section class="voip-view" id="view-pbx">
+    <div class="voip-grid">
+        <div class="voip-panel">
+            <div class="vp-head">
+                <h2>Asterisk</h2>
+                <span class="spacer"></span>
+                <button class="btn btn-small" onclick="loadPbx()">Обновить</button>
+                <button class="btn btn-small" onclick="reloadDialplan()">Перечитать план</button>
+            </div>
+            <div id="pbx-body" class="dim small">загрузка…</div>
+        </div>
+        <div class="voip-panel">
+            <div class="vp-head">
+                <h2>Порты шлюза</h2>
+                <span class="spacer"></span>
+                <button class="btn btn-small" onclick="loadPorts(true)">Опросить шлюз</button>
+            </div>
+            <table class="voip-table">
+                <thead><tr><th>Порт</th><th>Номер</th><th>Состояние</th></tr></thead>
+                <tbody id="ports-body"></tbody>
+            </table>
+        </div>
+    </div>
+</section>
+
+<!-- ══ Диагностика ═══════════════════════════════════════════════════ -->
+<section class="voip-view" id="view-tools">
+    <div class="voip-panel">
+        <div class="vp-head"><h2>Диагностика шлюза</h2></div>
+        <!--
+          Список фиксирован и только на чтение. У шлюза нет понятия
+          ограниченной учётной записи: telnet-сессия может стереть
+          конфигурацию, поэтому строка оператора в CLI не попадает никогда.
+        -->
+        <div class="vp-foot" id="diag-buttons"></div>
+        <pre class="voip-pre" id="diag-out">Выберите проверку.</pre>
+    </div>
+</section>
+
+<script>
+const EXTENSIONS = {{ extensions | tojson }};
+const SLOT_RANGE = {{ slot_range | tojson }};
+
+// Состояние панели: то же, что отдаёт /api/voip/state, плюс живые правки из
+// сокета. Держится целиком, а не по кусочкам, чтобы перерисовка была одной
+// функцией от одного объекта.
+let state = {lines: {}, calls: {}, audio: null, armed: {}, maintenance: {},
+             auto_power: [], watchdog: {}};
+let sounds = [];
+let ports = [];
+
+// ── вкладки ─────────────────────────────────────────────────────────────
+document.querySelectorAll('.voip-tab').forEach(tab => {
+    tab.onclick = () => {
+        document.querySelectorAll('.voip-tab').forEach(t => t.classList.toggle('is-on', t === tab));
+        document.querySelectorAll('.voip-view').forEach(v =>
+            v.classList.toggle('is-on', v.id === 'view-' + tab.dataset.tab));
+        if (tab.dataset.tab === 'dial') loadSlots();
+        if (tab.dataset.tab === 'pbx') { loadPbx(); loadPorts(false); }
+        if (tab.dataset.tab === 'tools') loadDiagnostics();
+    };
+});
+
+// ── связь ───────────────────────────────────────────────────────────────
+function setLink(ok, text) {
+    const el = document.getElementById('link');
+    el.classList.toggle('ok', ok);
+    el.classList.toggle('bad', !ok);
+    document.getElementById('link-text').textContent = text;
+}
+
+async function api(path, options) {
+    const res = await fetch(path, options);
+    let body = {};
+    try { body = await res.json(); } catch (e) {}
+    if (!res.ok) throw new Error(body.detail || body.error || ('HTTP ' + res.status));
+    return body;
+}
+
+async function post(path, payload) {
+    return api(path, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(payload || {}),
+    });
+}
+
+// ── аппараты ────────────────────────────────────────────────────────────
+function phoneClass(exten) {
+    const line = state.lines[exten] || {};
+    const call = state.calls[exten] || {};
+    if (line.state === 'ringing') return 'ringing';
+    if (call.busy || line.state === 'off-hook') return 'busy';
+    return 'idle';
+}
+
+function renderPhones() {
+    const box = document.getElementById('phones');
+    box.innerHTML = EXTENSIONS.map(p => {
+        const line = state.lines[p.exten] || {};
+        const call = state.calls[p.exten] || {};
+        const armed = state.armed[p.exten];
+        const playing = state.audio && state.audio.extension === p.exten ? state.audio : null;
+        const auto = state.auto_power.includes(p.exten);
+
+        // Что показать словами. Порядок важен: то, что слышно в трубке,
+        // важнее того, что думает АТС.
+        let status = 'свободен';
+        if (playing) status = 'играет ' + playing.sound;
+        else if (call.busy) status = call.detail || 'занят';
+        else if (line.state === 'ringing') status = 'звонит';
+        else if (line.state === 'off-hook') status = 'трубка снята';
+        else if (call.detail) status = call.detail;
+
+        const opts = sounds.map(s =>
+            `<option value="${s.name}">${s.name} · ${s.seconds}с</option>`).join('');
+
+        return `
+        <div class="phone ${phoneClass(p.exten)}">
+            <div class="ph-head">
+                <span class="ph-num">${p.exten}</span>
+                <span class="ph-slot">порт ${p.slot}</span>
+            </div>
+            <div class="ph-status">${status}</div>
+            ${armed ? `<div class="ph-armed">ждёт снятия: ${armed.sound}</div>` : ''}
+            ${line.digits ? `<div class="ph-digits">набрано: ${line.digits}</div>` : ''}
+            <select class="voip-select" id="snd-${p.exten}">${opts}</select>
+            <div class="ph-actions">
+                <button class="btn btn-plate btn-small" onclick="callPhone('${p.exten}')">Позвонить</button>
+                <button class="btn btn-small" onclick="playInto('${p.exten}')" title="Проиграть в уже снятую трубку">В трубку</button>
+                <button class="btn btn-small" onclick="stopAudio('${p.exten}')">Стоп</button>
+                <button class="btn btn-plate plate-yellow btn-small" onclick="freePort('${p.exten}')" title="Цикл порта на шлюзе: завершает вызов и освобождает линию">Освободить</button>
+                <button class="btn btn-small" onclick="onHook('${p.exten}')" title="Обесточить линию на 6 секунд — для аппарата с залипающими ключами">Обесточить</button>
+            </div>
+            <label class="ph-auto">
+                <input type="checkbox" ${auto ? 'checked' : ''}
+                       onchange="setAutoPower('${p.exten}', this.checked)">
+                <span>обесточивать после отбоя</span>
+            </label>
+        </div>`;
+    }).join('');
+}
+
+function chosenSound(exten) {
+    const el = document.getElementById('snd-' + exten);
+    return el ? el.value : '';
+}
+
+async function callPhone(exten) {
+    try { await post('/api/voip/call', {extension: exten, sound: chosenSound(exten)}); }
+    catch (e) { alert('Вызов не удался: ' + e.message); }
+}
+
+async function playInto(exten) {
+    try { await post('/api/voip/audio/play', {extension: exten, sound: chosenSound(exten)}); }
+    catch (e) { alert('Не удалось проиграть: ' + e.message); }
+}
+
+async function stopAudio(exten) {
+    try { await post('/api/voip/audio/stop', {extension: exten}); }
+    catch (e) { alert(e.message); }
+}
+
+async function freePort(exten) {
+    try { await post('/api/voip/hangup', {extension: exten}); }
+    catch (e) { alert('Не удалось освободить порт: ' + e.message); }
+}
+
+async function onHook(exten) {
+    try { await post('/api/voip/on-hook', {extension: exten, seconds: 6}); }
+    catch (e) { alert(e.message); }
+}
+
+async function setAutoPower(exten, enabled) {
+    try {
+        const r = await post('/api/voip/auto-power', {extension: exten, enabled});
+        state.auto_power = r.extensions;
+    } catch (e) { alert(e.message); }
+}
+
+async function setWatchdog(enabled) {
+    try { await post('/api/voip/watchdog', {enabled}); }
+    catch (e) { alert(e.message); }
+}
+
+// ── состояние системы ───────────────────────────────────────────────────
+async function loadHealth() {
+    try {
+        const h = await api('/api/voip/health');
+        const box = document.getElementById('checks');
+        box.innerHTML = h.checks.map(c => `
+            <li class="check ${c.state}">
+                <span class="chk-dot"></span>
+                <span class="chk-name">${c.label}</span>
+                <span class="chk-detail">${c.detail || ''}</span>
+            </li>`).join('');
+        document.getElementById('health-stamp').textContent =
+            new Date(h.at * 1000).toLocaleTimeString('ru-RU');
+        ports = h.ports || [];
+        renderPorts();
+        showMaintenance(h.maintenance);
+    } catch (e) {
+        document.getElementById('checks').innerHTML =
+            `<li class="check down"><span class="chk-dot"></span><span class="chk-name">${e.message}</span></li>`;
+    }
+}
+
+function showMaintenance(m) {
+    const el = document.getElementById('maintenance');
+    if (m && m.busy) {
+        el.hidden = false;
+        document.getElementById('maintenance-text').textContent =
+            'Обслуживание шлюза: ' + (m.detail || m.what);
+    } else {
+        el.hidden = true;
+    }
+}
+
+async function resetPorts() {
+    if (!confirm('Прогнать циклом все восемь портов FXS? Идущие вызовы оборвутся.')) return;
+    try { await post('/api/voip/reset-ports'); } catch (e) { alert(e.message); }
+}
+
+async function rebootGateway() {
+    if (!confirm('Перезагрузить шлюз? Это займёт около минуты, все вызовы оборвутся, '
+                 + 'а несохранённые во flash настройки откатятся.')) return;
+    try { await post('/api/voip/reboot'); } catch (e) { alert(e.message); }
+}
+
+// ── прогресс ────────────────────────────────────────────────────────────
+function renderProgress(p) {
+    const box = document.getElementById('progress');
+    if (!p || !p.steps || !p.steps.length) { box.hidden = true; return; }
+    box.hidden = false;
+    document.getElementById('progress-title').textContent = p.title;
+    const done = p.steps.filter(s => s.state === 'ok').length;
+    document.getElementById('progress-fill').style.width =
+        Math.round(100 * done / p.steps.length) + '%';
+    document.getElementById('progress-steps').innerHTML = p.steps.map(s =>
+        `<li class="st-${s.state}">${s.label}${s.detail ? ' — ' + s.detail : ''}</li>`).join('');
+}
+
+// ── журнал ──────────────────────────────────────────────────────────────
+const LOG_MAX = 200;
+
+function addLog(event) {
+    if (event.kind === 'progress') { renderProgress(event.progress); return; }
+    const log = document.getElementById('log');
+    document.getElementById('log-empty').hidden = true;
+    const li = document.createElement('li');
+    li.className = 'lg lg-' + event.kind;
+    const who = event.extension && event.extension !== '-' ? event.extension : '—';
+    li.innerHTML = `<span class="lg-time">${event.clock || ''}</span>`
+                 + `<span class="lg-who">${who}</span>`
+                 + `<span class="lg-what">${event.detail || event.kind}</span>`;
+    log.prepend(li);
+    while (log.children.length > LOG_MAX) log.lastChild.remove();
+}
+
+function clearLog() {
+    document.getElementById('log').innerHTML = '';
+    document.getElementById('log-empty').hidden = false;
+}
+
+// ── номера с диска ──────────────────────────────────────────────────────
+async function loadSlots() {
+    try {
+        const s = await api('/api/voip/slots');
+        sounds = s.sounds;
+        document.getElementById('slots-body').innerHTML = s.slots.length
+            ? s.slots.map(x => `
+                <tr>
+                    <td class="mono">${x.number}</td>
+                    <td>${x.sound}</td>
+                    <td><button class="btn btn-small" onclick="removeSlot('${x.number}')">Убрать</button></td>
+                </tr>`).join('')
+            : '<tr><td colspan="3" class="dim">Ничего не назначено.</td></tr>';
+        document.getElementById('slot-new-number').innerHTML =
+            s.free.map(n => `<option value="${n}">${n}</option>`).join('');
+        document.getElementById('slot-new-sound').innerHTML =
+            s.sounds.map(x => `<option value="${x.name}">${x.name} · ${x.seconds}с</option>`).join('');
+        renderPhones();
+    } catch (e) {
+        document.getElementById('slots-body').innerHTML =
+            `<tr><td colspan="3" class="dim">${e.message}</td></tr>`;
+    }
+}
+
+async function addSlot() {
+    const number = document.getElementById('slot-new-number').value;
+    const sound = document.getElementById('slot-new-sound').value;
+    try { await post('/api/voip/slots', {number, sound}); await loadSlots(); }
+    catch (e) { alert(e.message); }
+}
+
+async function removeSlot(number) {
+    try { await post('/api/voip/slots', {number, sound: ''}); await loadSlots(); }
+    catch (e) { alert(e.message); }
+}
+
+// ── АТС и порты ─────────────────────────────────────────────────────────
+async function loadPbx() {
+    try {
+        const p = await api('/api/voip/pbx');
+        document.getElementById('pbx-body').innerHTML = `
+            <p>Магистраль до шлюза: <b>${p.trunk}</b></p>
+            <p>Активных каналов: <b>${p.channel_count}</b></p>
+            <table class="voip-table"><thead><tr><th>Номер</th><th>Что делает</th></tr></thead>
+            <tbody>${p.dialplan.map(d =>
+                `<tr><td class="mono">${d.pattern}</td><td>${d.note}</td></tr>`).join('')}</tbody></table>`;
+    } catch (e) {
+        document.getElementById('pbx-body').textContent = e.message;
+    }
+}
+
+async function reloadDialplan() {
+    try { await post('/api/voip/pbx/reload'); await loadPbx(); }
+    catch (e) { alert(e.message); }
+}
+
+async function loadPorts(fresh) {
+    try {
+        const r = await api('/api/voip/ports' + (fresh ? '?fresh=true' : ''));
+        ports = r.ports || [];
+        renderPorts();
+    } catch (e) {
+        document.getElementById('ports-body').innerHTML =
+            `<tr><td colspan="3" class="dim">${e.message}</td></tr>`;
+    }
+}
+
+function renderPorts() {
+    const body = document.getElementById('ports-body');
+    if (!body) return;
+    body.innerHTML = ports.length
+        ? ports.map(p => `
+            <tr>
+                <td class="mono">${p.port}</td>
+                <td class="mono">${p.extension || ''}</td>
+                <td class="${p.usable ? 'ok' : 'warn'}">${p.status}</td>
+            </tr>`).join('')
+        : '<tr><td colspan="3" class="dim">Шлюз не опрошен.</td></tr>';
+}
+
+// ── диагностика ─────────────────────────────────────────────────────────
+async function loadDiagnostics() {
+    const box = document.getElementById('diag-buttons');
+    if (box.dataset.loaded) return;
+    try {
+        const d = await api('/api/voip/admin/diagnostics');
+        box.innerHTML = d.available.map(x =>
+            `<button class="btn btn-small" onclick="runDiagnostic('${x.key}')">${x.label}</button>`).join('');
+        box.dataset.loaded = '1';
+    } catch (e) { box.textContent = e.message; }
+}
+
+async function runDiagnostic(name) {
+    const out = document.getElementById('diag-out');
+    out.textContent = 'опрос шлюза…';
+    try {
+        const r = await api('/api/voip/admin/diagnostics/' + name);
+        out.textContent = r.text;
+    } catch (e) { out.textContent = e.message; }
+}
+
+// ── поток событий ───────────────────────────────────────────────────────
+function connect() {
+    const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const ws = new WebSocket(proto + '//' + location.host + '/ws/voip');
+
+    ws.onopen = () => setLink(true, 'на связи');
+    ws.onmessage = ev => {
+        const event = JSON.parse(ev.data);
+        addLog(event);
+        // Событие меняет то, что показывает карточка аппарата, но само состояние
+        // живёт на сервере: перерисовка идёт от снимка, а не от догадки о том,
+        // что событие означает.
+        if (event.kind !== 'progress') refreshState();
+    };
+    // Переподключение: сервер перезапускают посреди игры, и панель должна
+    // вернуться сама, а не ждать, пока кто-то нажмёт F5.
+    ws.onclose = () => { setLink(false, 'нет связи'); setTimeout(connect, 2000); };
+    ws.onerror = () => ws.close();
+}
+
+let refreshPending = false;
+async function refreshState() {
+    // События приходят пачками — снятие трубки сразу тянет за собой звук и
+    // остановку звонка. Один запрос на пачку вместо трёх подряд.
+    if (refreshPending) return;
+    refreshPending = true;
+    setTimeout(async () => {
+        refreshPending = false;
+        try {
+            const s = await api('/api/voip/state');
+            state = Object.assign(state, s);
+            renderPhones();
+            renderProgress(s.progress);
+            showMaintenance(s.maintenance);
+            const wd = document.getElementById('watchdog-on');
+            if (s.watchdog) wd.checked = !!s.watchdog.enabled;
+        } catch (e) {}
+    }, 150);
+}
+
+// ── старт ───────────────────────────────────────────────────────────────
+(async function init() {
+    try { sounds = (await api('/api/voip/sounds')).sounds; } catch (e) {}
+    renderPhones();
+    await refreshState();
+    loadHealth();
+    connect();
+    // Здоровье цепочки опрашивается по времени, а не по событиям: пропавший
+    // адрес на интерфейсе или упавший Asterisk никаких событий не порождают.
+    setInterval(loadHealth, 15000);
+})();
+</script>
+</body>
+</html>

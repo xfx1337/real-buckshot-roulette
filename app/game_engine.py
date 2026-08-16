@@ -67,6 +67,35 @@ ITEM_POOL_BASE = [
     ItemType.INVERTER, ItemType.EXPIRED_MEDICINE,
 ]
 
+# Что раздаётся в сюжетном режиме. Уже, чем полный пул: сюжет ведёт дилер по
+# сценарию, и предметы, меняющие ход партии непредсказуемо — адреналин, инвертор,
+# лекарство, — сбивают его с рельсов.
+ITEM_POOL_STORY = [
+    ItemType.BEER, ItemType.HANDSAW, ItemType.HANDCUFFS,
+    ItemType.MAGNIFYING_GLASS, ItemType.CIGARETTES,
+]
+
+# То же для одного раунда, плюс телефон. Одиночный раунд — партия 1 на 1, где
+# карточка телефона и есть событие: игрок уходит от стола к аппарату, набирает
+# номер и слышит голос. В длинном сюжете эта прогулка стоила бы темпа трижды, а
+# здесь она случается один раз за партию, и ради неё раунд и играется.
+ITEM_POOL_STORY_ONE_ROUND = ITEM_POOL_STORY + [ItemType.BURNER_PHONE]
+
+
+def item_pool_for(game_mode: str) -> list["ItemType"]:
+    """Из чего раздаются предметы в этом режиме.
+
+    Одна точка на всю раздачу: пул спрашивают и при выдаче на руки, и при
+    генерации предметов следующей дозарядки наперёд, и разъехавшиеся списки в
+    этих двух местах означали бы, что игрок видит в анонсе не то, что получит.
+    """
+    if game_mode == "story_one_round":
+        return list(ITEM_POOL_STORY_ONE_ROUND)
+    if game_mode == "story":
+        return list(ITEM_POOL_STORY)
+    return list(ITEM_POOL_BASE)
+
+
 ITEM_LABELS = {
     ItemType.BEER: ("Пиво", "Выбросить текущий патрон"),
     ItemType.HANDSAW: ("Пила", "Следующий выстрел x2"),
@@ -368,13 +397,7 @@ class GameState:
             return
 
         self.phase = GamePhase.DEALER_ITEMS
-        if self.config.game_mode in ("story", "story_one_round"):
-            base_pool = [
-                ItemType.BEER, ItemType.HANDSAW, ItemType.HANDCUFFS,
-                ItemType.MAGNIFYING_GLASS, ItemType.CIGARETTES
-            ]
-        else:
-            base_pool = list(ITEM_POOL_BASE)
+        base_pool = item_pool_for(self.config.game_mode)
 
         for p in self.get_alive_players():
             slots_free = self.config.max_items_per_player - len(p.items)
@@ -542,13 +565,7 @@ class GameState:
         if items_count <= 0:
             return result
         
-        if self.config.game_mode in ("story", "story_one_round"):
-            base_pool = [
-                ItemType.BEER, ItemType.HANDSAW, ItemType.HANDCUFFS,
-                ItemType.MAGNIFYING_GLASS, ItemType.CIGARETTES
-            ]
-        else:
-            base_pool = list(ITEM_POOL_BASE)
+        base_pool = item_pool_for(self.config.game_mode)
 
         for p in self.get_alive_players():
             slots_free = self.config.max_items_per_player - len(p.items)

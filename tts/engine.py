@@ -55,11 +55,14 @@ VOICES_DIR = ROOT / "voices"
 # settable at runtime by the dealer's panel through use_voice() below.
 DEFAULT_VOICE = os.environ.get("TTS_VOICE", "default")
 
-# The XTTS model every voice is generated with. Recorded in each cache
-# directory's manifest and checked on load: a cache built with a different
-# model is still playable, but the operator should know why it sounds unlike
-# the one they auditioned.
-MODEL = "tts_models/multilingual/multi-dataset/xtts_v2"
+# The model every voice is generated with, as its manifest records it. A cache
+# built with a different one is still playable — the files are ordinary wavs —
+# but the operator should know why it sounds unlike what they last heard.
+#
+# The Russian F5-TTS fine-tune, read with stress marks. It replaced XTTS, which
+# is why old manifests on disk still name xtts_v2; nothing breaks when they do,
+# it simply means those phrases were spoken by the previous model.
+MODEL = "f5-tts-ru"
 
 # What a phrase is stored at: the rate XTTS generates, kept whole.
 #
@@ -75,6 +78,28 @@ MODEL = "tts_models/multilingual/multi-dataset/xtts_v2"
 # Storing wide costs about three times the disk for a voice — a few hundred
 # megabytes — which is nothing next to the model that produced it.
 SAMPLE_RATE = 24000
+
+# What a stored phrase is, as a container and a bitrate.
+#
+# Uncompressed wav at the rate above is 480 KB for a ten-second phrase, and a
+# voice is a thousand of them: 474 MB each, which stops being free once there
+# are several voices on the table's disk. AAC at 48 kbit/s holds the same
+# phrase in 66 KB — seven times smaller — and measured against the original
+# through the telephone band it comes back at 21 dB SNR, correlation 0.996.
+# That is below what the earpiece itself does to the signal.
+#
+# The codec is AAC rather than Opus, which compresses slightly better at the
+# same bitrate, for one disqualifying reason: the telephone path plays files
+# with afplay, and afplay does not decode Opus. It does not fail either — it
+# opens the file, plays nothing, and exits successfully, which reaches a player
+# as a dead line. Anything stored here has to be something CoreAudio decodes.
+#
+# 48 kbit/s rather than 32 because phrases are also auditioned in the dealer's
+# panel through laptop speakers, full band, where the operator judges whether
+# the clone sounds like the person. That listening is what sets the floor; the
+# earpiece would have been happy with less.
+FORMAT = "m4a"
+BITRATE = "48k"
 
 # What the handset gets, when the handset is the destination. The telephone
 # path resamples on the way out (voip/scripts/audio.py plays through afplay,
@@ -140,8 +165,38 @@ def normalise(text: str) -> str:
 
 # ── voices ──────────────────────────────────────────────────────────────
 
+# Every container a stored phrase may be in. FORMAT is what new phrases are
+# written as; wav is here because voices generated before the change to AAC are
+# on disk and play perfectly well, and re-encoding a finished voice to save
+# space it has already spent would be work for nothing. A voice is looked up in
+# preference order, so a directory holding both answers with the compressed one.
+FORMATS = (FORMAT, "wav")
+
+
 def voice_dir(voice: str | None = None) -> Path:
     return CACHE_DIR / (voice or _voice)
+
+
+def _phrase_files(directory: Path):
+    """Every stored phrase in a directory, whatever container it is in."""
+    for suffix in FORMATS:
+        yield from directory.glob(f"tts_*.{suffix}")
+
+
+def phrase_path(text: str, voice: str | None = None) -> Path | None:
+    """Where this phrase is stored, or None if it is not.
+
+    The one place that knows a phrase may be in more than one container. Every
+    lookup goes through here so that adding or retiring a format is an edit to
+    FORMATS rather than a hunt through the callers.
+    """
+    directory = voice_dir(voice)
+    name = key(text)
+    for suffix in FORMATS:
+        candidate = directory / f"{name}.{suffix}"
+        if candidate.is_file() and candidate.stat().st_size > 0:
+            return candidate
+    return None
 
 
 def manifest(voice: str | None = None) -> dict:
@@ -173,7 +228,7 @@ def voices() -> list[dict]:
     for path in sorted(CACHE_DIR.iterdir()):
         if not path.is_dir():
             continue
-        phrases_on_disk = sum(1 for _ in path.glob("tts_*.wav"))
+        phrases_on_disk = sum(1 for _ in _phrase_files(path))
         if not phrases_on_disk:
             continue
         info = manifest(path.name)
@@ -243,8 +298,8 @@ def speak(text: str, voice: str | None = None) -> Speech:
         raise TTSError("нечего произносить: пустой текст")
 
     name = voice or _voice
-    target = voice_dir(name) / f"{key(text)}.wav"
-    if target.is_file() and target.stat().st_size > 0:
+    target = phrase_path(text, name)
+    if target is not None:
         return Speech(text=text, path=target, voice=name, cached=True)
 
     if not voice_dir(name).is_dir():
@@ -264,9 +319,8 @@ def missing(voice: str | None = None) -> list[str]:
     """
     from tts import corpus
 
-    directory = voice_dir(voice)
     return [line.text for line in corpus.lines()
-            if not (directory / f"{key(normalise(line.text))}.wav").is_file()]
+            if phrase_path(normalise(line.text), voice) is None]
 
 
 # ── generation, for the machine with the GPU ────────────────────────────
@@ -351,23 +405,29 @@ def convert(raw: Path, target: Path) -> None:
     Used by pregenerate.py and farm.py. Lives here so that the form of a
     cached file is decided in one place — the module that reads them back.
 
-    Only two things happen: a gentle high-pass, because XTTS sometimes leaves
-    a slow rumble under a phrase that no voice made, and loudness normalisation
-    so that a generated phrase and one of the operator's own recordings sit at
-    the same level in the same earpiece. The rate is left alone; see
-    SAMPLE_RATE for why narrowing here would be a one-way loss.
+    Three things happen: a gentle high-pass, because XTTS sometimes leaves a
+    slow rumble under a phrase that no voice made; loudness normalisation so
+    that a generated phrase and one of the operator's own recordings sit at the
+    same level in the same earpiece; and encoding to FORMAT at BITRATE. The
+    rate is left alone; see SAMPLE_RATE for why narrowing here would be a
+    one-way loss, and FORMAT for why the compression is not.
     """
     if not shutil.which("ffmpeg"):
         raise TTSError("ffmpeg не установлен")
     result = subprocess.run(
         ["ffmpeg", "-y", "-i", str(raw),
          "-af", f"highpass=f=55,{LOUDNORM}",
+         "-c:a", "aac", "-b:a", BITRATE,
          "-ac", "1", "-ar", str(SAMPLE_RATE), str(target)],
-        capture_output=True, text=True, timeout=120,
+        capture_output=True, timeout=120,
     )
     if result.returncode != 0:
         target.unlink(missing_ok=True)
-        tail = "\n".join(result.stderr.strip().splitlines()[-3:])
+        # Decoded permissively: ffmpeg's diagnostics can carry a path or a tag
+        # that is not UTF-8, and failing to read the error message is a worse
+        # failure than whatever the error was.
+        stderr = result.stderr.decode("utf-8", errors="replace")
+        tail = "\n".join(stderr.strip().splitlines()[-3:])
         raise TTSError(f"ffmpeg не смог обработать синтезированный звук:\n{tail}")
 
 
@@ -383,7 +443,7 @@ def clear_cache(voice: str | None = None) -> int:
         return 0
     gone = 0
     with _lock:
-        for path in directory.glob("tts_*.wav"):
+        for path in list(_phrase_files(directory)):
             path.unlink(missing_ok=True)
             gone += 1
     return gone

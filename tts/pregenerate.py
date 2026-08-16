@@ -1,34 +1,27 @@
-"""Generate a cloned voice's whole vocabulary, on a machine with a GPU.
+"""Turning a recording of a person into the speaker sample a clone is built on.
 
-This does not run at the table. It runs wherever there is an NVIDIA card,
-takes a recording of someone talking — or singing — and produces the directory
-of wav files that tts/engine.py reads back all evening. Copy that directory to
-the table and the informant on the telephone is that person.
+This does not run at the table. It runs on the machine with the GPU, where
+tts/remote.py calls it as the first step of adding a voice: a recording arrives,
+and what has to come out is one clean wav holding nothing but that person
+talking. Everything after it — the synthesis of a phrase or of the whole
+vocabulary — reads that file and nothing else, so this step decides whether the
+result sounds like anybody.
 
-Two steps, and the first is the one that decides whether the result sounds
-like anybody:
+    prepare   A song is a voice with a band playing over it, and the model
+              clones what it hears, band included. So Demucs separates the
+              vocal first, then the stretches with the most actual speech in
+              them are taken as the sample. Plain speech skips the separation
+              and only gets cleaned and levelled.
 
-    prepare   A song is a voice with a band playing over it, and XTTS clones
-              what it hears, band included. So Demucs separates the vocal
-              first, then the loudest continuous stretch of it is taken as the
-              speaker sample. Plain speech skips the separation and only gets
-              trimmed and levelled.
+Usable by hand as well as through the panel:
 
-    generate  Every line tts/corpus.py enumerates, synthesised once and
-              converted to the 8 kHz mono the earpiece carries. Resumable:
-              phrases already on disk are skipped, so an interrupted run
-              continues where it stopped.
+    python -m tts.pregenerate prepare ~/sample.mp3 --name kolya --song
+    python -m tts.pregenerate check --name kolya
 
-Usage, on the GPU machine:
-
-    pip install coqui-tts "transformers>=4.57,<5" torch torchaudio torchcodec demucs
-    python -m tts.pregenerate prepare  ~/sample.mp3 --name kolya --song
-    python -m tts.pregenerate generate --name kolya
-
-The transformers pin is load-bearing: its fifth major version removed a helper
-XTTS imports, and without the ceiling nothing runs at all.
-
-Then copy tts/cache/kolya/ to the same path at the table.
+How long a sample to cut is not asked for here any more. tts/remote.py reads
+the recording's own duration and decides, because a number typed into a panel
+is wrong in both directions — a twelve-second clip cut to "thirty" silently
+yields twelve, and a nine-minute interview still gives up one half-minute.
 
 Why a fixed corpus rather than synthesising on demand: see tts/engine.py. The
 short version is that a player is standing at the handset with the receiver
@@ -47,10 +40,30 @@ from pathlib import Path
 
 from tts import corpus, engine
 
-# How much voice XTTS conditions on. More is not better past this: the model
-# takes a speaker embedding from a few seconds, and a longer sample only makes
-# it likelier to include a stretch where the person is not talking.
+# How long one window of the sample is.
+#
+# Thirty because that is XTTS's own ceiling, and it is a hard one: xtts.py
+# does `audio[:, : load_sr * max_ref_length]` before computing anything, so a
+# longer file is silently truncated — from the *start*, discarding whatever
+# the window search picked. Raising this past 30 does not give the model more
+# to work with, it only makes the truncation less predictable.
 SAMPLE_SECONDS = 30
+
+# How many such windows are taken from the recording.
+#
+# This is the answer to "use as much of the recording as possible", and the
+# reason it is a count of windows rather than a longer window. XTTS takes a
+# *list* of references: it embeds each one separately, averages the speaker
+# embeddings, and concatenates the audio for the GPT latents. So four windows
+# from across an interview give it four different moments of the person —
+# raised voice, quiet aside, different sentences — which is genuinely more
+# information than any single stretch of the same total length, because a
+# single stretch is one mood recorded once.
+#
+# Four rather than more: past this the embedding average stops changing much,
+# and every extra window is another cut that has to actually contain clean
+# speech. Recordings shorter than the windows need simply yield fewer.
+SAMPLE_WINDOWS = 4
 
 # What XTTS wants its speaker sample as. Not the telephone's 8 kHz — that is
 # the output rate, and conditioning on band-limited audio makes every generated
@@ -62,12 +75,26 @@ VOCAL_STEM = "vocals"
 
 
 def _run(command: list[str], what: str, timeout: int = 3600) -> str:
-    result = subprocess.run(command, capture_output=True, text=True,
-                            timeout=timeout)
+    """Run a tool and return its stdout, surviving whatever it prints.
+
+    Decoded with errors="replace" rather than with text=True, because ffmpeg
+    and ffprobe echo the source file's metadata — an mp3's title and artist
+    tags — and those are frequently not UTF-8. A Russian tag written in
+    cp1251 makes text=True raise UnicodeDecodeError while the tool itself
+    succeeded, and the upload fails with "'utf-8' codec can't decode byte
+    0xd1" naming a byte the operator has no way to connect to a song title.
+
+    What is in those tags does not matter here; only the exit code and, on
+    failure, a readable tail of the error do. So undecodable bytes become
+    replacement characters and the work continues.
+    """
+    result = subprocess.run(command, capture_output=True, timeout=timeout)
+    stdout = result.stdout.decode("utf-8", errors="replace")
     if result.returncode != 0:
-        tail = "\n".join(result.stderr.strip().splitlines()[-5:])
+        stderr = result.stderr.decode("utf-8", errors="replace")
+        tail = "\n".join(stderr.strip().splitlines()[-5:])
         raise SystemExit(f"{what} не удалось:\n{tail}")
-    return result.stdout
+    return stdout
 
 
 # ── step one: a recording becomes a speaker sample ──────────────────────
@@ -103,56 +130,91 @@ def _separate_vocal(source: Path, workdir: Path) -> Path:
     return found[0]
 
 
-def _window_rms(source: Path, start: float, seconds: int) -> float:
-    """How loud one candidate window is, in dBFS.
+def _window_stats(source: Path, start: float, seconds: int) -> tuple[float, float]:
+    """How loud one candidate window is, and how much of it is not noise.
 
-    The measure that matters for a speaker sample is simply how much voice is
-    in it. A window that lands on a quiet passage, a fade, or the gap between
-    verses measures low and is a poor thing to clone from — XTTS conditions on
-    what it is given, and near-silence gives it almost nothing to hold on to.
+    Two numbers, because loudness alone picks the wrong window. A stretch of
+    traffic rumble under a fan measures loud and holds no voice at all; the
+    thing that separates speech from a steady noise floor is the *gap* between
+    the loud parts and the quiet parts. Speech is bursty — words, then pauses —
+    so a window full of it has a wide peak-to-floor spread. A window full of
+    machinery is flat.
+
+    Returns (rms, spread) in dB. astats reports both the overall RMS and the
+    minimum RMS across its analysis windows, and the difference between them
+    is the measure that matters.
     """
+    # Without -hide_banner and with a raised log level there is no astats
+    # output at all: the filter reports through the info log, and -v error
+    # silences exactly the lines being parsed.
+    # Decoded by hand, for the reason _run explains: the file's own metadata
+    # comes back in this stream and need not be UTF-8.
     result = subprocess.run(
-        ["ffmpeg", "-ss", str(start), "-t", str(seconds), "-i", str(source),
-         "-af", "astats=metadata=1:reset=0", "-f", "null", "-"],
-        capture_output=True, text=True, timeout=300,
+        ["ffmpeg", "-hide_banner", "-ss", str(start), "-t", str(seconds),
+         "-i", str(source), "-af", "astats=metadata=1:reset=0",
+         "-f", "null", "-"],
+        capture_output=True, timeout=300,
     )
-    for line in result.stderr.splitlines():
-        if "RMS level dB" in line:
+    overall, floor = -99.0, -99.0
+    for line in result.stderr.decode("utf-8", errors="replace").splitlines():
+        # astats prints its summary once per channel and once overall, so the
+        # first of each is taken and the repeats ignored.
+        if "RMS level dB" in line and overall <= -99.0:
             try:
-                return float(line.split(":")[-1].strip())
+                overall = float(line.split(":")[-1].strip())
             except ValueError:
-                break
-    return -99.0
+                pass
+        elif "Noise floor dB" in line and floor <= -99.0:
+            try:
+                floor = float(line.split(":")[-1].strip())
+            except ValueError:
+                pass
+    if floor <= -99.0 or overall <= -99.0:
+        return overall, 0.0
+    return overall, overall - floor
 
 
-def _loudest_window(source: Path, seconds: int) -> float:
-    """Where in the file to cut the speaker sample from.
+def _best_windows(source: Path, seconds: int, count: int) -> list[float]:
+    """Where to cut speaker samples from, best first, without overlaps.
 
-    Every candidate start is measured and the fullest one wins, rather than
-    taking the first stretch that is merely not silent. That earlier rule
-    picked whatever came after the opening pause, which in a song is the
-    quietest verse as often as not, and the clone was built from it.
+    More than one, because a single window is a single moment of someone's
+    voice. XTTS accepts a list of references, averages their speaker
+    embeddings and concatenates them for the GPT latents, so several windows
+    from across a recording give it the person's range — a raised voice, a
+    quiet aside, the way they start a sentence — instead of one half-minute of
+    whatever they happened to be doing.
 
-    Coarse on purpose: a window is thirty seconds and the step is five, so a
-    handful of probes covers a three-minute recording. Finer would measure
-    differences no listener could hear in the result.
+    Ranked by how much voice is in them rather than by how loud they are: see
+    _window_stats. Overlapping candidates are dropped, since two windows
+    sharing twenty seconds of the same audio contribute one window's worth of
+    information and crowd out somewhere else in the recording.
     """
     duration = _duration(source)
     if duration <= seconds:
-        return 0.0
+        return [0.0]
 
-    step = max(5.0, seconds / 6)
-    best_start, best_rms = 0.0, -99.0
+    step = max(5.0, seconds / 3)
+    scored: list[tuple[float, float, float]] = []
     start = 0.0
     while start + seconds <= duration:
-        rms = _window_rms(source, start, seconds)
-        if rms > best_rms:
-            best_start, best_rms = start, rms
+        rms, spread = _window_stats(source, start, seconds)
+        # Loudness still matters — a window has to have voice in it at all —
+        # but the spread is what says the loudness is speech. Weighted so a
+        # flat, loud stretch of noise loses to a quieter one with real speech.
+        scored.append((rms + 2.0 * spread, start, rms))
         start += step
 
-    print(f"лучший кусок: {best_start:.0f}–{best_start + seconds:.0f} с "
-          f"({best_rms:.1f} dB)", flush=True)
-    return best_start
+    scored.sort(reverse=True)
+    chosen: list[float] = []
+    for _, begin, rms in scored:
+        if len(chosen) >= count:
+            break
+        if any(abs(begin - taken) < seconds for taken in chosen):
+            continue
+        chosen.append(begin)
+        print(f"кусок {len(chosen)}: {begin:.0f}–{begin + seconds:.0f} с "
+              f"({rms:.1f} dB)", flush=True)
+    return sorted(chosen) or [0.0]
 
 
 def _duration(source: Path) -> float:
@@ -164,8 +226,100 @@ def _duration(source: Path) -> float:
         return 0.0
 
 
+def _clean_chain(song: bool) -> str:
+    """What the sample is cleaned of, and why each filter is here.
+
+    Everything the recording contains that is not the person's voice, XTTS
+    treats as part of their voice. A fan, a fridge, traffic through a window,
+    the room's own reverberation — all of it gets folded into the speaker
+    embedding and comes back as a permanent layer under every generated
+    phrase. It cannot be removed afterwards, because by then it is not noise
+    on top of a voice, it *is* the voice as the model understands it.
+
+    So the cleaning is done here, once, and it is done properly:
+
+    highpass    below 80 Hz there is nothing of a human voice. There is a
+                great deal of everything else — traffic rumble, fan bearings,
+                mains hum, the thump of a table being knocked.
+    lowpass     above 11 kHz a speech recording holds mostly hiss. Kept high
+                enough to leave sibilance and breath, which is what makes a
+                clone recognisable as a particular person.
+    afftdn      spectral denoise, tracking the noise profile as it goes
+                (nt=w, noise tracking on white-ish noise). This is what takes
+                out steady machinery: it learns the floor between words and
+                subtracts it from the words too.
+    anlmdn      non-local means, a second pass with a different principle —
+                it finds repeated patterns and averages them, which catches
+                the periodic noise afftdn leaves (hum harmonics, the regular
+                whirr of a fan) without touching speech, since speech does
+                not repeat that way.
+    agate       everything under the threshold is not quiet, it is silent.
+                Between words the noise floor is what remains after the two
+                denoisers, and leaving it in tells the model the person is
+                accompanied by a faint hiss whenever they stop talking.
+    loudnorm    a quiet sample gives a vague speaker embedding, so it is
+                brought to a consistent level last, after cleaning.
+
+    A song gets the same treatment plus a stricter low end: Demucs leaves bass
+    bleeding into the vocal stem, because a kick drum is broadband and does
+    not separate cleanly, and the separation artefacts above 11 kHz are
+    cymbal residue the model could not place.
+
+    The denoisers are deliberately moderate. Pushed harder they start eating
+    breath and the tails of words, and a clone built from over-processed audio
+    sounds synthetic in a way no amount of sampling tuning repairs — the usual
+    trade of noise for artefacts, where the artefacts are worse.
+    """
+    low = 90 if song else 80
+    return (
+        f"highpass=f={low},"
+        "lowpass=f=11000,"
+        "afftdn=nf=-28:nt=w,"
+        "anlmdn=s=0.0004:p=0.008:r=0.006,"
+        "agate=threshold=0.008:ratio=2:attack=10:release=250,"
+        "loudnorm=I=-16:TP=-1.5:LRA=9"
+    )
+
+
+def _join(pieces: list[Path], target: Path) -> None:
+    """Put the chosen windows together into one speaker sample.
+
+    Concatenated rather than handed to XTTS as separate files, even though it
+    accepts a list. Two reasons, and both are about everything else that
+    touches this file: the panel plays the sample back so an operator can hear
+    what was cut, and F5-TTS takes exactly one reference. One file keeps every
+    consumer working and loses nothing — XTTS concatenates its references
+    internally anyway.
+
+    A short silence between pieces, because two unrelated stretches of speech
+    butted together make a click and an impossible transition, and the model
+    hears both as things this person's voice does.
+    """
+    if len(pieces) == 1:
+        shutil.move(str(pieces[0]), str(target))
+        return
+
+    listing = pieces[0].parent / "pieces.txt"
+    gap = pieces[0].parent / "gap.wav"
+    _run(["ffmpeg", "-y", "-hide_banner", "-f", "lavfi",
+          "-i", f"anullsrc=r={SAMPLE_RATE}:cl=mono", "-t", "0.25", str(gap)],
+         "ffmpeg (пауза между кусками)")
+
+    lines = []
+    for index, piece in enumerate(pieces):
+        if index:
+            lines.append(f"file '{gap.name}'")
+        lines.append(f"file '{piece.name}'")
+    listing.write_text("\n".join(lines))
+
+    _run(["ffmpeg", "-y", "-hide_banner", "-f", "concat", "-safe", "0",
+          "-i", str(listing), "-c", "copy", str(target)],
+         "ffmpeg (склейка образца)")
+
+
 def prepare(source: Path, name: str, *, song: bool,
-            seconds: int = SAMPLE_SECONDS) -> Path:
+            seconds: int = SAMPLE_SECONDS,
+            windows: int = SAMPLE_WINDOWS) -> Path:
     """Turn a recording into the speaker sample XTTS conditions on."""
     if not source.is_file():
         raise SystemExit(f"нет такого файла: {source}")
@@ -179,57 +333,30 @@ def prepare(source: Path, name: str, *, song: bool,
     try:
         voice_source = _separate_vocal(source, workdir) if song else source
 
-        start = _loudest_window(voice_source, seconds)
         target = engine.VOICES_DIR / f"{name}.wav"
-        print(f"вырезаю {seconds} с начиная с {start:.1f} с...", flush=True)
+        starts = _best_windows(voice_source, seconds, windows)
+        pieces = []
+        for index, start in enumerate(starts, 1):
+            piece = workdir / f"piece_{index}.wav"
+            _run(["ffmpeg", "-y", "-hide_banner", "-ss", str(start),
+                  "-t", str(seconds), "-i", str(voice_source),
+                  "-af", _clean_chain(song),
+                  "-ac", "1", "-ar", str(SAMPLE_RATE), str(piece)],
+                 "ffmpeg (нарезка образца)")
+            pieces.append(piece)
 
-        # What the sample is cleaned of, and why each one is here.
-        #
-        # highpass  Demucs leaves bass bleeding into the vocal stem — a kick
-        #           drum is broadband and does not separate cleanly. Below
-        #           70 Hz there is nothing of a human voice anyway.
-        # lowpass   above 11 kHz the stem is mostly separation artefacts:
-        #           cymbal residue and the smeared hiss the model could not
-        #           place. XTTS treats that as part of the timbre and
-        #           reproduces it as a permanent sheen over every phrase.
-        # afftdn    broadband denoise, gentle. Enough to take the hiss out
-        #           from between words without gating the words themselves.
-        # loudnorm  a quiet sample gives a vague speaker embedding, so it is
-        #           brought up to a consistent level last, after cleaning.
-        #
-        # Speech only gets the rumble filter and the levelling: a clean
-        # recording has none of these problems, and denoising it would only
-        # remove the breath that makes the clone sound alive.
-        chain = ("highpass=f=70,lowpass=f=11000,afftdn=nf=-25,"
-                 "loudnorm=I=-16:TP=-1.5:LRA=9") if song else \
-                "highpass=f=60,loudnorm=I=-16:TP=-1.5:LRA=9"
-
-        _run(["ffmpeg", "-y", "-ss", str(start), "-t", str(seconds),
-              "-i", str(voice_source), "-af", chain,
-              "-ac", "1", "-ar", str(SAMPLE_RATE), str(target)],
-             "ffmpeg (нарезка образца)")
+        _join(pieces, target)
     finally:
         shutil.rmtree(workdir, ignore_errors=True)
 
     print(f"\nобразец готов: {target}")
     print(f"послушайте его — именно так будет звучать информатор.")
-    print(f"дальше: python -m tts.pregenerate generate --name {name}")
+    print(f"дальше: озвучить фразу или весь словарь через панель дилера, "
+          f"либо `python -m tts.remote speak` на этой машине.")
     return target
 
 
-# ── step two: the whole vocabulary ──────────────────────────────────────
-
-def _load_model(device: str):
-    """Bring XTTS up. Imported here so `prepare` needs no torch at all."""
-    import os
-
-    os.environ.setdefault("COQUI_TOS_AGREED", "1")
-    engine.enable_cuda_libraries()
-    print(f"загружаю модель на {device} (первый раз качает ~2 ГБ)...", flush=True)
-    from TTS.api import TTS
-
-    return TTS(engine.MODEL).to(device)
-
+# ── what the far side needs to know about this machine ───────────────
 
 def _pick_device(requested: str) -> str:
     if requested != "auto":
@@ -248,89 +375,21 @@ def _pick_device(requested: str) -> str:
     return "cpu"
 
 
-def generate(name: str, *, device: str = "auto", max_shells: int | None = None,
-             force: bool = False) -> None:
-    """Synthesise every corpus phrase in one voice.
+def _write_manifest(name: str, sample: Path, phrases: int, device: str,
+                    spoken_by: str = "") -> None:
+    """Leave a note in the cache directory about what built it.
 
-    Resumable by design: a phrase whose file already exists is skipped, so a
-    run killed at 600 of 1002 picks up at 600 rather than starting over.
+    The engine is recorded because a cache directory is otherwise silent about
+    how it was spoken — the filenames hash the text, not the settings — and
+    tts/remote.py reads it back to notice that a voice is being regenerated by
+    a different one, so the old phrases go rather than mixing with the new.
     """
-    sample = engine.VOICES_DIR / f"{name}.wav"
-    if not sample.is_file():
-        raise SystemExit(
-            f"нет образца голоса: {sample}\n"
-            f"сначала: python -m tts.pregenerate prepare <файл> --name {name}")
+    from tts import engines
 
-    out = engine.voice_dir(name)
-    out.mkdir(parents=True, exist_ok=True)
-    if force:
-        gone = engine.clear_cache(name)
-        print(f"удалено старых фраз: {gone}")
-
-    lines = corpus.lines(max_shells) if max_shells else corpus.lines()
-    todo = [line for line in lines
-            if not (out / f"{engine.key(engine.normalise(line.text))}.wav").is_file()]
-    print(f"фраз всего: {len(lines)}, надо сгенерировать: {len(todo)}")
-    if not todo:
-        print("всё уже на месте.")
-        _write_manifest(name, sample, len(lines), device="—")
-        return
-
-    device = _pick_device(device)
-    model = _load_model(device)
-
-    # Same conditioning the farm uses, for the same reason: XTTS defaults to
-    # six seconds of reference and the sample is thirty. See tts/farm.py.
-    from tts import farm
-
-    xtts = model.synthesizer.tts_model
-    print(f"считаю латенты по {farm.COND_SECONDS} с образца...", flush=True)
-    gpt_cond_latent, speaker_embedding = xtts.get_conditioning_latents(
-        audio_path=[str(sample)],
-        gpt_cond_len=farm.COND_SECONDS,
-        gpt_cond_chunk_len=farm.COND_SECONDS,
-        max_ref_length=farm.COND_SECONDS,
-        sound_norm_refs=True,
-    )
-
-    started = time.time()
-    raw = out / ".raw.wav"
-    try:
-        for index, line in enumerate(todo, 1):
-            text = engine.normalise(line.text)
-            target = out / f"{engine.key(text)}.wav"
-            result = xtts.inference(
-                text=text, language="ru",
-                gpt_cond_latent=gpt_cond_latent,
-                speaker_embedding=speaker_embedding,
-                **farm.SAMPLING,
-            )
-            engine.write_raw(result["wav"], raw)
-            engine.convert(raw, target)
-
-            done = time.time() - started
-            rate = done / index
-            left = rate * (len(todo) - index)
-            print(f"  [{index}/{len(todo)}] {line.kind} {line.detail} "
-                  f"— осталось ~{left / 60:.0f} мин", flush=True)
-    finally:
-        raw.unlink(missing_ok=True)
-
-    _write_manifest(name, sample, len(lines), device=device)
-    absent = engine.missing(name)
-    if absent:
-        print(f"\nвнимание: {len(absent)} фраз всё ещё нет. "
-              f"Запустите ещё раз — генерация продолжится с этого места.")
-    else:
-        print(f"\nготово: голос {name!r}, все {len(lines)} фраз.")
-        print(f"скопируйте {out} на машину за столом, в тот же путь.")
-
-
-def _write_manifest(name: str, sample: Path, phrases: int, device: str) -> None:
-    """Leave a note in the cache directory about what built it."""
     (engine.voice_dir(name) / "manifest.json").write_text(json.dumps({
         "voice": name,
         "model": engine.MODEL,
+        "engine": spoken_by or engines.DEFAULT,
         "source": sample.name,
         "phrases": phrases,
         "max_shells": corpus.MAX_SHELLS,
@@ -345,7 +404,7 @@ def _write_manifest(name: str, sample: Path, phrases: int, device: str) -> None:
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(
         prog="python -m tts.pregenerate",
-        description="Клонировать голос и сгенерировать всю озвучку заранее.")
+        description="Запись человека → образец, на котором строится клон.")
     sub = parser.add_subparsers(dest="command", required=True)
 
     p = sub.add_parser("prepare", help="запись → образец голоса")
@@ -354,15 +413,8 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--song", action="store_true",
                    help="это песня: отделить вокал от музыки")
     p.add_argument("--seconds", type=int, default=SAMPLE_SECONDS,
-                   help=f"длина образца (по умолчанию {SAMPLE_SECONDS})")
-
-    g = sub.add_parser("generate", help="образец → вся озвучка")
-    g.add_argument("--name", required=True)
-    g.add_argument("--device", default="auto", choices=["auto", "cuda", "mps", "cpu"])
-    g.add_argument("--max-shells", type=int, default=None,
-                   help=f"потолок магазина (по умолчанию {corpus.MAX_SHELLS})")
-    g.add_argument("--force", action="store_true",
-                   help="перегенерировать всё заново")
+                   help=f"длина одного окна (по умолчанию {SAMPLE_SECONDS}); "
+                        f"через панель считается по длине записи")
 
     c = sub.add_parser("check", help="что установлено и чего не хватает")
     c.add_argument("--name", default=None)
@@ -371,9 +423,6 @@ def main(argv: list[str] | None = None) -> None:
 
     if args.command == "prepare":
         prepare(args.source, args.name, song=args.song, seconds=args.seconds)
-    elif args.command == "generate":
-        generate(args.name, device=args.device, max_shells=args.max_shells,
-                 force=args.force)
     else:
         state = engine.available()
         print(json.dumps(state, ensure_ascii=False, indent=2))

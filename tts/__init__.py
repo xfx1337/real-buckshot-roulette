@@ -30,10 +30,11 @@ playing into an earpiece, belong to voip/ and stay there.
 
 from __future__ import annotations
 
+import random
 from pathlib import Path
 from typing import Optional
 
-from tts import corpus, engine, phrases, sessions
+from tts import corpus, engine, engines, phrases, sessions
 from tts.engine import Speech, TTSError
 from tts.sessions import Ticket, registry
 
@@ -42,33 +43,83 @@ __all__ = [
     "corpus", "engine", "phrases", "sessions",
     "issue_burner", "prepare_magnifier", "redeem", "refusal_audio",
     "status", "clear_round", "voices", "use_voice",
+    "STORY_VOICE", "pick_voice",
 ]
 
+# Who answers the telephone when there is only one player at the table.
+#
+# One-on-one is the story: the same antagonist across the whole night, so the
+# voice has to be the same one every time or he is not a character, he is
+# whoever the shuffle picked. Multiplayer has no such thread — every player is
+# calling their own informant — and there the shuffle is the point.
+STORY_VOICE = "mariarti"
 
-def _voice(text: str) -> Speech:
-    return engine.speak(text)
+# The modes that count as one-on-one. Named rather than inferred from the
+# player count: a multiplayer game that happens to have one player left alive
+# is still multiplayer, and its informant should still be a stranger.
+STORY_MODES = frozenset({"solo", "story", "story_one_round"})
+
+
+def _voice(text: str, voice: str | None = None) -> Speech:
+    return engine.speak(text, voice=voice)
+
+
+def installed_voices() -> list[str]:
+    """Names of every voice with phrases on this disk, in a stable order.
+
+    engine.voices() reports the whole record for the dealer's panel; this is
+    only the names, which is all the picker below needs.
+    """
+    return [v["name"] for v in engine.voices()]
+
+
+def pick_voice(game_mode: str) -> str:
+    """Which cloned voice answers this call.
+
+    One-on-one gets Moriarty, always. Multiplayer gets whoever the shuffle
+    lands on, so the table cannot learn the informant by his voice.
+
+    Falls back to the current voice when the wanted one has no cache directory
+    here — the voices arrive by being copied from the GPU machine, and a table
+    set up with only one of them should still be able to play a card. Returning
+    a name that cannot speak would fail in engine.speak() with a message about
+    a missing phrase, which is the wrong thing to tell the operator when the
+    real fault is a voice that was never copied.
+    """
+    available = installed_voices()
+    if not available:
+        return engine.current_voice()
+
+    if game_mode in STORY_MODES:
+        return STORY_VOICE if STORY_VOICE in available else engine.current_voice()
+
+    return random.choice(available)
 
 
 # ── the burner phone: a number to dial ──────────────────────────────────
 
 def issue_burner(*, player_id: str, player_number: int, round_id: int,
-                 position: int, total: int, shell: str) -> Ticket:
+                 position: int, total: int, shell: str,
+                 voice: str | None = None) -> Ticket:
     """Generate the informant's phrase and reserve a number that plays it.
 
     position/total/shell come from the game engine, which has already decided
     which shell is given away. This does not choose — it only says out loud
     what was chosen, so that the hint a player hears and the hint the dealer's
     panel shows can never disagree.
+
+    voice is who says it, from pick_voice() above. None keeps whatever the
+    dealer's panel last selected.
     """
     text = phrases.burner(position=position, total=total, shell=shell)
-    speech = _voice(text)
+    speech = _voice(text, voice)
     return registry.issue(text=text, audio=speech.path, player_id=player_id,
                           player_number=player_number, kind="burner",
-                          round_id=round_id)
+                          round_id=round_id, voice=speech.voice)
 
 
 def issue_burner_silent(*, player_id: str, player_number: int,
-                        round_id: int) -> Ticket:
+                        round_id: int, voice: str | None = None) -> Ticket:
     """The same, for a magazine too short to give anything away.
 
     Still a real number the player dials. The card was spent, so they are owed
@@ -77,16 +128,16 @@ def issue_burner_silent(*, player_id: str, player_number: int,
     voice is the game working, not failing.
     """
     text = phrases.burner_silent()
-    speech = _voice(text)
+    speech = _voice(text, voice)
     return registry.issue(text=text, audio=speech.path, player_id=player_id,
                           player_number=player_number, kind="burner",
-                          round_id=round_id)
+                          round_id=round_id, voice=speech.voice)
 
 
 # ── the magnifying glass: a call that comes to them ─────────────────────
 
 def prepare_magnifier(*, player_id: str, player_number: int, round_id: int,
-                      shell: str) -> tuple[str, Speech]:
+                      shell: str, voice: str | None = None) -> tuple[str, Speech]:
     """Produce what the incoming call will play.
 
     No number is issued: nobody dials this one. Returns the text and the
@@ -94,7 +145,7 @@ def prepare_magnifier(*, player_id: str, player_number: int, round_id: int,
     against the handset before the bells start.
     """
     text = phrases.magnifier(shell)
-    return text, _voice(text)
+    return text, _voice(text, voice)
 
 
 # ── a dialled number arriving from the disc reader ──────────────────────
@@ -111,9 +162,14 @@ def refusal_audio(number: str) -> Speech:
     number that was never issued gets "no such number". The caller cannot see
     a screen while holding a receiver, so the difference has to be audible or
     it does not exist.
+
+    Spoken by whoever the spent number was issued in the voice of, so a player
+    who dials their own number twice hears the same person refuse them. A
+    number nobody issued has no voice of its own and gets the current one.
     """
+    spent = registry.voice_of(number)
     text = phrases.expired() if registry.known(number) else phrases.wrong_number()
-    return _voice(text)
+    return _voice(text, spent)
 
 
 # ── housekeeping and health ─────────────────────────────────────────────

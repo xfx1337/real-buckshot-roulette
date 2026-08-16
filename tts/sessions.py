@@ -42,6 +42,25 @@ from typing import Optional
 FIRST = 100
 LAST = 999
 
+# Numbers this registry must never hand out, because something else on the
+# telephone answers them first.
+#
+# The dialled-number path asks each owner in turn, and whoever claims the
+# number plays into the earpiece. So a number claimed by two owners is not a
+# collision that shows up as an error — it is a player dialling the number
+# their card gave them and hearing somebody else's audio, with the shell hint
+# they spent an item for silently lost.
+#
+# Kept as a set the caller fills rather than a range constant: this module
+# describes numbers a phrase can live at, and it should not have to learn what
+# else the telephone does. app/memes.py reserves its own block through this.
+RESERVED: set[str] = set()
+
+
+def reserve(numbers) -> None:
+    """Keep these numbers out of every future ticket."""
+    RESERVED.update(str(number) for number in numbers)
+
 # How long an unredeemed number stays alive, in seconds. Generous: the cost of
 # being too long is a number nobody dials, which expires quietly; the cost of
 # being too short is a player standing at the telephone with a number that has
@@ -62,6 +81,11 @@ class Ticket:
     kind: str                # "burner" | "magnifier"
     round_id: int
     issued: float
+    # Which cloned voice this phrase was generated in. Recorded rather than
+    # recomputed: the picker can land somewhere else by the time this number is
+    # dialled, and the refusal for a spent number has to come from the same
+    # person who was going to give the hint.
+    voice: str = ""
     used: Optional[float] = field(default=None)
 
     @property
@@ -80,6 +104,7 @@ class Ticket:
             "kind": self.kind,
             "round_id": self.round_id,
             "text": self.text,
+            "voice": self.voice,
             "issued": self.issued,
             "used": self.used,
             "seconds_left": round(self.seconds_left, 1),
@@ -108,7 +133,7 @@ class Registry:
 
     def _free_number(self) -> str:
         """A number no live ticket is using."""
-        with_us = set(self._tickets) | set(self._spent)
+        with_us = set(self._tickets) | set(self._spent) | RESERVED
         # Bounded rather than looped forever: with 800 numbers and a handful
         # live, this succeeds on the first attempt essentially always, and a
         # game that somehow filled the range should say so rather than hang
@@ -120,13 +145,15 @@ class Registry:
         raise RuntimeError("свободных номеров не осталось")
 
     def issue(self, *, text: str, audio: Path, player_id: str,
-              player_number: int, kind: str, round_id: int) -> Ticket:
+              player_number: int, kind: str, round_id: int,
+              voice: str = "") -> Ticket:
         """Reserve a number for one phrase and hand it back."""
         with self._lock:
             self._sweep()
             ticket = Ticket(number=self._free_number(), text=text, audio=audio,
                             player_id=player_id, player_number=player_number,
-                            kind=kind, round_id=round_id, issued=time.time())
+                            kind=kind, round_id=round_id, issued=time.time(),
+                            voice=voice)
             self._tickets[ticket.number] = ticket
             return ticket
 
@@ -156,6 +183,17 @@ class Registry:
         """
         with self._lock:
             return number in self._tickets or number in self._spent
+
+    def voice_of(self, number: str) -> Optional[str]:
+        """Who spoke for this number, live or spent, or None if it is neither.
+
+        Only for the refusal: a player dialling their own spent number should
+        be turned away by the same voice that would have given them the hint,
+        not by whoever the last shuffle happened to select.
+        """
+        with self._lock:
+            ticket = self._tickets.get(number) or self._spent.get(number)
+            return ticket.voice or None if ticket else None
 
     # ── housekeeping ────────────────────────────────────────────────────
 

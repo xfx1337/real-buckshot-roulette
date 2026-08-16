@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Камеры — Дилер</title>
+    <link rel="stylesheet" href="/static/style.css">
+    <style>
+        html, body { margin: 0; height: 100%; background: #0a0a0a; color: #e0e0e0;
+            font-family: 'Courier New', Consolas, monospace; }
+        #cams-bar {
+            display: flex; align-items: center; gap: 12px;
+            padding: 8px 14px; border-bottom: 1px solid #333;
+            font-size: 13px; letter-spacing: 1px;
+        }
+        #cams-bar .title { color: #4af626; }
+        #cams-bar .hint { color: #888; font-size: 11px; margin-left: auto; }
+        #cams-grid {
+            display: grid; gap: 6px; padding: 6px;
+            height: calc(100vh - 40px); box-sizing: border-box;
+        }
+        .cam-cell {
+            position: relative; background: #111; overflow: hidden;
+            border: 1px solid #222; cursor: pointer;
+        }
+        .cam-cell iframe { width: 100%; height: 100%; border: none; background: #111; }
+        .cam-cell .cam-label {
+            position: absolute; top: 8px; left: 8px; z-index: 5;
+            background: rgba(0,0,0,.7); color: #fff; padding: 3px 7px;
+            font-size: 11px; border: 1px solid rgba(255,255,255,.2);
+            pointer-events: none;
+        }
+        .click-overlay { position: absolute; inset: 0; z-index: 4; cursor: pointer; }
+        /* Виден ли этот поток игроку. Дилеру нужно различать сразу: на самой
+           плитке, а не в отдельной вкладке настроек. */
+        .cam-vis {
+            position: absolute; top: 8px; right: 8px; z-index: 5;
+            background: rgba(0,0,0,.75); padding: 3px 7px;
+            font-size: 11px; letter-spacing: 1px; border: 1px solid;
+            pointer-events: none;
+        }
+        .cam-vis[data-vis="normal"] { display: none; }
+        .cam-vis[data-vis="rare"] { color: #e5bc3e; border-color: #e5bc3e; }
+        .cam-vis[data-vis="blocked"] { color: #ff5a3a; border-color: #ff5a3a; }
+        .cam-cell[data-vis="blocked"] { border-color: #ff5a3a; }
+        .cam-cell[data-vis="rare"] { border-color: #e5bc3e; }
+        /* Fullscreen one camera */
+        #cams-grid.fullscreen { grid-template-columns: 1fr !important; grid-template-rows: 1fr !important; }
+        #cams-grid.fullscreen .cam-cell { display: none; }
+        #cams-grid.fullscreen .cam-cell.active { display: block; }
+        .exit-full {
+            display: none; position: absolute; top: 8px; right: 8px; z-index: 6;
+            background: rgba(0,0,0,.7); color: #ff2a2a; border: 1px solid #ff2a2a;
+            padding: 4px 10px; font-family: inherit; cursor: pointer; font-size: 12px;
+        }
+        #cams-grid.fullscreen .cam-cell.active .exit-full { display: block; }
+        /* В полноэкранном режиме правый верхний угол занимает кнопка выхода —
+           уводим бейдж видимости под неё, иначе они наезжают друг на друга. */
+        #cams-grid.fullscreen .cam-cell.active .cam-vis { top: 40px; }
+    </style>
+</head>
+<body>
+    <div id="cams-bar">
+        <span class="title">📷 КАМЕРЫ — ПАНЕЛЬ ДИЛЕРА</span>
+        <span class="hint">клик по камере — на весь экран • ещё клик или ✕ — назад к сетке</span>
+    </div>
+    <div id="cams-grid"></div>
+
+    <script>
+        // Camera path names come from the CCTV config (server-rendered).
+        const CAMERAS = {{ cameras | tojson }};
+        const host = location.hostname;
+        const grid = document.getElementById('cams-grid');
+
+        function layout(n) {
+            const cols = n <= 1 ? 1 : n <= 4 ? 2 : n <= 9 ? 3 : 4;
+            const rows = Math.ceil(n / cols);
+            grid.style.gridTemplateColumns = `repeat(${cols}, 1fr)`;
+            grid.style.gridTemplateRows = `repeat(${rows}, 1fr)`;
+        }
+
+        function render() {
+            layout(CAMERAS.length);
+            grid.innerHTML = CAMERAS.map(cam => `
+                <div class="cam-cell" data-cam="${cam}" data-vis="normal">
+                    <div class="cam-label">${cam.toUpperCase()} <span data-stat="${cam}">…</span></div>
+                    <div class="cam-vis" data-vis="normal" data-vis-for="${cam}"></div>
+                    <button class="exit-full" data-exit>✕ НАЗАД</button>
+                    <div class="click-overlay"></div>
+                    <iframe scrolling="no" src="http://${host}:8889/${encodeURIComponent(cam)}/"></iframe>
+                </div>`).join('');
+        }
+
+        function enterFull(cell) {
+            grid.querySelectorAll('.cam-cell').forEach(c => c.classList.remove('active'));
+            cell.classList.add('active');
+            grid.classList.add('fullscreen');
+        }
+        function exitFull() { grid.classList.remove('fullscreen'); }
+
+        grid.addEventListener('click', (e) => {
+            const cell = e.target.closest('.cam-cell');
+            if (!cell) return;
+            if (e.target.closest('[data-exit]')) { exitFull(); return; }
+            if (grid.classList.contains('fullscreen')) exitFull();
+            else enterFull(cell);
+        });
+
+        render();
+
+        // Подпись на каждой плитке: реально ли идёт запись плюс заряд и
+        // температура устройства, если оно их присылает. Раньше тут висело
+        // статичное [REC] — оно горело даже у мёртвой камеры.
+        async function pollStatus() {
+            try {
+                const r = await fetch('/api/cctv/status');
+                const d = await r.json();
+                const rareChance = d.rare_chance ?? 10;
+                (d.cameras || []).forEach(c => {
+                    // Бейдж видимости для игрока — рисуем до статуса потока,
+                    // чтобы он появлялся даже у мёртвой камеры.
+                    const vis = c.visibility || 'normal';
+                    const badge = grid.querySelector(`[data-vis-for="${CSS.escape(c.name)}"]`);
+                    if (badge) {
+                        badge.dataset.vis = vis;
+                        badge.textContent = vis === 'blocked'
+                            ? '⛔ СКРЫТА ОТ ИГРОКА'
+                            : (vis === 'rare' ? `⚠ РЕДКАЯ ~${rareChance}%` : '');
+                        badge.closest('.cam-cell').dataset.vis = vis;
+                    }
+
+                    const el = grid.querySelector(`[data-stat="${CSS.escape(c.name)}"]`);
+                    if (!el) return;
+                    const parts = [];
+                    parts.push(c.recording ? '[REC]' : (c.online ? '[НЕТ ПОТОКА]' : '[ОФЛАЙН]'));
+                    if (c.battery !== null && c.battery !== undefined) {
+                        parts.push(`${c.charging ? '⚡' : '🔋'}${Math.round(c.battery)}%`);
+                    }
+                    // Градусы, если есть датчик; иначе уровень нагрева от
+                    // Compute Pressure API — точных °C браузер не отдаёт.
+                    if (c.temperature !== null && c.temperature !== undefined) {
+                        parts.push(`🌡${c.temperature.toFixed(0)}°`);
+                    } else if (c.pressure) {
+                        const short = { nominal:'ok', fair:'тепло', serious:'горячо', critical:'ПЕРЕГРЕВ' };
+                        if (short[c.pressure]) parts.push(`🌡${short[c.pressure]}`);
+                    }
+                    el.textContent = parts.join(' ');
+                    el.style.color = c.recording ? '#ff4a4a' : '#888';
+                });
+            } catch (e) { /* следующий тик покажет */ }
+        }
+
+        pollStatus();
+        setInterval(pollStatus, 5000);
+    </script>
+</body>
+</html>

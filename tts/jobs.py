@@ -70,6 +70,13 @@ class Job:
     total: int = 0               # phrases the full run will make
     auditions: list[str] = field(default_factory=list)   # wav filenames
     audition_texts: list[str] = field(default_factory=list)
+    # Which engine spoke each audition, positionally alongside the two lists
+    # above. Kept per phrase rather than per job because one audition can hold
+    # several engines saying the same lines — that comparison is the point.
+    audition_engines: list[str] = field(default_factory=list)
+    # Which engines were asked for, and which one generated the vocabulary.
+    engines: list[str] = field(default_factory=list)
+    engine: str = ""
     started: float = field(default_factory=time.time)
     updated: float = field(default_factory=time.time)
 

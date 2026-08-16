@@ -1,0 +1,1385 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=EB+Garamond:wght@400;600;700;800&family=Share+Tech+Mono&family=Special+Elite&family=JetBrains+Mono:wght@400;500;600;700&display=swap" />
+<style>
+  body { margin: 0; background: #0a0a0a; }
+  a { color: #3fef6a; text-decoration: none; }
+  a:hover { color: #5fff8f; }
+  @keyframes redPulse { 0%,100% { opacity: 1 } 50% { opacity: .35 } }
+  @keyframes actPulse {
+    0%,100% { box-shadow: 0 0 0 0 rgba(63,239,106,.5), inset 0 1px 0 rgba(255,255,255,.25); }
+    50% { box-shadow: 0 0 32px 6px rgba(63,239,106,.42), inset 0 1px 0 rgba(255,255,255,.38); }
+  }
+  @keyframes actPulseRed {
+    0%,100% { box-shadow: 0 0 0 0 rgba(216,106,106,.45); }
+    50% { box-shadow: 0 0 32px 6px rgba(200,70,70,.45); }
+  }
+  @keyframes tabPulse {
+    0%,100% { box-shadow: 0 0 0 0 rgba(255,164,56,.45); }
+    50% { box-shadow: 0 0 18px 3px rgba(255,164,56,.45); }
+  }
+  @keyframes dotPulse { 0%,100% { opacity: 1 } 50% { opacity: .25 } }
+  @keyframes ringPulse {
+    0%,100% { opacity: .9; box-shadow: 0 0 14px rgba(168,50,50,.5); }
+    50% { opacity: .35; box-shadow: 0 0 4px rgba(168,50,50,.25); }
+  }
+</style>
+</helmet>
+<div style="width: 1280px; height: 832px; margin: 0 auto; position: relative; overflow: hidden; display: flex; flex-direction: column; background: radial-gradient(120% 90% at 70% 0%, #17100f 0%, #121010 42%, #0a0a0a 100%); border: 1px solid #241614; font-family: 'Share Tech Mono', monospace; color: #cdbfae;">
+  <div style="position: absolute; inset: 0; pointer-events: none; z-index: 60; box-shadow: inset 0 0 150px 26px rgba(0,0,0,.8);"></div>
+  <div style="position: absolute; inset: 0; pointer-events: none; z-index: 61; opacity: .2; background: repeating-linear-gradient(to bottom, rgba(0,0,0,0) 0 2px, rgba(0,0,0,.3) 3px, rgba(0,0,0,0) 4px);"></div>
+
+  <header style="position: relative; z-index: 20; flex: 0 0 auto; height: 46px; display: flex; align-items: center; gap: 12px; padding: 0 14px; border-bottom: 1px solid #241614; background: linear-gradient(180deg, #1b1615, #100e0d);">
+    <div style="display: flex; align-items: center; gap: 8px; flex: 0 0 auto;">
+      <span style="width: 10px; height: 10px; border-radius: 50%; border: 2px solid #a83232; background: radial-gradient(circle, #a83232 0 32%, transparent 44%); animation: redPulse 1.6s infinite;"></span>
+      <span style="font-family: 'JetBrains Mono', monospace; font-size: 12px; font-weight: 600; letter-spacing: 3px; white-space: nowrap; color: #f2e9da;">ПУЛЬТ ОПЕРАТОРА</span>
+    </div>
+    <span style="width: 1px; height: 22px; background: #2c2119;"></span>
+    <span style="font-family: 'JetBrains Mono', monospace; font-size: 12px; font-weight: 700; letter-spacing: 1.5px; white-space: nowrap; padding: 6px 11px; color: #08120b; background: #3fef6a; box-shadow: 0 0 14px rgba(63,239,106,.3);">{{ phaseLabel }}</span>
+    <span style="font-family: 'JetBrains Mono', monospace; font-size: 12px; font-weight: 700; letter-spacing: 1.5px; white-space: nowrap; padding: 6px 11px; color: #241a06; background: linear-gradient(180deg, #ead9ae, #c9b47e); box-shadow: inset 0 1px 0 rgba(255,248,225,.7);">{{ roundLabel }}</span>
+    <span style="font-family: 'JetBrains Mono', monospace; font-size: 11px; letter-spacing: 1.5px; white-space: nowrap; color: #8a7a68;">{{ modeLabel }}</span>
+    <span style="flex: 1 1 auto;"></span>
+    <div style="display: flex; align-items: center; gap: 6px;">
+      <button onClick="{{ toggleSolenoid }}" title="Соленоид" style="{{ solenoidStyle }}">⚡</button>
+      <button onClick="{{ toggleSound }}" title="Звук" style="{{ soundStyle }}">🔊</button>
+      <button onClick="{{ toggleVoice }}" title="Голоса информатора" style="{{ voiceStyle }}">🎙</button>
+      <button onClick="{{ goServer }}" title="Сервер и железо" style="width: 38px; height: 32px; font-size: 14px; background: linear-gradient(180deg, #5c9180, #33574a); border: 1px solid #26443a; color: #f2ecd9; cursor: pointer;">⚙</button>
+      <button onClick="{{ askFinish }}" style="height: 32px; padding: 0 14px; font-family: 'JetBrains Mono', monospace; font-size: 11px; font-weight: 700; letter-spacing: .1em; background: linear-gradient(180deg, #9a3226, #54160e); border: 1px solid #4a120c; color: #f5e6c8; cursor: pointer;">ЗАВЕРШИТЬ</button>
+    </div>
+  </header>
+
+  <nav style="position: relative; z-index: 20; flex: 0 0 auto; height: 52px; display: flex; align-items: stretch; gap: 4px; padding: 6px 14px 0; background: #0f0d0c; border-bottom: 1px solid #241614;">
+    <sc-for list="{{ tabs }}" as="t" hint-placeholder-count="8">
+      <button onClick="{{ t.go }}" style="{{ t.style }}">
+        <span style="font-family: 'JetBrains Mono', monospace; font-size: 9px; letter-spacing: .1em; opacity: .55;">{{ t.key }}</span>
+        <span style="font-family: 'JetBrains Mono', monospace; font-size: 12px; font-weight: 700; letter-spacing: .06em; display: flex; align-items: center; gap: 6px;">{{ t.label }}<span style="{{ t.dotStyle }}"></span></span>
+      </button>
+    </sc-for>
+    <span style="flex: 1 1 auto;"></span>
+    <div style="display: flex; align-items: center; gap: 6px; padding-bottom: 6px;">
+      <button onClick="{{ undo }}" style="{{ undoStyle }}">↩ ОТКАТИТЬ</button>
+      <button onClick="{{ endRound }}" style="height: 34px; padding: 0 13px; font-family: 'JetBrains Mono', monospace; font-size: 11px; font-weight: 700; letter-spacing: .08em; background: linear-gradient(180deg, #5c9180, #33574a); border: 1px solid #26443a; color: #f2ecd9; cursor: pointer;">КОНЕЦ РАУНДА</button>
+    </div>
+  </nav>
+
+  <section style="position: relative; z-index: 18; flex: 0 0 auto; display: grid; grid-template-columns: 178px 250px minmax(0, 1fr) 146px 172px; gap: 1px; background: #241614; border-bottom: 1px solid #241614;">
+    <div style="background: linear-gradient(180deg, #1a0e0e, #120b0b); padding: 9px 12px 10px; display: flex; flex-direction: column; gap: 7px;">
+      <div style="font-family: 'JetBrains Mono', monospace; font-size: 9px; letter-spacing: .24em; color: #8a7a68;">ПАТРОННИК</div>
+      <div style="display: flex; align-items: center; gap: 10px;">
+        <span style="{{ chamberRingStyle }}"><span style="{{ chamberDotStyle }}"></span></span>
+        <div>
+          <div style="font-family: 'JetBrains Mono', monospace; font-size: 17px; font-weight: 700; line-height: 1; color: {{ chamberColor }};">{{ chamberLabel }}</div>
+          <div style="font-family: 'Share Tech Mono', monospace; font-size: 10px; letter-spacing: .1em; color: #8a7a68; margin-top: 3px;">{{ chamberHint }}</div>
+        </div>
+      </div>
+    </div>
+
+    <div style="background: linear-gradient(180deg, #171310, #110e0d); padding: 9px 12px 10px; display: flex; flex-direction: column; gap: 7px;">
+      <div style="display: flex; justify-content: space-between; align-items: baseline;">
+        <span style="font-family: 'JetBrains Mono', monospace; font-size: 9px; letter-spacing: .24em; color: #8a7a68;">МАГАЗИН</span>
+        <span style="font-family: 'Share Tech Mono', monospace; font-size: 10px; color: #8a7a68;">{{ magLabel }}</span>
+      </div>
+      <div style="display: flex; align-items: center; gap: 13px;">
+        <div style="display: flex; align-items: baseline; gap: 5px;">
+          <span style="font-family: 'JetBrains Mono', monospace; font-size: 25px; font-weight: 700; line-height: 1; color: #d86a6a; text-shadow: 0 0 14px rgba(168,50,50,.5);">{{ liveCount }}</span>
+          <span style="font-family: 'JetBrains Mono', monospace; font-size: 9px; letter-spacing: .16em; color: #6a3a3a;">БОЕВЫХ</span>
+        </div>
+        <div style="display: flex; align-items: baseline; gap: 5px;">
+          <span style="font-family: 'JetBrains Mono', monospace; font-size: 25px; font-weight: 700; line-height: 1; color: #6f9fb8;">{{ blankCount }}</span>
+          <span style="font-family: 'JetBrains Mono', monospace; font-size: 9px; letter-spacing: .16em; color: #3f5f70;">ХОЛОСТЫХ</span>
+        </div>
+        <div style="display: flex; gap: 3px; margin-left: auto;">
+          <sc-for list="{{ magPills }}" as="m" hint-placeholder-count="5">
+            <span style="{{ m.style }}"></span>
+          </sc-for>
+        </div>
+      </div>
+    </div>
+
+    <div style="background: linear-gradient(180deg, #171310, #110e0d); padding: 9px 12px 10px; display: flex; flex-direction: column; gap: 5px; min-width: 0;">
+      <div style="font-family: 'JetBrains Mono', monospace; font-size: 9px; letter-spacing: .24em; color: #8a7a68;">ИГРОКИ</div>
+      <sc-for list="{{ players }}" as="p" hint-placeholder-count="2">
+        <div style="{{ p.rowStyle }}">
+          <span style="font-family: 'JetBrains Mono', monospace; font-size: 10px; width: 14px; color: {{ p.numColor }};">{{ p.mark }}</span>
+          <span style="font-family: 'Special Elite', monospace; font-size: 13px; color: #f2e9da; width: 74px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">{{ p.name }}</span>
+          <span style="display: flex; align-items: center; gap: 3px;">
+            <sc-for list="{{ p.bolts }}" as="b" hint-placeholder-count="5">
+              <img src="{{ b.src }}" alt="" style="{{ b.style }}" />
+            </sc-for>
+          </span>
+          <span style="font-family: 'JetBrains Mono', monospace; font-size: 12px; font-weight: 700; color: {{ p.hpColor }}; width: 32px; text-align: right;">{{ p.hpText }}</span>
+          <span style="display: flex; gap: 3px;">
+            <button onClick="{{ p.dec }}" style="width: 22px; height: 20px; font-family: 'JetBrains Mono', monospace; font-size: 11px; background: #1d1715; color: #d99; border: 1px solid #4a2020; cursor: pointer;">−</button>
+            <button onClick="{{ p.inc }}" style="width: 22px; height: 20px; font-family: 'JetBrains Mono', monospace; font-size: 11px; background: #1d1715; color: #3fef6a; border: 1px solid #2a4a2c; cursor: pointer;">+</button>
+          </span>
+          <span style="display: flex; gap: 4px; flex: 1 1 auto; min-width: 0; overflow: hidden;">
+            <sc-for list="{{ p.items }}" as="it" hint-placeholder-count="2">
+              <span style="display: inline-flex; align-items: center; gap: 3px; font-family: 'JetBrains Mono', monospace; font-size: 10px; color: #cdbfae; background: rgba(255,255,255,.03); border: 1px solid #33261c; padding: 2px 5px; white-space: nowrap;"><span style="font-size: 11px;">{{ it.emoji }}</span>{{ it.label }}</span>
+            </sc-for>
+          </span>
+        </div>
+      </sc-for>
+    </div>
+
+    <div style="background: linear-gradient(180deg, #171310, #110e0d); padding: 9px 12px 10px; display: flex; flex-direction: column; gap: 6px;">
+      <div style="font-family: 'JetBrains Mono', monospace; font-size: 9px; letter-spacing: .24em; color: #8a7a68;">МОДИФИКАТОРЫ</div>
+      <span style="{{ sawChipStyle }}">{{ sawChipText }}</span>
+      <span style="{{ cuffChipStyle }}">{{ cuffChipText }}</span>
+    </div>
+
+    <div style="background: linear-gradient(180deg, #171310, #110e0d); padding: 9px 12px 10px; display: flex; flex-direction: column; gap: 6px;">
+      <div style="font-family: 'JetBrains Mono', monospace; font-size: 9px; letter-spacing: .24em; color: #8a7a68;">ЖЕЛЕЗО</div>
+      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 4px 8px; font-family: 'JetBrains Mono', monospace; font-size: 11px;">
+        <sc-for list="{{ hardware }}" as="h" hint-placeholder-count="4">
+          <span style="display: flex; align-items: center; gap: 5px; color: #cdbfae; white-space: nowrap;"><span style="{{ h.dot }}"></span>{{ h.label }}</span>
+        </sc-for>
+      </div>
+    </div>
+  </section>
+
+  <main style="position: relative; z-index: 16; flex: 1 1 auto; min-height: 0; padding: 12px 14px 14px;">
+
+    <sc-if value="{{ isTurn }}" hint-placeholder-val="{{ true }}">
+      <div style="height: 100%; display: grid; grid-template-columns: minmax(0, 1fr) 312px; gap: 12px;">
+        <div style="display: flex; flex-direction: column; gap: 12px; min-height: 0;">
+          <div style="{{ promptStyle }}">
+            <span style="font-family: 'JetBrains Mono', monospace; font-size: 11px; letter-spacing: .2em; color: #120c08; background: #ffa438; padding: 5px 9px; font-weight: 700; white-space: nowrap;">ЖДЁТ ВАС</span>
+            <span style="font-family: 'EB Garamond', Georgia, serif; font-size: 23px; font-weight: 700; color: #ffd9a0;">{{ promptText }}</span>
+            <span style="flex: 1 1 auto;"></span>
+            <span style="font-family: 'Share Tech Mono', monospace; font-size: 12px; white-space: nowrap; color: #b39068;">{{ promptHint }}</span>
+          </div>
+
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; flex: 0 0 auto;">
+            <button onClick="{{ fireSelf }}" style="{{ selfBtnStyle }}">
+              <span style="font-family: 'Special Elite', monospace; font-size: 26px; letter-spacing: .04em;">В СЕБЯ</span>
+              <span style="font-family: 'JetBrains Mono', monospace; font-size: 12px; letter-spacing: .08em; white-space: nowrap; opacity: .8;">{{ selfBtnHint }}</span>
+            </button>
+            <button onClick="{{ fireTarget }}" style="{{ targetBtnStyle }}">
+              <span style="font-family: 'Special Elite', monospace; font-size: 26px; letter-spacing: .04em;">{{ targetBtnLabel }}</span>
+              <span style="font-family: 'JetBrains Mono', monospace; font-size: 12px; letter-spacing: .08em; white-space: nowrap; opacity: .8;">{{ targetBtnHint }}</span>
+            </button>
+          </div>
+
+          <div style="flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; background: linear-gradient(160deg, #181310, #120e0d); border: 1px solid #322217; padding: 11px 13px 13px;">
+            <div style="display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid #322217; padding-bottom: 8px; margin-bottom: 10px;">
+              <span style="font-family: 'JetBrains Mono', monospace; font-size: 10px; letter-spacing: .22em; color: #3fef6a; text-shadow: 0 0 6px rgba(63,239,106,.5);">{{ handTitle }}</span>
+              <span style="font-family: 'Share Tech Mono', monospace; font-size: 11px; white-space: nowrap; color: #8a7a68;">нажмите, когда игрок применил предмет</span>
+            </div>
+            <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; align-content: start;">
+              <sc-for list="{{ handItems }}" as="it" hint-placeholder-count="3">
+                <button onClick="{{ it.use }}" style="{{ it.style }}">
+                  <span style="font-size: 28px; line-height: 1; flex: 0 0 auto;">{{ it.emoji }}</span>
+                  <span style="min-width: 0;">
+                    <span style="display: block; font-family: 'Special Elite', monospace; font-size: 16px; color: #f2e9da;">{{ it.label }}</span>
+                    <span style="display: block; font-family: 'JetBrains Mono', monospace; font-size: 10px; color: #8a7a68; margin-top: 3px; line-height: 1.35;">{{ it.effect }}</span>
+                  </span>
+                </button>
+              </sc-for>
+              <sc-if value="{{ hasCuffs }}" hint-placeholder-val="{{ true }}">
+                <div style="display: flex; align-items: center; gap: 10px; padding: 10px 14px; border: 1px solid #322217; background: #14100d; min-height: 68px;">
+                  <span style="font-size: 26px;">⛓️</span>
+                  <span style="flex: 1 1 auto; min-width: 0;">
+                    <span style="display: block; font-family: 'Special Elite', monospace; font-size: 15px; color: #f2e9da; margin-bottom: 5px;">Наручники</span>
+                    <span style="display: flex; gap: 6px;">
+                      <select value="{{ cuffTarget }}" onChange="{{ setCuffTarget }}" style="flex: 1 1 auto; min-width: 0; font-family: 'Share Tech Mono', monospace; font-size: 12px; color: #3fef6a; background: #100c0b; border: 1px solid #3a2a22; padding: 6px 7px;">
+                        <sc-for list="{{ opponents }}" as="o" hint-placeholder-count="1">
+                          <option value="{{ o.id }}">{{ o.title }}</option>
+                        </sc-for>
+                      </select>
+                      <button onClick="{{ useCuffs }}" style="font-family: 'JetBrains Mono', monospace; font-size: 11px; font-weight: 700; padding: 6px 11px; background: linear-gradient(180deg, #5c9180, #33574a); border: 1px solid #26443a; color: #f2ecd9; cursor: pointer;">ПРИМЕНИТЬ</button>
+                    </span>
+                  </span>
+                </div>
+              </sc-if>
+            </div>
+            <span style="flex: 1 1 auto;"></span>
+            <div style="display: flex; gap: 10px; margin-top: 10px;">
+              <button onClick="{{ passTurn }}" style="flex: 1 1 auto; height: 44px; font-family: 'JetBrains Mono', monospace; font-size: 12px; font-weight: 700; letter-spacing: .1em; background: #191412; border: 1px solid #3a2a22; color: #cdbfae; cursor: pointer;">ПЕРЕДАТЬ ХОД ВРУЧНУЮ</button>
+              <button onClick="{{ revealChamber }}" style="flex: 0 0 240px; height: 44px; font-family: 'JetBrains Mono', monospace; font-size: 12px; font-weight: 700; letter-spacing: .1em; background: #191412; border: 1px solid #3a2a22; color: #cdbfae; cursor: pointer;">ПОКАЗАТЬ ПАТРОННИК МНЕ</button>
+            </div>
+          </div>
+        </div>
+
+        <div style="display: flex; flex-direction: column; gap: 12px; min-height: 0;">
+          <div style="flex: 0 0 auto; background: linear-gradient(160deg, #181310, #120e0d); border: 1px solid #322217; padding: 11px 13px;">
+            <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 9px;">
+              <span style="font-family: 'JetBrains Mono', monospace; font-size: 10px; letter-spacing: .22em; color: #3fef6a;">РЕВОЛЬВЕР · КАПСЮЛИ</span>
+              <span style="font-family: 'JetBrains Mono', monospace; font-size: 14px; font-weight: 700; color: #f2e9da;">{{ capsLabel }}</span>
+            </div>
+            <div style="display: flex; gap: 4px;">
+              <sc-for list="{{ caps }}" as="c" hint-placeholder-count="8">
+                <span style="{{ c.style }}"></span>
+              </sc-for>
+            </div>
+            <div style="display: flex; align-items: center; gap: 8px; margin-top: 9px;">
+              <span style="flex: 1 1 auto; font-family: 'Share Tech Mono', monospace; font-size: 11px; color: {{ capsHintColor }};">{{ capsHint }}</span>
+              <button onClick="{{ reloadCaps }}" style="font-family: 'JetBrains Mono', monospace; font-size: 10px; font-weight: 700; padding: 6px 10px; background: linear-gradient(180deg, #e5bc3e, #a97f1e); border: 1px solid #7a5c14; color: #1d1403; cursor: pointer;">ПЕРЕЗАРЯДИЛ 8</button>
+            </div>
+          </div>
+
+          <div style="flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; background: linear-gradient(160deg, #181310, #120e0d); border: 1px solid #322217; padding: 11px 13px 13px;">
+            <div style="display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid #322217; padding-bottom: 8px; margin-bottom: 9px;">
+              <span style="font-family: 'JetBrains Mono', monospace; font-size: 10px; letter-spacing: .22em; color: #3fef6a;">ЛОГ СОБЫТИЙ</span>
+              <span style="font-family: 'Share Tech Mono', monospace; font-size: 10px; color: #8a7a68;">{{ logCount }}</span>
+            </div>
+            <div style="flex: 1 1 auto; overflow-y: auto; display: flex; flex-direction: column; gap: 5px;">
+              <sc-for list="{{ log }}" as="e" hint-placeholder-count="7">
+                <div style="{{ e.style }}"><span style="color: #6b5c4e; margin-right: 7px;">{{ e.time }}</span>{{ e.text }}</div>
+              </sc-for>
+            </div>
+          </div>
+        </div>
+      </div>
+    </sc-if>
+
+    <sc-if value="{{ isLoading }}" hint-placeholder-val="{{ false }}">
+      <div style="height: 100%; display: grid; grid-template-columns: minmax(0, 1fr) 312px; gap: 12px;">
+        <div style="display: flex; flex-direction: column; gap: 12px; min-height: 0;">
+          <div style="{{ promptStyle }}">
+            <span style="font-family: 'JetBrains Mono', monospace; font-size: 11px; letter-spacing: .2em; color: #120c08; background: #ffa438; padding: 5px 9px; font-weight: 700; white-space: nowrap;">ЖДЁТ ВАС</span>
+            <span style="font-family: 'EB Garamond', Georgia, serif; font-size: 23px; font-weight: 700; color: #ffd9a0;">Зарядите магазин строго по списку</span>
+            <span style="flex: 1 1 auto;"></span>
+            <span style="font-family: 'Share Tech Mono', monospace; font-size: 12px; white-space: nowrap; color: #b39068;">первый в списке досылается первым</span>
+          </div>
+          <div style="flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; background: linear-gradient(160deg, #181310, #120e0d); border: 1px solid #322217; padding: 12px 14px 14px;">
+            <div style="display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid #322217; padding-bottom: 8px; margin-bottom: 12px;">
+              <span style="font-family: 'JetBrains Mono', monospace; font-size: 10px; letter-spacing: .22em; color: #3fef6a;">{{ loadTitle }}</span>
+              <div style="display: flex; gap: 6px;">
+                <button onClick="{{ reshuffle }}" style="font-family: 'JetBrains Mono', monospace; font-size: 10px; font-weight: 700; padding: 6px 10px; background: #191412; border: 1px solid #3a2a22; color: #cdbfae; cursor: pointer;">ПЕРЕТАСОВАТЬ</button>
+                <button onClick="{{ printOrder }}" style="font-family: 'JetBrains Mono', monospace; font-size: 10px; font-weight: 700; padding: 6px 10px; background: #191412; border: 1px solid #3a2a22; color: #cdbfae; cursor: pointer;">В ЛОГ</button>
+              </div>
+            </div>
+            <div style="display: flex; flex-direction: column; gap: 8px;">
+              <sc-for list="{{ loadOrder }}" as="s" hint-placeholder-count="5">
+                <div style="{{ s.rowStyle }}">
+                  <span style="font-family: 'JetBrains Mono', monospace; font-size: 13px; font-weight: 700; color: #8a7a68; width: 46px;">{{ s.idx }}</span>
+                  <span style="{{ s.pillStyle }}"></span>
+                  <span style="font-family: 'Special Elite', monospace; font-size: 18px; color: {{ s.color }};">{{ s.label }}</span>
+                  <span style="flex: 1 1 auto;"></span>
+                  <span style="font-family: 'Share Tech Mono', monospace; font-size: 12px; color: #8a7a68;">{{ s.note }}</span>
+                </div>
+              </sc-for>
+            </div>
+            <span style="flex: 1 1 auto;"></span>
+            <button onClick="{{ confirmLoaded }}" style="{{ confirmBtnStyle }}">ЗАРЯЖЕНО — ПРОДОЛЖИТЬ</button>
+          </div>
+        </div>
+        <div style="display: flex; flex-direction: column; gap: 12px; min-height: 0;">
+          <div style="flex: 0 0 auto; background: {{ capsWarnBg }}; border: 1px solid {{ capsWarnBorder }}; padding: 12px 13px;">
+            <div style="font-family: 'JetBrains Mono', monospace; font-size: 10px; letter-spacing: .2em; color: {{ capsWarnColor }}; margin-bottom: 7px;">КАПСЮЛИ В РЕВОЛЬВЕРЕ</div>
+            <div style="font-family: 'Share Tech Mono', monospace; font-size: 13px; line-height: 1.45; color: #ffd9a0;">{{ capsWarnText }}</div>
+            <button onClick="{{ reloadCaps }}" style="margin-top: 10px; width: 100%; height: 36px; font-family: 'JetBrains Mono', monospace; font-size: 11px; font-weight: 700; background: linear-gradient(180deg, #e5bc3e, #a97f1e); border: 1px solid #7a5c14; color: #1d1403; cursor: pointer;">ПЕРЕЗАРЯДИЛ 8 КАПСЮЛЕЙ</button>
+          </div>
+          <div style="flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; background: linear-gradient(160deg, #181310, #120e0d); border: 1px solid #322217; padding: 11px 13px 13px;">
+            <div style="font-family: 'JetBrains Mono', monospace; font-size: 10px; letter-spacing: .22em; color: #3fef6a; border-bottom: 1px solid #322217; padding-bottom: 8px; margin-bottom: 9px;">ЛОГ СОБЫТИЙ</div>
+            <div style="flex: 1 1 auto; overflow-y: auto; display: flex; flex-direction: column; gap: 5px;">
+              <sc-for list="{{ log }}" as="e" hint-placeholder-count="7">
+                <div style="{{ e.style }}"><span style="color: #6b5c4e; margin-right: 7px;">{{ e.time }}</span>{{ e.text }}</div>
+              </sc-for>
+            </div>
+          </div>
+        </div>
+      </div>
+    </sc-if>
+
+    <sc-if value="{{ isItems }}" hint-placeholder-val="{{ false }}">
+      <div style="height: 100%; display: grid; grid-template-columns: minmax(0, 1fr) 312px; gap: 12px;">
+        <div style="display: flex; flex-direction: column; gap: 12px; min-height: 0;">
+          <div style="{{ promptStyle }}">
+            <span style="font-family: 'JetBrains Mono', monospace; font-size: 11px; letter-spacing: .2em; color: #120c08; background: #ffa438; padding: 5px 9px; font-weight: 700; white-space: nowrap;">ЖДЁТ ВАС</span>
+            <span style="font-family: 'EB Garamond', Georgia, serif; font-size: 23px; font-weight: 700; color: #ffd9a0;">Раздайте предметы по игрокам</span>
+            <span style="flex: 1 1 auto;"></span>
+            <span style="font-family: 'Share Tech Mono', monospace; font-size: 12px; white-space: nowrap; color: #b39068;">выдайте реквизит и подтвердите</span>
+          </div>
+          <div style="flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; background: linear-gradient(160deg, #181310, #120e0d); border: 1px solid #322217; padding: 12px 14px 14px;">
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+              <sc-for list="{{ dealt }}" as="d" hint-placeholder-count="2">
+                <div style="border: 1px solid #322217; background: #14100d; padding: 12px 13px;">
+                  <div style="display: flex; align-items: center; gap: 8px; border-bottom: 1px solid #2b2118; padding-bottom: 8px; margin-bottom: 10px;">
+                    <span style="font-family: 'JetBrains Mono', monospace; font-size: 11px; color: #3fef6a;">{{ d.num }}</span>
+                    <span style="font-family: 'Special Elite', monospace; font-size: 16px; color: #f2e9da;">{{ d.name }}</span>
+                    <span style="flex: 1 1 auto;"></span>
+                    <button onClick="{{ d.reroll }}" style="font-family: 'JetBrains Mono', monospace; font-size: 10px; padding: 5px 8px; background: #191412; border: 1px solid #3a2a22; color: #cdbfae; cursor: pointer;">ЗАМЕНИТЬ</button>
+                  </div>
+                  <div style="display: flex; flex-direction: column; gap: 9px;">
+                    <sc-for list="{{ d.items }}" as="it" hint-placeholder-count="2">
+                      <div style="display: flex; align-items: center; gap: 10px; font-family: 'Special Elite', monospace; font-size: 15px; color: #f2e9da;"><span style="font-size: 22px;">{{ it.emoji }}</span>{{ it.label }}</div>
+                    </sc-for>
+                  </div>
+                </div>
+              </sc-for>
+            </div>
+            <span style="flex: 1 1 auto;"></span>
+            <button onClick="{{ confirmDealt }}" style="{{ confirmBtnStyle }}">ПРЕДМЕТЫ РОЗДАНЫ</button>
+          </div>
+        </div>
+        <div style="display: flex; flex-direction: column; min-height: 0; background: linear-gradient(160deg, #181310, #120e0d); border: 1px solid #322217; padding: 11px 13px 13px;">
+          <div style="font-family: 'JetBrains Mono', monospace; font-size: 10px; letter-spacing: .22em; color: #3fef6a; border-bottom: 1px solid #322217; padding-bottom: 8px; margin-bottom: 9px;">ЛОГ СОБЫТИЙ</div>
+          <div style="flex: 1 1 auto; overflow-y: auto; display: flex; flex-direction: column; gap: 5px;">
+            <sc-for list="{{ log }}" as="e" hint-placeholder-count="7">
+              <div style="{{ e.style }}"><span style="color: #6b5c4e; margin-right: 7px;">{{ e.time }}</span>{{ e.text }}</div>
+            </sc-for>
+          </div>
+        </div>
+      </div>
+    </sc-if>
+
+    <sc-if value="{{ isLobby }}" hint-placeholder-val="{{ false }}">
+      <div style="height: 100%; display: grid; grid-template-columns: 320px minmax(0, 1fr) 300px; gap: 12px;">
+        <div style="display: flex; flex-direction: column; gap: 12px; min-height: 0;">
+          <div style="flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; background: linear-gradient(160deg, #181310, #120e0d); border: 1px solid #322217; padding: 11px 13px 13px;">
+            <div style="display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid #322217; padding-bottom: 8px; margin-bottom: 10px;">
+              <span style="font-family: 'JetBrains Mono', monospace; font-size: 10px; letter-spacing: .22em; color: #3fef6a;">ЛОББИ</span>
+              <span style="font-family: 'Share Tech Mono', monospace; font-size: 11px; color: #8a7a68;">{{ modeLabel }}</span>
+            </div>
+            <div style="display: flex; flex-direction: column; gap: 8px;">
+              <sc-for list="{{ lobby }}" as="l" hint-placeholder-count="2">
+                <div style="display: flex; align-items: center; gap: 10px; padding: 10px 12px; border: 1px solid #2b2118; background: #14100d;">
+                  <span style="font-family: 'JetBrains Mono', monospace; font-size: 11px; color: #3fef6a;">{{ l.num }}</span>
+                  <span style="flex: 1 1 auto; font-family: 'Special Elite', monospace; font-size: 15px; color: #f2e9da;">{{ l.name }}</span>
+                  <span style="font-family: 'JetBrains Mono', monospace; font-size: 10px; color: {{ l.stateColor }};">{{ l.state }}</span>
+                  <button onClick="{{ l.kick }}" style="font-family: 'JetBrains Mono', monospace; font-size: 10px; padding: 5px 8px; background: #1d1715; border: 1px solid #4a2020; color: #d99; cursor: pointer;">УБРАТЬ</button>
+                </div>
+              </sc-for>
+            </div>
+            <span style="flex: 1 1 auto;"></span>
+            <button onClick="{{ addSeat }}" style="height: 40px; font-family: 'JetBrains Mono', monospace; font-size: 11px; font-weight: 700; letter-spacing: .1em; background: #191412; border: 1px solid #3a2a22; color: #cdbfae; cursor: pointer; margin-bottom: 8px;">+ ДОБАВИТЬ МЕСТО</button>
+            <button onClick="{{ startGame }}" style="{{ startBtnStyle }}">НАЧАТЬ ИГРУ</button>
+          </div>
+        </div>
+
+        <div style="display: flex; flex-direction: column; gap: 12px; min-height: 0; overflow-y: auto;">
+          <div style="background: linear-gradient(160deg, #181310, #120e0d); border: 1px solid #322217; padding: 11px 13px 13px;">
+            <div style="font-family: 'JetBrains Mono', monospace; font-size: 10px; letter-spacing: .22em; color: #3fef6a; border-bottom: 1px solid #322217; padding-bottom: 8px; margin-bottom: 11px;">НАСТРОЙКИ ИГРЫ</div>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 11px;">
+              <sc-for list="{{ numCfg }}" as="c" hint-placeholder-count="4">
+                <div style="display: flex; align-items: center; gap: 9px; padding: 9px 11px; border: 1px solid #2b2118; background: #14100d;">
+                  <span style="flex: 1 1 auto; font-family: 'Share Tech Mono', monospace; font-size: 12px; color: #cdbfae;">{{ c.label }}</span>
+                  <button onClick="{{ c.dec }}" style="width: 30px; height: 30px; font-family: 'JetBrains Mono', monospace; font-size: 14px; background: #1d1715; border: 1px solid #3a2a22; color: #cdbfae; cursor: pointer;">−</button>
+                  <span style="font-family: 'JetBrains Mono', monospace; font-size: 16px; font-weight: 700; color: #f2e9da; width: 28px; text-align: center;">{{ c.value }}</span>
+                  <button onClick="{{ c.inc }}" style="width: 30px; height: 30px; font-family: 'JetBrains Mono', monospace; font-size: 14px; background: #1d1715; border: 1px solid #3a2a22; color: #cdbfae; cursor: pointer;">+</button>
+                </div>
+              </sc-for>
+            </div>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 11px; margin-top: 11px;">
+              <sc-for list="{{ toggleCfg }}" as="c" hint-placeholder-count="4">
+                <button onClick="{{ c.toggle }}" style="{{ c.style }}">
+                  <span style="{{ c.lamp }}"></span>
+                  <span style="flex: 1 1 auto; text-align: left; font-family: 'Share Tech Mono', monospace; font-size: 12px;">{{ c.label }}</span>
+                  <span style="font-family: 'JetBrains Mono', monospace; font-size: 10px; font-weight: 700;">{{ c.stateText }}</span>
+                </button>
+              </sc-for>
+            </div>
+            <button onClick="{{ saveConfig }}" style="{{ saveCfgStyle }}">{{ saveCfgText }}</button>
+          </div>
+
+          <div style="background: linear-gradient(160deg, #181310, #120e0d); border: 1px solid #322217; padding: 11px 13px 13px;">
+            <div style="display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid #322217; padding-bottom: 8px; margin-bottom: 11px;">
+              <span style="font-family: 'JetBrains Mono', monospace; font-size: 10px; letter-spacing: .22em; color: #3fef6a;">СОДЕРЖИМОЕ МАГАЗИНА · РУЧНОЙ НАБОР</span>
+              <span style="font-family: 'Share Tech Mono', monospace; font-size: 11px; color: #8a7a68;">{{ magLabel }}</span>
+            </div>
+            <div style="display: flex; gap: 10px;">
+              <button onClick="{{ addLive }}" style="flex: 1 1 auto; height: 46px; font-family: 'JetBrains Mono', monospace; font-size: 12px; font-weight: 700; background: linear-gradient(180deg, #7a2828, #4a1414); border: 1px solid #7a2828; color: #ffd9d9; cursor: pointer;">+ БОЕВОЙ</button>
+              <button onClick="{{ addBlank }}" style="flex: 1 1 auto; height: 46px; font-family: 'JetBrains Mono', monospace; font-size: 12px; font-weight: 700; background: linear-gradient(180deg, #244a72, #16304a); border: 1px solid #2c4a5a; color: #d9ecff; cursor: pointer;">+ ХОЛОСТОЙ</button>
+              <button onClick="{{ clearMag }}" style="flex: 0 0 130px; height: 46px; font-family: 'JetBrains Mono', monospace; font-size: 12px; font-weight: 700; background: #191412; border: 1px solid #3a2a22; color: #cdbfae; cursor: pointer;">ОЧИСТИТЬ</button>
+            </div>
+          </div>
+        </div>
+
+        <div style="display: flex; flex-direction: column; min-height: 0; background: linear-gradient(160deg, #181310, #120e0d); border: 1px solid #322217; padding: 11px 13px 13px;">
+          <div style="font-family: 'JetBrains Mono', monospace; font-size: 10px; letter-spacing: .22em; color: #3fef6a; border-bottom: 1px solid #322217; padding-bottom: 8px; margin-bottom: 9px;">ЛОГ СОБЫТИЙ</div>
+          <div style="flex: 1 1 auto; overflow-y: auto; display: flex; flex-direction: column; gap: 5px;">
+            <sc-for list="{{ log }}" as="e" hint-placeholder-count="7">
+              <div style="{{ e.style }}"><span style="color: #6b5c4e; margin-right: 7px;">{{ e.time }}</span>{{ e.text }}</div>
+            </sc-for>
+          </div>
+        </div>
+      </div>
+    </sc-if>
+
+    <sc-if value="{{ isTv }}" hint-placeholder-val="{{ false }}">
+      <div style="height: 100%; display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 12px;">
+        <div style="display: flex; flex-direction: column; gap: 12px; min-height: 0;">
+          <div style="flex: 0 0 auto; background: linear-gradient(160deg, #181310, #120e0d); border: 1px solid #322217; padding: 11px 13px 13px;">
+            <div style="display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid #322217; padding-bottom: 8px; margin-bottom: 11px;">
+              <span style="font-family: 'JetBrains Mono', monospace; font-size: 10px; letter-spacing: .22em; color: #3fef6a;">ЧТО НА ТЕЛЕВИЗОРЕ СЕЙЧАС</span>
+              <span style="font-family: 'JetBrains Mono', monospace; font-size: 11px; font-weight: 700; color: {{ tvNowColor }};">{{ tvNowLabel }}</span>
+            </div>
+            <div style="display: flex; gap: 12px; align-items: stretch;">
+              <div style="flex: 0 0 320px; aspect-ratio: 4 / 3; border: 2px solid #2a2018; border-radius: 8px; background: radial-gradient(circle at 50% 45%, #0d1a0f, #050805); display: flex; align-items: center; justify-content: center; padding: 12px; text-align: center; overflow: hidden;">
+                <span style="font-family: 'Share Tech Mono', monospace; font-size: 15px; line-height: 1.5; color: #3fef6a; text-shadow: 0 0 10px rgba(63,239,106,.5);">{{ tvPreview }}</span>
+              </div>
+              <div style="flex: 1 1 auto; display: flex; flex-direction: column; gap: 8px;">
+                <sc-for list="{{ tvSources }}" as="s" hint-placeholder-count="4">
+                  <button onClick="{{ s.pick }}" style="{{ s.style }}">
+                    <span style="{{ s.lamp }}"></span>
+                    <span style="flex: 1 1 auto; text-align: left; font-family: 'Special Elite', monospace; font-size: 15px;">{{ s.label }}</span>
+                    <span style="font-family: 'JetBrains Mono', monospace; font-size: 10px; opacity: .7;">{{ s.hint }}</span>
+                  </button>
+                </sc-for>
+              </div>
+            </div>
+          </div>
+
+          <div style="flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; background: linear-gradient(160deg, #181310, #120e0d); border: 1px solid #322217; padding: 11px 13px 13px;">
+            <div style="font-family: 'JetBrains Mono', monospace; font-size: 10px; letter-spacing: .22em; color: #3fef6a; border-bottom: 1px solid #322217; padding-bottom: 8px; margin-bottom: 11px;">СООБЩЕНИЕ НА ТЕЛЕВИЗОР · ПЕЧАТАЕТСЯ ПОСИМВОЛЬНО</div>
+            <textarea value="{{ tvMessage }}" onChange="{{ setTvMessage }}" placeholder="Текст, который увидит игрок…" style="width: 100%; box-sizing: border-box; height: 84px; resize: none; font-family: 'Share Tech Mono', monospace; font-size: 15px; line-height: 1.5; color: #3fef6a; background: #0b0f0b; border: 1px solid #2a4a2c; padding: 10px 12px;"></textarea>
+            <div style="display: flex; gap: 8px; flex-wrap: wrap; margin: 10px 0;">
+              <sc-for list="{{ tvPresets }}" as="p" hint-placeholder-count="4">
+                <button onClick="{{ p.pick }}" style="font-family: 'Share Tech Mono', monospace; font-size: 12px; padding: 7px 11px; background: #14100d; border: 1px solid #322217; color: #cdbfae; cursor: pointer;">{{ p.label }}</button>
+              </sc-for>
+            </div>
+            <span style="flex: 1 1 auto;"></span>
+            <div style="display: flex; gap: 10px;">
+              <button onClick="{{ sendTvMessage }}" style="{{ tvSendStyle }}">ОТПРАВИТЬ НА TV</button>
+              <button onClick="{{ clearTv }}" style="flex: 0 0 200px; height: 60px; font-family: 'JetBrains Mono', monospace; font-size: 12px; font-weight: 700; letter-spacing: .08em; background: #191412; border: 1px solid #3a2a22; color: #cdbfae; cursor: pointer;">ОЧИСТИТЬ ЭКРАН</button>
+            </div>
+          </div>
+        </div>
+
+        <div style="display: flex; flex-direction: column; gap: 12px; min-height: 0; overflow-y: auto;">
+          <div style="background: linear-gradient(160deg, #181310, #120e0d); border: 1px solid #322217; padding: 11px 13px 13px;">
+            <div style="font-family: 'JetBrains Mono', monospace; font-size: 10px; letter-spacing: .22em; color: #3fef6a; border-bottom: 1px solid #322217; padding-bottom: 8px; margin-bottom: 11px;">ВИДЕО</div>
+            <div style="font-family: 'Special Elite', monospace; font-size: 15px; color: #f2e9da; margin-bottom: 9px;">{{ videoName }}</div>
+            <div style="display: flex; gap: 8px;">
+              <button onClick="{{ toggleVideo }}" style="{{ videoBtnStyle }}">{{ videoBtnText }}</button>
+              <button onClick="{{ stopVideo }}" style="flex: 0 0 96px; height: 44px; font-family: 'JetBrains Mono', monospace; font-size: 11px; font-weight: 700; background: #191412; border: 1px solid #3a2a22; color: #cdbfae; cursor: pointer;">СТОП</button>
+            </div>
+            <div style="display: flex; align-items: center; gap: 9px; margin-top: 11px;">
+              <span style="font-family: 'JetBrains Mono', monospace; font-size: 10px; letter-spacing: .16em; color: #8a7a68;">ГРОМКОСТЬ</span>
+              <input type="range" min="0" max="100" value="{{ volume }}" onChange="{{ setVolume }}" style="flex: 1 1 auto; accent-color: #3fef6a;" />
+              <span style="font-family: 'JetBrains Mono', monospace; font-size: 12px; color: #f2e9da; width: 34px; text-align: right;">{{ volume }}</span>
+            </div>
+          </div>
+
+          <div style="background: linear-gradient(160deg, #181310, #120e0d); border: 1px solid #322217; padding: 11px 13px 13px;">
+            <div style="font-family: 'JetBrains Mono', monospace; font-size: 10px; letter-spacing: .22em; color: #3fef6a; border-bottom: 1px solid #322217; padding-bottom: 8px; margin-bottom: 11px;">СЕКЦИИ ИГРОКОВ НА TV</div>
+            <div style="display: flex; gap: 8px;">
+              <sc-for list="{{ tvLayouts }}" as="l" hint-placeholder-count="3">
+                <button onClick="{{ l.pick }}" style="{{ l.style }}">{{ l.label }}</button>
+              </sc-for>
+            </div>
+          </div>
+
+          <div style="flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; background: linear-gradient(160deg, #181310, #120e0d); border: 1px solid #322217; padding: 11px 13px 13px;">
+            <div style="font-family: 'JetBrains Mono', monospace; font-size: 10px; letter-spacing: .22em; color: #3fef6a; border-bottom: 1px solid #322217; padding-bottom: 8px; margin-bottom: 9px;">ЛОГ СОБЫТИЙ</div>
+            <div style="flex: 1 1 auto; overflow-y: auto; display: flex; flex-direction: column; gap: 5px;">
+              <sc-for list="{{ log }}" as="e" hint-placeholder-count="5">
+                <div style="{{ e.style }}"><span style="color: #6b5c4e; margin-right: 7px;">{{ e.time }}</span>{{ e.text }}</div>
+              </sc-for>
+            </div>
+          </div>
+        </div>
+      </div>
+    </sc-if>
+
+    <sc-if value="{{ isVoip }}" hint-placeholder-val="{{ false }}">
+      <div style="height: 100%; display: grid; grid-template-columns: minmax(0, 1fr) 330px; gap: 12px;">
+        <div style="display: flex; flex-direction: column; gap: 12px; min-height: 0;">
+          <div style="flex: 0 0 auto; background: linear-gradient(160deg, #181310, #120e0d); border: 1px solid #322217; padding: 11px 13px 13px;">
+            <div style="display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid #322217; padding-bottom: 8px; margin-bottom: 11px;">
+              <span style="font-family: 'JetBrains Mono', monospace; font-size: 10px; letter-spacing: .22em; color: #3fef6a;">АППАРАТЫ</span>
+              <span style="font-family: 'Share Tech Mono', monospace; font-size: 11px; color: #8a7a68;">{{ phonesLabel }}</span>
+            </div>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+              <sc-for list="{{ phones }}" as="ph" hint-placeholder-count="4">
+                <div style="{{ ph.cardStyle }}">
+                  <div style="display: flex; align-items: center; gap: 9px; margin-bottom: 9px;">
+                    <span style="{{ ph.lamp }}"></span>
+                    <span style="flex: 1 1 auto; font-family: 'Special Elite', monospace; font-size: 15px; color: #f2e9da;">{{ ph.name }}</span>
+                    <span style="font-family: 'JetBrains Mono', monospace; font-size: 11px; color: {{ ph.stateColor }};">{{ ph.state }}</span>
+                  </div>
+                  <div style="display: flex; gap: 8px;">
+                    <button onClick="{{ ph.call }}" style="{{ ph.callStyle }}">{{ ph.callText }}</button>
+                    <button onClick="{{ ph.test }}" style="flex: 0 0 84px; height: 40px; font-family: 'JetBrains Mono', monospace; font-size: 10px; font-weight: 700; background: #191412; border: 1px solid #3a2a22; color: #cdbfae; cursor: pointer;">ТЕСТ</button>
+                  </div>
+                </div>
+              </sc-for>
+            </div>
+          </div>
+
+          <div style="flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; background: linear-gradient(160deg, #181310, #120e0d); border: 1px solid #322217; padding: 11px 13px 13px;">
+            <div style="font-family: 'JetBrains Mono', monospace; font-size: 10px; letter-spacing: .22em; color: #3fef6a; border-bottom: 1px solid #322217; padding-bottom: 8px; margin-bottom: 11px;">ДИСКОВЫЙ ТЕЛЕФОН · НОМЕР → ЗВУК</div>
+            <div style="display: flex; flex-direction: column; gap: 7px;">
+              <sc-for list="{{ dialSlots }}" as="d" hint-placeholder-count="3">
+                <div style="display: flex; align-items: center; gap: 11px; padding: 9px 12px; border: 1px solid #2b2118; background: #14100d;">
+                  <span style="font-family: 'JetBrains Mono', monospace; font-size: 15px; font-weight: 700; color: #e0c86a; width: 46px;">{{ d.number }}</span>
+                  <span style="flex: 1 1 auto; font-family: 'Share Tech Mono', monospace; font-size: 13px; color: #cdbfae;">{{ d.sound }}</span>
+                  <button onClick="{{ d.play }}" style="font-family: 'JetBrains Mono', monospace; font-size: 10px; padding: 6px 10px; background: linear-gradient(180deg, #5c9180, #33574a); border: 1px solid #26443a; color: #f2ecd9; cursor: pointer;">ПРОСЛУШАТЬ</button>
+                  <button onClick="{{ d.remove }}" style="font-family: 'JetBrains Mono', monospace; font-size: 10px; padding: 6px 9px; background: #1d1715; border: 1px solid #4a2020; color: #d99; cursor: pointer;">СНЯТЬ</button>
+                </div>
+              </sc-for>
+            </div>
+            <div style="display: flex; gap: 8px; margin-top: 11px;">
+              <select value="{{ newSlotNumber }}" onChange="{{ setNewSlotNumber }}" style="flex: 0 0 120px; font-family: 'Share Tech Mono', monospace; font-size: 13px; color: #3fef6a; background: #100c0b; border: 1px solid #3a2a22; padding: 9px 8px;">
+                <sc-for list="{{ freeNumbers }}" as="n" hint-placeholder-count="3">
+                  <option value="{{ n.value }}">{{ n.value }}</option>
+                </sc-for>
+              </select>
+              <select value="{{ newSlotSound }}" onChange="{{ setNewSlotSound }}" style="flex: 1 1 auto; font-family: 'Share Tech Mono', monospace; font-size: 13px; color: #3fef6a; background: #100c0b; border: 1px solid #3a2a22; padding: 9px 8px;">
+                <sc-for list="{{ soundBank }}" as="s" hint-placeholder-count="3">
+                  <option value="{{ s.value }}">{{ s.value }}</option>
+                </sc-for>
+              </select>
+              <button onClick="{{ addSlot }}" style="flex: 0 0 150px; height: 42px; font-family: 'JetBrains Mono', monospace; font-size: 11px; font-weight: 700; background: linear-gradient(180deg, #5fff8f, #3fef6a); border: 1px solid #5fff8f; color: #08120b; cursor: pointer;">НАЗНАЧИТЬ</button>
+            </div>
+          </div>
+        </div>
+
+        <div style="display: flex; flex-direction: column; gap: 12px; min-height: 0;">
+          <div style="flex: 0 0 auto; background: linear-gradient(160deg, #181310, #120e0d); border: 1px solid #322217; padding: 11px 13px 13px;">
+            <div style="display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid #322217; padding-bottom: 8px; margin-bottom: 11px;">
+              <span style="font-family: 'JetBrains Mono', monospace; font-size: 10px; letter-spacing: .22em; color: #3fef6a;">ЦЕПОЧКА</span>
+              <span style="font-family: 'JetBrains Mono', monospace; font-size: 11px; font-weight: 700; color: {{ chainColor }};">{{ chainSummary }}</span>
+            </div>
+            <div style="display: flex; flex-direction: column; gap: 6px; margin-bottom: 11px;">
+              <sc-for list="{{ chainChecks }}" as="c" hint-placeholder-count="4">
+                <div style="display: flex; align-items: center; gap: 9px; font-family: 'Share Tech Mono', monospace; font-size: 12px; color: #cdbfae;">
+                  <span style="{{ c.dot }}"></span><span style="flex: 1 1 auto;">{{ c.label }}</span><span style="color: {{ c.color }};">{{ c.value }}</span>
+                </div>
+              </sc-for>
+            </div>
+            <div style="display: flex; flex-direction: column; gap: 7px;">
+              <button onClick="{{ refreshChain }}" style="height: 40px; font-family: 'JetBrains Mono', monospace; font-size: 11px; font-weight: 700; background: #191412; border: 1px solid #3a2a22; color: #cdbfae; cursor: pointer;">ОБНОВИТЬ</button>
+              <button onClick="{{ resetPorts }}" style="height: 40px; font-family: 'JetBrains Mono', monospace; font-size: 11px; font-weight: 700; background: linear-gradient(180deg, #e5bc3e, #a97f1e); border: 1px solid #7a5c14; color: #1d1403; cursor: pointer;">СБРОСИТЬ ПОРТЫ</button>
+              <button onClick="{{ rebootGw }}" style="height: 40px; font-family: 'JetBrains Mono', monospace; font-size: 11px; font-weight: 700; background: linear-gradient(180deg, #9a3226, #54160e); border: 1px solid #4a120c; color: #f5e6c8; cursor: pointer;">ПЕРЕЗАГРУЗИТЬ ШЛЮЗ</button>
+            </div>
+          </div>
+          <div style="flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; background: linear-gradient(160deg, #181310, #120e0d); border: 1px solid #322217; padding: 11px 13px 13px;">
+            <div style="font-family: 'JetBrains Mono', monospace; font-size: 10px; letter-spacing: .22em; color: #3fef6a; border-bottom: 1px solid #322217; padding-bottom: 8px; margin-bottom: 9px;">СОБЫТИЯ ТЕЛЕФОНОВ</div>
+            <div style="flex: 1 1 auto; overflow-y: auto; display: flex; flex-direction: column; gap: 5px;">
+              <sc-for list="{{ log }}" as="e" hint-placeholder-count="5">
+                <div style="{{ e.style }}"><span style="color: #6b5c4e; margin-right: 7px;">{{ e.time }}</span>{{ e.text }}</div>
+              </sc-for>
+            </div>
+          </div>
+        </div>
+      </div>
+    </sc-if>
+
+    <sc-if value="{{ isCams }}" hint-placeholder-val="{{ false }}">
+      <div style="height: 100%; display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 12px;">
+        <div style="display: flex; flex-direction: column; gap: 12px; min-height: 0;">
+          <div style="flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; background: linear-gradient(160deg, #181310, #120e0d); border: 1px solid #322217; padding: 11px 13px 13px;">
+            <div style="display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid #322217; padding-bottom: 8px; margin-bottom: 11px;">
+              <span style="font-family: 'JetBrains Mono', monospace; font-size: 10px; letter-spacing: .22em; color: #3fef6a;">КАМЕРЫ · КЛИК = ВЫВЕСТИ НА TV</span>
+              <span style="font-family: 'Share Tech Mono', monospace; font-size: 11px; color: #8a7a68;">{{ camsLabel }}</span>
+            </div>
+            <div style="flex: 1 1 auto; display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; gap: 10px; min-height: 0;">
+              <sc-for list="{{ cams }}" as="c" hint-placeholder-count="4">
+                <button onClick="{{ c.pick }}" style="{{ c.style }}">
+                  <span style="position: absolute; top: 8px; left: 10px; font-family: 'JetBrains Mono', monospace; font-size: 11px; font-weight: 700; color: {{ c.labelColor }};">{{ c.label }}</span>
+                  <span style="position: absolute; top: 8px; right: 10px; font-family: 'JetBrains Mono', monospace; font-size: 10px; color: {{ c.stateColor }};">{{ c.state }}</span>
+                  <span style="font-family: 'Share Tech Mono', monospace; font-size: 13px; color: #4a5a4c;">{{ c.caption }}</span>
+                </button>
+              </sc-for>
+            </div>
+          </div>
+        </div>
+        <div style="display: flex; flex-direction: column; gap: 12px; min-height: 0;">
+          <div style="background: linear-gradient(160deg, #181310, #120e0d); border: 1px solid #322217; padding: 11px 13px 13px;">
+            <div style="font-family: 'JetBrains Mono', monospace; font-size: 10px; letter-spacing: .22em; color: #3fef6a; border-bottom: 1px solid #322217; padding-bottom: 8px; margin-bottom: 11px;">АВТО-РЕЖИМ (КРУТИЛКА)</div>
+            <div style="display: flex; flex-direction: column; gap: 8px;">
+              <sc-for list="{{ cctvModes }}" as="m" hint-placeholder-count="3">
+                <button onClick="{{ m.pick }}" style="{{ m.style }}">
+                  <span style="{{ m.lamp }}"></span>
+                  <span style="flex: 1 1 auto; text-align: left; font-family: 'Share Tech Mono', monospace; font-size: 13px;">{{ m.label }}</span>
+                </button>
+              </sc-for>
+            </div>
+          </div>
+          <div style="flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; background: linear-gradient(160deg, #181310, #120e0d); border: 1px solid #322217; padding: 11px 13px 13px;">
+            <div style="font-family: 'JetBrains Mono', monospace; font-size: 10px; letter-spacing: .22em; color: #3fef6a; border-bottom: 1px solid #322217; padding-bottom: 8px; margin-bottom: 9px;">ЛОГ СОБЫТИЙ</div>
+            <div style="flex: 1 1 auto; overflow-y: auto; display: flex; flex-direction: column; gap: 5px;">
+              <sc-for list="{{ log }}" as="e" hint-placeholder-count="5">
+                <div style="{{ e.style }}"><span style="color: #6b5c4e; margin-right: 7px;">{{ e.time }}</span>{{ e.text }}</div>
+              </sc-for>
+            </div>
+          </div>
+        </div>
+      </div>
+    </sc-if>
+
+    <sc-if value="{{ isCalib }}" hint-placeholder-val="{{ false }}">
+      <div style="height: 100%; display: grid; grid-template-columns: 360px minmax(0, 1fr) 300px; gap: 12px;">
+        <div style="display: flex; flex-direction: column; gap: 12px; min-height: 0;">
+          <div style="flex: 1 1 auto; display: flex; flex-direction: column; background: linear-gradient(160deg, #181310, #120e0d); border: 1px solid #322217; padding: 11px 13px 13px;">
+            <div style="font-family: 'JetBrains Mono', monospace; font-size: 10px; letter-spacing: .22em; color: #3fef6a; border-bottom: 1px solid #322217; padding-bottom: 8px; margin-bottom: 11px;">КАЛИБРОВКА ПРИЦЕЛА · ГИРОСКОП</div>
+            <div style="font-family: 'Share Tech Mono', monospace; font-size: 13px; line-height: 1.5; color: #8a7a68; margin-bottom: 12px;">Пульт опрашивает каждое место за столом по очереди, в конце — один выстрел в себя.</div>
+            <div style="{{ calibStatusStyle }}">{{ calibStatusText }}</div>
+            <span style="flex: 1 1 auto;"></span>
+            <button onClick="{{ toggleGyro }}" style="{{ gyroStyle }}">
+              <span style="{{ gyroLamp }}"></span>
+              <span style="flex: 1 1 auto; text-align: left; font-family: 'Share Tech Mono', monospace; font-size: 13px;">Гироскоп выбирает цель</span>
+              <span style="font-family: 'JetBrains Mono', monospace; font-size: 10px; font-weight: 700;">{{ gyroText }}</span>
+            </button>
+            <div style="display: flex; gap: 9px; margin-top: 9px;">
+              <button onClick="{{ startCalib }}" style="{{ calibBtnStyle }}">{{ calibBtnText }}</button>
+              <button onClick="{{ cancelCalib }}" style="flex: 0 0 120px; height: 54px; font-family: 'JetBrains Mono', monospace; font-size: 11px; font-weight: 700; background: #191412; border: 1px solid #3a2a22; color: #cdbfae; cursor: pointer;">ОТМЕНА</button>
+            </div>
+          </div>
+        </div>
+
+        <div style="display: flex; flex-direction: column; background: linear-gradient(160deg, #181310, #120e0d); border: 1px solid #322217; padding: 11px 13px 13px; min-height: 0;">
+          <div style="font-family: 'JetBrains Mono', monospace; font-size: 10px; letter-spacing: .22em; color: #3fef6a; border-bottom: 1px solid #322217; padding-bottom: 8px; margin-bottom: 11px;">СТОЛ · ВИД СВЕРХУ</div>
+          <div style="flex: 1 1 auto; display: flex; align-items: center; justify-content: center; min-height: 0;">
+            <div style="position: relative; width: 300px; height: 300px;">
+              <div style="position: absolute; left: 50%; top: 50%; width: 150px; height: 150px; margin: -75px; border: 4px solid #3a2a22; border-radius: 8px; background: rgba(0,0,0,.35); box-shadow: inset 0 0 20px rgba(0,0,0,.8);"></div>
+              <div style="position: absolute; left: 50%; top: 50%; width: 14px; height: 14px; margin: -7px; border-radius: 50%; background: #3fef6a; box-shadow: 0 0 10px #3fef6a;"></div>
+              <sc-for list="{{ seats }}" as="s" hint-placeholder-count="2">
+                <button onClick="{{ s.mark }}" style="{{ s.style }}">
+                  <span style="font-family: 'JetBrains Mono', monospace; font-size: 10px; opacity: .7;">{{ s.angle }}</span>
+                  <span style="font-family: 'Special Elite', monospace; font-size: 14px;">{{ s.name }}</span>
+                  <span style="font-family: 'JetBrains Mono', monospace; font-size: 10px; font-weight: 700;">{{ s.state }}</span>
+                </button>
+              </sc-for>
+            </div>
+          </div>
+        </div>
+
+        <div style="display: flex; flex-direction: column; min-height: 0; background: linear-gradient(160deg, #181310, #120e0d); border: 1px solid #322217; padding: 11px 13px 13px;">
+          <div style="font-family: 'JetBrains Mono', monospace; font-size: 10px; letter-spacing: .22em; color: #3fef6a; border-bottom: 1px solid #322217; padding-bottom: 8px; margin-bottom: 9px;">ЛОГ СОБЫТИЙ</div>
+          <div style="flex: 1 1 auto; overflow-y: auto; display: flex; flex-direction: column; gap: 5px;">
+            <sc-for list="{{ log }}" as="e" hint-placeholder-count="5">
+              <div style="{{ e.style }}"><span style="color: #6b5c4e; margin-right: 7px;">{{ e.time }}</span>{{ e.text }}</div>
+            </sc-for>
+          </div>
+        </div>
+      </div>
+    </sc-if>
+
+    <sc-if value="{{ isServer }}" hint-placeholder-val="{{ false }}">
+      <div style="height: 100%; display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 12px;">
+        <div style="display: flex; flex-direction: column; gap: 12px; min-height: 0; overflow-y: auto;">
+          <div style="background: linear-gradient(160deg, #181310, #120e0d); border: 1px solid #322217; padding: 11px 13px 13px;">
+            <div style="font-family: 'JetBrains Mono', monospace; font-size: 10px; letter-spacing: .22em; color: #3fef6a; border-bottom: 1px solid #322217; padding-bottom: 8px; margin-bottom: 11px;">СЕРВЕР И ЖЕЛЕЗО</div>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+              <sc-for list="{{ devices }}" as="d" hint-placeholder-count="4">
+                <div style="display: flex; align-items: center; gap: 10px; padding: 11px 12px; border: 1px solid #2b2118; background: #14100d;">
+                  <span style="{{ d.lamp }}"></span>
+                  <span style="flex: 1 1 auto; font-family: 'Share Tech Mono', monospace; font-size: 13px; color: #cdbfae;">{{ d.label }}</span>
+                  <span style="font-family: 'JetBrains Mono', monospace; font-size: 11px; font-weight: 700; color: {{ d.color }};">{{ d.state }}</span>
+                  <button onClick="{{ d.ping }}" style="font-family: 'JetBrains Mono', monospace; font-size: 10px; padding: 6px 9px; background: #191412; border: 1px solid #3a2a22; color: #cdbfae; cursor: pointer;">ПИНГ</button>
+                </div>
+              </sc-for>
+            </div>
+          </div>
+          <div style="background: linear-gradient(160deg, #181310, #120e0d); border: 1px solid #322217; padding: 11px 13px 13px;">
+            <div style="font-family: 'JetBrains Mono', monospace; font-size: 10px; letter-spacing: .22em; color: #3fef6a; border-bottom: 1px solid #322217; padding-bottom: 8px; margin-bottom: 11px;">АУДИО / ОЗВУЧКА</div>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+              <sc-for list="{{ audioToggles }}" as="a" hint-placeholder-count="4">
+                <button onClick="{{ a.toggle }}" style="{{ a.style }}">
+                  <span style="{{ a.lamp }}"></span>
+                  <span style="flex: 1 1 auto; text-align: left; font-family: 'Share Tech Mono', monospace; font-size: 12px;">{{ a.label }}</span>
+                  <span style="font-family: 'JetBrains Mono', monospace; font-size: 10px; font-weight: 700;">{{ a.stateText }}</span>
+                </button>
+              </sc-for>
+            </div>
+          </div>
+        </div>
+        <div style="display: flex; flex-direction: column; min-height: 0; background: linear-gradient(160deg, #181310, #120e0d); border: 1px solid #322217; padding: 11px 13px 13px;">
+          <div style="font-family: 'JetBrains Mono', monospace; font-size: 10px; letter-spacing: .22em; color: #3fef6a; border-bottom: 1px solid #322217; padding-bottom: 8px; margin-bottom: 9px;">ЛОГ СОБЫТИЙ</div>
+          <div style="flex: 1 1 auto; overflow-y: auto; display: flex; flex-direction: column; gap: 5px;">
+            <sc-for list="{{ log }}" as="e" hint-placeholder-count="5">
+              <div style="{{ e.style }}"><span style="color: #6b5c4e; margin-right: 7px;">{{ e.time }}</span>{{ e.text }}</div>
+            </sc-for>
+          </div>
+        </div>
+      </div>
+    </sc-if>
+
+    <sc-if value="{{ isEnd }}" hint-placeholder-val="{{ false }}">
+      <div style="height: 100%; display: flex; align-items: center; justify-content: center;">
+        <div style="width: 620px; border: 1px solid #a83232; background: linear-gradient(180deg, #241010, #150b0b); padding: 30px 34px; text-align: center;">
+          <div style="font-family: 'EB Garamond', Georgia, serif; font-size: 30px; font-weight: 800; color: #f2e9da; margin-bottom: 10px;">{{ endTitle }}</div>
+          <div style="font-family: 'Share Tech Mono', monospace; font-size: 14px; line-height: 1.6; color: #cdbfae; margin-bottom: 24px;">{{ endText }}</div>
+          <div style="display: flex; gap: 12px;">
+            <button onClick="{{ newGame }}" style="flex: 1 1 auto; height: 64px; font-family: 'EB Garamond', Georgia, serif; font-size: 21px; font-weight: 700; letter-spacing: .08em; background: linear-gradient(180deg, #5fff8f, #3fef6a); border: 1px solid #5fff8f; color: #08120b; cursor: pointer;">НОВАЯ ИГРА</button>
+            <button onClick="{{ cancelFinish }}" style="flex: 0 0 200px; height: 64px; font-family: 'JetBrains Mono', monospace; font-size: 12px; font-weight: 700; letter-spacing: .08em; background: #191412; border: 1px solid #3a2a22; color: #cdbfae; cursor: pointer;">ВЕРНУТЬСЯ К ИГРЕ</button>
+          </div>
+        </div>
+      </div>
+    </sc-if>
+  </main>
+</div>
+
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:1280,&quot;height&quot;:832},&quot;pulseHints&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Поведение&quot;}}">
+const ITEMS = {
+  beer: { emoji: '🍺', label: 'Пиво', effect: 'Выбросить патрон без выстрела' },
+  handsaw: { emoji: '🔪', label: 'Пила', effect: 'Урон следующего боевого ×2' },
+  magnifier: { emoji: '🔍', label: 'Лупа', effect: 'Показать тип патрона в патроннике' },
+  medicine: { emoji: '💊', label: 'Лекарство', effect: '50/50: +2 HP или −1 HP' },
+  cigarettes: { emoji: '🚬', label: 'Сигареты', effect: '+1 HP' },
+  inverter: { emoji: '🔄', label: 'Инвертор', effect: 'Сменить тип патрона в патроннике' },
+  handcuffs: { emoji: '⛓️', label: 'Наручники', effect: 'Противник пропускает ход' }
+};
+const POOL = ['beer', 'handsaw', 'magnifier', 'medicine', 'cigarettes', 'inverter', 'handcuffs'];
+
+class Component extends DCLogic {
+  state = {
+    tab: 'turn',
+    phase: 'turn',
+    round: 2, maxRounds: 3,
+    mag: ['live', 'blank', 'live', 'blank', 'live'],
+    revealed: false,
+    saw: false,
+    cuffed: null,
+    caps: 8,
+    turn: 1,
+    players: [
+      { id: 1, name: 'ДИЛЕР', hp: 4, max: 5, items: ['beer', 'handsaw'], seat: 'справа', calibrated: true },
+      { id: 2, name: 'ИГРОК', hp: 1, max: 5, items: ['magnifier', 'handcuffs', 'medicine'], seat: 'слева', calibrated: true }
+    ],
+    dealPreview: [['beer', 'handsaw'], ['magnifier', 'medicine', 'handcuffs']],
+    log: [
+      { t: '22:41', text: 'ИГРОК стреляет в ДИЛЕРА — боевой, −2 (пила)', kind: 'shot' },
+      { t: '22:41', text: 'ИГРОК применил ПИЛУ', kind: 'item' },
+      { t: '22:40', text: 'Ход ИГРОКА', kind: 'info' },
+      { t: '22:39', text: 'Раунд 2 начат · 3 боевых / 2 холостых', kind: 'info' }
+    ],
+    history: [],
+    cuffTarget: 1,
+    solenoid: true, sound: true, voice: true,
+    cfg: { rounds: 3, hp: 5, items: 3, shells: 5 },
+    flags: { gyro: true, autoVoice: true, hardMode: false, showShells: false },
+    cfgSaved: true,
+    tvSource: 'game', tvMessage: '', tvSent: '', video: 'stop', videoName: 'intro_zoo.mp4', volume: 62, tvLayout: '2',
+    phones: [
+      { id: 1, name: 'Аппарат #1 · зал', state: 'готов', busy: false },
+      { id: 2, name: 'Аппарат #2 · зал', state: 'готов', busy: false },
+      { id: 3, name: 'Дисковый · стол', state: 'готов', busy: false },
+      { id: 4, name: 'Аппарат #4 · кабина', state: 'нет линии', busy: false, dead: true }
+    ],
+    dialSlots: [
+      { number: '101', sound: 'зоопарк.mp3' },
+      { number: '102', sound: 'informer_hint.ogg' },
+      { number: '103', sound: 'static_noise.ogg' }
+    ],
+    newSlotNumber: '104', newSlotSound: 'ambient_idle_turn.ogg',
+    chain: 'ok',
+    cams: [
+      { id: 1, label: 'КАМ 1 · СТОЛ', caption: 'сигнал есть', ok: true },
+      { id: 2, label: 'КАМ 2 · ДВЕРЬ', caption: 'сигнал есть', ok: true },
+      { id: 3, label: 'КАМ 3 · КОРИДОР', caption: 'сигнал есть', ok: true },
+      { id: 4, label: 'КАМ 4 · КАБИНА', caption: 'сигнал есть', ok: true }
+    ],
+    activeCam: 1, cctv: 'off',
+    calib: 'idle', calibIdx: 0,
+    devices: [
+      { id: 'esp', label: 'ESP32 · дробовик', ok: true },
+      { id: 'sol', label: 'Соленоид', ok: true },
+      { id: 'gyro', label: 'Гироскоп', ok: true },
+      { id: 'atc', label: 'АТС · шлюз', ok: true }
+    ],
+    prevTab: 'turn'
+  };
+
+  now() {
+    const d = new Date();
+    return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
+  }
+
+  snapshot(s) {
+    return JSON.parse(JSON.stringify({
+      phase: s.phase, round: s.round, mag: s.mag, revealed: s.revealed, saw: s.saw,
+      cuffed: s.cuffed, caps: s.caps, turn: s.turn, players: s.players, log: s.log, tab: s.tab,
+      cfg: s.cfg, dealPreview: s.dealPreview, cuffTarget: s.cuffTarget
+    }));
+  }
+
+  apply(mutate, text, kind) {
+    this.setState(s => {
+      const snap = this.snapshot(s);
+      const next = JSON.parse(JSON.stringify(snap));
+      const res = mutate(next);
+      const logText = typeof res === 'string' ? res : (res && res.text) || text;
+      const logKind = (res && res.kind) || kind || 'info';
+      if (logText) next.log = [{ t: this.now(), text: logText, kind: logKind }].concat(next.log).slice(0, 60);
+      return Object.assign({}, next, { history: [snap].concat(s.history).slice(0, 40) });
+    });
+  }
+
+  note(text, kind) {
+    this.setState(s => ({ log: [{ t: this.now(), text, kind: kind || 'info' }].concat(s.log).slice(0, 60) }));
+  }
+
+  pname(st, id) {
+    const p = st.players.find(x => x.id === id);
+    return p ? '#' + p.id + ' ' + p.name : '#' + id;
+  }
+
+  nextTurn(st) {
+    const alive = st.players.filter(p => p.hp > 0);
+    if (alive.length <= 1) { st.phase = 'end'; st.tab = 'end'; return; }
+    let i = st.players.findIndex(p => p.id === st.turn);
+    for (let k = 0; k < st.players.length; k++) {
+      i = (i + 1) % st.players.length;
+      const cand = st.players[i];
+      if (cand.hp <= 0) continue;
+      if (st.cuffed === cand.id) { st.cuffed = null; continue; }
+      st.turn = cand.id;
+      return;
+    }
+  }
+
+  afterShot(st) {
+    st.mag.shift();
+    st.revealed = false;
+    if (!st.mag.length) { st.phase = 'loading'; st.tab = 'loading'; }
+  }
+
+  fire(selfShot) {
+    this.apply(st => {
+      const shooter = st.players.find(p => p.id === st.turn);
+      const target = selfShot ? shooter : st.players.find(p => p.id !== st.turn && p.hp > 0) || shooter;
+      const shell = st.mag[0];
+      let text;
+      if (shell === 'live') {
+        const dmg = st.saw ? 2 : 1;
+        target.hp = Math.max(0, target.hp - dmg);
+        if (st.caps > 0) st.caps -= 1;
+        st.saw = false;
+        text = shooter.name + (selfShot ? ' стреляет в себя' : ' стреляет в ' + target.name) + ' — боевой, −' + dmg + ' HP';
+        this.afterShot(st);
+        if (st.phase !== 'loading') this.nextTurn(st);
+        if (target.hp === 0) { st.phase = 'end'; st.tab = 'end'; }
+      } else {
+        text = shooter.name + (selfShot ? ' стреляет в себя' : ' стреляет в ' + target.name) + ' — холостой';
+        st.saw = false;
+        this.afterShot(st);
+        if (!selfShot && st.phase !== 'loading') this.nextTurn(st);
+      }
+      return { text, kind: 'shot' };
+    });
+  }
+
+  useItem(id) {
+    this.apply(st => {
+      const p = st.players.find(x => x.id === st.turn);
+      const idx = p.items.indexOf(id);
+      if (idx >= 0) p.items.splice(idx, 1);
+      let text = p.name + ' применил ' + ITEMS[id].label.toUpperCase();
+      if (id === 'beer') {
+        const sh = st.mag.shift();
+        text += ': выброшен ' + (sh === 'live' ? 'БОЕВОЙ' : 'ХОЛОСТОЙ');
+        st.revealed = false;
+        if (!st.mag.length) { st.phase = 'loading'; st.tab = 'loading'; }
+      } else if (id === 'magnifier') {
+        st.revealed = true;
+        text += ': в патроннике ' + (st.mag[0] === 'live' ? 'БОЕВОЙ' : 'ХОЛОСТОЙ');
+      } else if (id === 'handsaw') {
+        st.saw = true;
+        text += ': урон ×2';
+      } else if (id === 'inverter') {
+        st.mag[0] = st.mag[0] === 'live' ? 'blank' : 'live';
+        text += ': патрон в патроннике сменён';
+      } else if (id === 'cigarettes') {
+        p.hp = Math.min(p.max, p.hp + 1);
+        text += ': +1 HP';
+      } else if (id === 'medicine') {
+        const good = Math.random() < 0.5;
+        p.hp = good ? Math.min(p.max, p.hp + 2) : Math.max(0, p.hp - 1);
+        text += good ? ': +2 HP' : ': −1 HP';
+        if (p.hp === 0) { st.phase = 'end'; st.tab = 'end'; }
+      }
+      return { text, kind: 'item' };
+    });
+  }
+
+  boltRow(hp, max, critical) {
+    const base = 'height: 24px; width: 12px; object-fit: contain; display: block;';
+    return Array.from({ length: max }, (_, i) => {
+      const alive = i < hp;
+      return {
+        src: alive && critical ? 'assets/icons/bolt-critical.png' : 'assets/icons/bolt-alive.png',
+        style: alive
+          ? base + (critical ? ' filter: drop-shadow(0 0 4px rgba(196,80,80,.7));' : ' filter: drop-shadow(0 0 4px rgba(63,239,106,.5));')
+          : base + ' opacity: .13; filter: grayscale(1);'
+      };
+    });
+  }
+
+  lamp(on, color) {
+    const c = color || '#3fef6a';
+    return 'width: 9px; height: 9px; flex: 0 0 auto; border-radius: 50%; background: ' +
+      (on ? c : '#2a2420') + ';' + (on ? ' box-shadow: 0 0 8px ' + c + ';' : '');
+  }
+
+  optBtn(on) {
+    return 'display: flex; align-items: center; gap: 9px; padding: 11px 12px; cursor: pointer; border: 1px solid ' +
+      (on ? 'rgba(63,239,106,.45)' : '#2b2118') + '; background: ' + (on ? 'rgba(63,239,106,.08)' : '#14100d') +
+      '; color: ' + (on ? '#8fffb4' : '#a4937f') + ';';
+  }
+
+  renderVals() {
+    const s = this.state;
+    const pulse = this.props.pulseHints ?? true;
+    const awaits = { turn: 'turn', loading: 'loading', items: 'items' }[s.phase];
+    const TABS = [
+      ['turn', 'ХОД', '1'], ['loading', 'ЗАРЯДКА', '2'], ['items', 'ПРЕДМЕТЫ', '3'],
+      ['lobby', 'НАСТРОЙКИ', '4'], ['tv', 'TV', '5'], ['voip', 'ТЕЛЕФОНЫ', '6'],
+      ['cams', 'КАМЕРЫ', '7'], ['calib', 'ПРИЦЕЛ', '8']
+    ];
+    const tabs = TABS.map(([id, label, key]) => {
+      const active = id === s.tab;
+      const attn = id === awaits && !active;
+      return {
+        key, label,
+        go: () => this.setState({ tab: id }),
+        style: 'display: flex; flex-direction: column; align-items: flex-start; justify-content: center; gap: 2px; min-width: 92px; padding: 0 12px; cursor: pointer; border: 1px solid ' +
+          (active ? '#5fff8f' : '#2c2119') + '; border-bottom: none; background: ' +
+          (active ? 'linear-gradient(180deg, #5fff8f, #3fef6a)' : '#161110') + '; color: ' +
+          (active ? '#08120b' : '#a4937f') + ';' + (attn && pulse ? ' animation: tabPulse 1.9s ease-in-out infinite;' : ''),
+        dotStyle: attn
+          ? 'width: 6px; height: 6px; border-radius: 50%; background: #ffa438; box-shadow: 0 0 6px #ffa438; animation: dotPulse 1.4s infinite;'
+          : 'display: none;'
+      };
+    });
+
+    const shell = s.mag[0];
+    const known = s.revealed;
+    const players = s.players.map(p => {
+      const active = p.id === s.turn && s.phase === 'turn';
+      const crit = p.hp <= 1;
+      return {
+        name: p.name, mark: active ? '▶' : '#' + p.id,
+        numColor: active ? '#3fef6a' : '#8a7a68',
+        hpText: p.hp + '/' + p.max, hpColor: crit ? '#e06a6a' : '#cdbfae',
+        rowStyle: 'display: flex; align-items: center; gap: 9px; padding: 3px 7px; border: 1px solid ' +
+          (active ? 'rgba(63,239,106,.32)' : '#2b2118') + '; background: ' + (active ? 'rgba(63,239,106,.06)' : 'rgba(255,255,255,.015)') + ';',
+        bolts: this.boltRow(p.hp, p.max, crit),
+        items: p.items.map(i => ({ emoji: ITEMS[i].emoji, label: ITEMS[i].label })),
+        dec: () => this.apply(st => { const t = st.players.find(x => x.id === p.id); t.hp = Math.max(0, t.hp - 1); }, p.name + ': HP вручную −1', 'shot'),
+        inc: () => this.apply(st => { const t = st.players.find(x => x.id === p.id); t.hp = Math.min(t.max, t.hp + 1); }, p.name + ': HP вручную +1', 'item')
+      };
+    });
+
+    const cur = s.players.find(p => p.id === s.turn) || s.players[0];
+    const opp = s.players.filter(p => p.id !== s.turn && p.hp > 0);
+    const handItems = cur.items.filter(i => i !== 'handcuffs').map(i => ({
+      emoji: ITEMS[i].emoji, label: ITEMS[i].label, effect: ITEMS[i].effect,
+      use: () => this.useItem(i),
+      style: 'display: flex; align-items: center; gap: 12px; text-align: left; padding: 12px 14px; border: 1px solid #322217; background: #14100d; color: #f2e9da; cursor: pointer; min-height: 68px;'
+    }));
+
+    const log = s.log.map(e => ({
+      time: e.t, text: e.text,
+      style: "font-family: 'Share Tech Mono', monospace; font-size: 12px; line-height: 1.4; padding: 6px 9px; background: #0d0a09; border-left: 2px solid " +
+        (e.kind === 'shot' ? '#a83232' : e.kind === 'item' ? '#2a4a2c' : '#2a2018') + '; color: ' +
+        (e.kind === 'shot' ? '#e0a0a0' : e.kind === 'item' ? '#7fdf9a' : '#a4937f') + ';'
+    }));
+
+    const loadOrder = s.mag.map((sh, i) => {
+      const live = sh === 'live';
+      return {
+        idx: (i + 1) + '-й',
+        label: live ? 'БОЕВОЙ' : 'ХОЛОСТОЙ',
+        color: live ? '#e06a6a' : '#8fbfd8',
+        note: i === 0 ? 'досылается первым' : '',
+        rowStyle: 'display: flex; align-items: center; gap: 12px; padding: 9px 12px; border: 1px solid ' +
+          (i === 0 ? (live ? '#7a2828' : '#2c4a5a') : '#2b2118') + '; background: rgba(255,255,255,' + (i === 0 ? '.03' : '.012') + ');',
+        pillStyle: 'width: 44px; height: 20px; border-radius: 10px; background: ' +
+          (live ? 'linear-gradient(180deg, #c94040, #7a1f1f); box-shadow: 0 0 10px rgba(201,64,64,.4);' : 'linear-gradient(180deg, #4a8ac9, #244a72);')
+      };
+    });
+
+    const liveCount = s.mag.filter(x => x === 'live').length;
+    const bigBtn = 'display: flex; flex-direction: column; align-items: flex-start; justify-content: center; gap: 7px; height: 128px; padding: 0 24px; cursor: pointer; text-align: left;';
+    const target = opp[0];
+
+    const numCfg = [
+      ['rounds', 'Раундов', 1, 5], ['hp', 'HP на игрока', 2, 8],
+      ['items', 'Предметов за раунд', 0, 5], ['shells', 'Патронов в магазине', 2, 8]
+    ].map(([k, label, min, max]) => ({
+      label, value: s.cfg[k],
+      dec: () => this.setState(st => ({ cfg: Object.assign({}, st.cfg, { [k]: Math.max(min, st.cfg[k] - 1) }), cfgSaved: false })),
+      inc: () => this.setState(st => ({ cfg: Object.assign({}, st.cfg, { [k]: Math.min(max, st.cfg[k] + 1) }), cfgSaved: false }))
+    }));
+
+    const toggleCfg = [
+      ['gyro', 'Гироскоп выбирает цель'], ['autoVoice', 'Авто-озвучка информатора'],
+      ['hardMode', 'Жёсткий режим'], ['showShells', 'Показывать порядок игрокам']
+    ].map(([k, label]) => {
+      const on = s.flags[k];
+      return {
+        label, stateText: on ? 'ВКЛ' : 'ВЫКЛ',
+        lamp: this.lamp(on), style: this.optBtn(on),
+        toggle: () => this.setState(st => ({ flags: Object.assign({}, st.flags, { [k]: !st.flags[k] }), cfgSaved: false }))
+      };
+    });
+
+    const tvNow = s.tvSource === 'message' && s.tvSent ? 'СООБЩЕНИЕ' : s.tvSource === 'video' ? (s.video === 'play' ? 'ВИДЕО ИДЁТ' : 'ВИДЕО ПАУЗА') : s.tvSource === 'cctv' ? 'КАМЕРА ' + s.activeCam : 'ИГРОВОЙ ЭКРАН';
+    const tvSources = [
+      ['game', 'Игровой экран', 'жизни, ход'], ['message', 'Сообщение', 'текст оператора'],
+      ['video', 'Видео', s.videoName], ['cctv', 'Камера', 'КАМ ' + s.activeCam]
+    ].map(([id, label, hint]) => {
+      const on = s.tvSource === id;
+      return {
+        label, hint, lamp: this.lamp(on),
+        style: this.optBtn(on) + ' min-height: 44px;',
+        pick: () => { this.setState({ tvSource: id }); this.note('TV: источник — ' + label, 'info'); }
+      };
+    });
+
+    const tvPresets = ['Оставайтесь на месте', 'Ваш ход', 'Снимите трубку', 'Смотрите на экран'].map(txt => ({
+      label: txt, pick: () => this.setState({ tvMessage: txt })
+    }));
+
+    const phones = s.phones.map(ph => ({
+      name: ph.name, state: ph.dead ? 'нет линии' : ph.busy ? 'звонит' : 'готов',
+      stateColor: ph.dead ? '#e06a6a' : ph.busy ? '#ffa438' : '#3fef6a',
+      lamp: this.lamp(!ph.dead, ph.busy ? '#ffa438' : '#3fef6a'),
+      cardStyle: 'padding: 11px 12px; border: 1px solid ' + (ph.busy ? '#5a3c18' : '#2b2118') + '; background: #14100d;',
+      callText: ph.busy ? 'СБРОСИТЬ' : 'ПОЗВОНИТЬ',
+      callStyle: 'flex: 1 1 auto; height: 40px; font-family: \'JetBrains Mono\', monospace; font-size: 11px; font-weight: 700; cursor: pointer; border: 1px solid ' +
+        (ph.busy ? '#4a120c' : '#26443a') + '; background: ' + (ph.busy ? 'linear-gradient(180deg, #9a3226, #54160e)' : 'linear-gradient(180deg, #5c9180, #33574a)') + '; color: #f2ecd9;',
+      call: () => {
+        if (ph.dead) { this.note(ph.name + ': линии нет, звонок невозможен', 'shot'); return; }
+        this.setState(st => ({ phones: st.phones.map(x => x.id === ph.id ? Object.assign({}, x, { busy: !x.busy }) : x) }));
+        this.note(ph.name + (ph.busy ? ': вызов сброшен' : ': идёт вызов'), 'item');
+      },
+      test: () => this.note(ph.name + ': тестовый гудок отправлен', 'info')
+    }));
+
+    const dialSlots = s.dialSlots.map(d => ({
+      number: d.number, sound: d.sound,
+      play: () => this.note('Прослушивание ' + d.sound + ' (номер ' + d.number + ')', 'item'),
+      remove: () => { this.setState(st => ({ dialSlots: st.dialSlots.filter(x => x.number !== d.number) })); this.note('Номер ' + d.number + ' освобождён', 'info'); }
+    }));
+    const used = s.dialSlots.map(d => d.number);
+    const freeNumbers = ['101', '102', '103', '104', '105', '106'].filter(n => used.indexOf(n) < 0).map(v => ({ value: v }));
+    const soundBank = ['ambient_idle_turn.ogg', 'зоопарк.mp3', 'informer_hint.ogg', 'static_noise.ogg', 'dial_tone.ogg'].map(v => ({ value: v }));
+
+    const chainOk = s.chain === 'ok';
+    const chainChecks = [
+      ['АТС отвечает', chainOk ? 'да' : 'нет'], ['Адрес на интерфейсе', chainOk ? 'есть' : 'потерян'],
+      ['Порты FXS', chainOk ? '4 свободны' : '1 залип'], ['Последний вызов', chainOk ? 'прошёл' : 'обрыв']
+    ].map(([label, value]) => ({
+      label, value, color: chainOk ? '#3fef6a' : '#e06a6a', dot: this.lamp(chainOk, chainOk ? '#3fef6a' : '#e06a6a')
+    }));
+
+    const cams = s.cams.map(c => {
+      const on = s.activeCam === c.id;
+      return {
+        label: c.label, caption: c.caption, state: on ? 'НА TV' : c.ok ? 'ok' : 'нет сигнала',
+        labelColor: on ? '#3fef6a' : '#a4937f', stateColor: on ? '#3fef6a' : c.ok ? '#8a7a68' : '#e06a6a',
+        style: 'position: relative; display: flex; align-items: center; justify-content: center; cursor: pointer; border: 1px solid ' +
+          (on ? '#3fef6a' : '#2b2118') + '; background: radial-gradient(circle at 50% 45%, #0d1410, #060806);' +
+          (on ? ' box-shadow: 0 0 18px rgba(63,239,106,.2);' : ''),
+        pick: () => { this.setState({ activeCam: c.id, tvSource: 'cctv' }); this.note(c.label + ' выведена на телевизор', 'item'); }
+      };
+    });
+
+    const cctvModes = [['off', 'Выключен'], ['round', 'По кругу, 10 с'], ['event', 'По событиям в игре']].map(([id, label]) => {
+      const on = s.cctv === id;
+      return { label, lamp: this.lamp(on), style: this.optBtn(on) + ' min-height: 42px;', pick: () => { this.setState({ cctv: id }); this.note('Авто-режим камер: ' + label, 'info'); } };
+    });
+
+    const seatAngles = [-90, 90, 0, 180];
+    const seats = s.players.map((p, i) => {
+      const running = s.calib === 'run';
+      const done = s.calib === 'done' || (running && i < s.calibIdx);
+      const active = running && i === s.calibIdx;
+      const ang = seatAngles[i] || 0;
+      const rad = (ang - 90) * Math.PI / 180;
+      const x = 150 + Math.cos(rad) * 118, y = 150 + Math.sin(rad) * 118;
+      return {
+        name: p.name, angle: ang + '°', state: done ? 'ГОТОВО' : active ? 'ЖДЁМ ВЫСТРЕЛ' : 'не снято',
+        style: 'position: absolute; left: ' + x + 'px; top: ' + y + 'px; transform: translate(-50%, -50%); width: 118px; display: flex; flex-direction: column; align-items: center; gap: 3px; padding: 9px 8px; cursor: pointer; border: 1px solid ' +
+          (done ? 'rgba(63,239,106,.5)' : active ? '#ffa438' : '#2b2118') + '; background: ' +
+          (done ? 'rgba(63,239,106,.1)' : active ? 'rgba(255,164,56,.12)' : '#14100d') + '; color: ' +
+          (done ? '#8fffb4' : active ? '#ffd9a0' : '#a4937f') + ';' + (active && pulse ? ' animation: tabPulse 1.6s ease-in-out infinite;' : ''),
+        mark: () => {
+          if (s.calib !== 'run') { this.note('Сначала начните калибровку', 'info'); return; }
+          this.setState(st => {
+            const nx = st.calibIdx + 1;
+            const fin = nx >= st.players.length;
+            return { calibIdx: nx, calib: fin ? 'done' : 'run' };
+          });
+          this.note('Прицел записан: ' + p.name, 'item');
+        }
+      };
+    });
+
+    const devices = s.devices.map(d => ({
+      label: d.label, state: d.ok ? 'ok' : 'нет ответа', color: d.ok ? '#3fef6a' : '#e06a6a',
+      lamp: this.lamp(d.ok, d.ok ? '#3fef6a' : '#e06a6a'),
+      ping: () => this.note(d.label + ': пинг ' + (12 + Math.floor(Math.random() * 30)) + ' мс', 'info')
+    }));
+
+    const audioToggles = [
+      ['sound', 'Звук игры', s.sound], ['voice', 'Голос информатора', s.voice],
+      ['solenoid', 'Соленоид дробовика', s.solenoid], ['autoVoice', 'Авто-реплики', s.flags.autoVoice]
+    ].map(([k, label, on]) => ({
+      label, stateText: on ? 'ВКЛ' : 'ВЫКЛ', lamp: this.lamp(on), style: this.optBtn(on),
+      toggle: () => {
+        if (k === 'autoVoice') this.setState(st => ({ flags: Object.assign({}, st.flags, { autoVoice: !st.flags.autoVoice }) }));
+        else this.setState(st => ({ [k]: !st[k] }));
+        this.note(label + ': ' + (on ? 'выкл' : 'вкл'), 'info');
+      }
+    }));
+
+    const iconBtn = on => 'width: 38px; height: 32px; font-size: 14px; cursor: pointer; border: 1px solid ' +
+      (on ? '#26443a' : '#3a2a22') + '; background: ' + (on ? 'linear-gradient(180deg, #5c9180, #33574a)' : '#191412') +
+      '; color: ' + (on ? '#f2ecd9' : '#6a5c4e') + '; opacity: ' + (on ? '1' : '.75') + ';';
+
+    const capsEnough = s.caps >= liveCount;
+
+    return {
+      tabs, players, log, handItems, loadOrder, numCfg, toggleCfg, tvSources, tvPresets,
+      phones, dialSlots, freeNumbers, soundBank, chainChecks, cams, cctvModes, seats, devices, audioToggles,
+      isTurn: s.tab === 'turn', isLoading: s.tab === 'loading', isItems: s.tab === 'items',
+      isLobby: s.tab === 'lobby', isTv: s.tab === 'tv', isVoip: s.tab === 'voip',
+      isCams: s.tab === 'cams', isCalib: s.tab === 'calib', isServer: s.tab === 'server', isEnd: s.tab === 'end',
+
+      phaseLabel: s.phase === 'loading' ? 'ЗАРЯДКА' : s.phase === 'items' ? 'ВЫДАЧА' : s.phase === 'end' ? 'ИГРА ОСТАНОВЛЕНА' : 'ХОД ' + cur.name,
+      roundLabel: 'РАУНД ' + s.round + ' / ' + s.cfg.rounds,
+      modeLabel: 'СТОРИ 1 vs 1 · ' + s.players.length + ' ИГРОКА',
+
+      chamberLabel: known ? (shell === 'live' ? 'БОЕВОЙ' : 'ХОЛОСТОЙ') : 'НЕИЗВЕСТЕН',
+      chamberColor: known ? (shell === 'live' ? '#e06a6a' : '#8fbfd8') : '#8a7a68',
+      chamberHint: known ? 'следующий выстрел' : 'лупа покажет тип',
+      chamberRingStyle: 'width: 34px; height: 34px; border-radius: 50%; display: flex; align-items: center; justify-content: center; border: 2px dashed ' +
+        (known ? (shell === 'live' ? '#a83232' : '#2c4a5a') : '#3a2a22') + ';' + (known && pulse ? ' animation: ringPulse 1.4s ease-in-out infinite;' : ''),
+      chamberDotStyle: 'width: 15px; height: 15px; border-radius: 50%; background: ' +
+        (known ? (shell === 'live' ? 'radial-gradient(circle, #ff6b6b, #7a1a1a)' : 'radial-gradient(circle, #7fb8dd, #244a72)') : '#241c18') + ';',
+
+      magLabel: s.mag.length + ' патр.',
+      liveCount, blankCount: s.mag.filter(x => x === 'blank').length,
+      magPills: s.mag.map((sh, i) => ({
+        style: 'width: 8px; height: 24px; border-radius: 4px; background: ' +
+          (sh === 'live' ? 'linear-gradient(180deg, #c94040, #7a1f1f)' : 'linear-gradient(180deg, #4a8ac9, #244a72)') +
+          ';' + (i === 0 ? ' outline: 1px solid rgba(255,255,255,.35);' : '')
+      })),
+
+      sawChipText: s.saw ? 'ПИЛА ×2 УРОН' : 'пила — нет',
+      sawChipStyle: s.saw
+        ? "font-family: 'JetBrains Mono', monospace; font-size: 11px; font-weight: 700; color: #e0c86a; border: 1px solid #5a4a20; background: #1c1a12; padding: 4px 7px;"
+        : "font-family: 'JetBrains Mono', monospace; font-size: 11px; color: #4a4238; border: 1px dashed #2e271f; padding: 4px 7px;",
+      cuffChipText: s.cuffed ? 'НАРУЧНИКИ: ' + this.pname(s, s.cuffed) : 'наручники — нет',
+      cuffChipStyle: s.cuffed
+        ? "font-family: 'JetBrains Mono', monospace; font-size: 11px; font-weight: 700; color: #e0c86a; border: 1px solid #5a4a20; background: #1c1a12; padding: 4px 7px;"
+        : "font-family: 'JetBrains Mono', monospace; font-size: 11px; color: #4a4238; border: 1px dashed #2e271f; padding: 4px 7px;",
+
+      hardware: [
+        { label: 'КАМ ' + s.cams.filter(c => c.ok).length + '/' + s.cams.length, dot: this.lamp(true) },
+        { label: 'ТЛФ ' + s.phones.filter(p => !p.dead).length + '/' + s.phones.length, dot: this.lamp(chainOk, chainOk ? '#3fef6a' : '#e06a6a') },
+        { label: 'TV ' + (s.tvSource === 'video' && s.video === 'play' ? 'ИДЁТ' : 'ГОТОВ'), dot: this.lamp(true, s.video === 'play' ? '#ffa438' : '#3fef6a') },
+        { label: 'ESP32', dot: this.lamp(s.devices[0].ok) }
+      ],
+
+      promptText: s.phase === 'turn' ? cur.name + ' целится — отметьте выстрел' : 'Дальше по игре',
+      promptHint: (known ? 'патронник: ' + (shell === 'live' ? 'боевой' : 'холостой') : 'патронник неизвестен') + (s.saw ? ' · пила ×2' : ''),
+      promptStyle: 'flex: 0 0 auto; display: flex; align-items: center; gap: 14px; height: 54px; padding: 0 16px; border: 1px solid #6a4a18; background: linear-gradient(180deg, #241703, #1a1208);' +
+        (pulse ? ' animation: tabPulse 1.9s ease-in-out infinite;' : ''),
+      selfBtnHint: '#' + cur.id + ' ' + cur.name + ' · холостой → ход остаётся',
+      targetBtnLabel: target ? 'В ' + target.name : 'НЕТ ЦЕЛИ',
+      targetBtnHint: target ? '#' + target.id + ' ' + target.name + ' · ' + target.hp + ' HP' + (s.saw ? ' · урон ×2' : '') : 'все выбиты',
+      selfBtnStyle: bigBtn + ' border: 1.5px solid rgba(63,239,106,.45); background: linear-gradient(180deg, #0d1c0c, #08120a); color: #6fffa0;' +
+        (pulse ? ' animation: actPulse 1.6s ease-in-out infinite;' : ''),
+      targetBtnStyle: bigBtn + ' border: 1.5px solid rgba(200,70,70,.5); background: linear-gradient(180deg, #1e0a0a, #140707); color: #e58787;' +
+        (pulse ? ' animation: actPulseRed 1.6s ease-in-out infinite;' : ''),
+      handTitle: 'ПРЕДМЕТЫ #' + cur.id + ' ' + cur.name,
+      hasCuffs: cur.items.indexOf('handcuffs') >= 0,
+      opponents: opp.map(o => ({ id: o.id, title: '#' + o.id + ' ' + o.name })),
+      cuffTarget: String(s.cuffTarget),
+
+      capsLabel: s.caps + ' / 8',
+      caps: Array.from({ length: 8 }, (_, i) => ({
+        style: 'flex: 1 1 0; height: 22px; border-radius: 3px; background: ' +
+          (i < s.caps ? 'radial-gradient(circle at 40% 30%, #ffd27a, #c9962e 72%)' : '#1a1512') +
+          ';' + (i < s.caps ? ' box-shadow: 0 0 8px rgba(224,178,58,.35);' : '')
+      })),
+      capsHint: capsEnough ? 'хватит на ' + liveCount + ' боевых выстрела' : 'капсюлей меньше, чем боевых!',
+      capsHintColor: capsEnough ? '#8a7a68' : '#e06a6a',
+      capsWarnText: capsEnough
+        ? liveCount + ' боевых в магазине, ' + s.caps + ' капсюлей в револьвере. Хватает.'
+        : liveCount + ' боевых, но только ' + s.caps + ' капсюлей. Перезарядите револьвер.',
+      capsWarnBg: capsEnough ? 'linear-gradient(180deg, #14200f, #0e150b)' : 'linear-gradient(180deg, #2a1010, #1a0c0c)',
+      capsWarnBorder: capsEnough ? '#2a4a2c' : '#a83232',
+      capsWarnColor: capsEnough ? '#3fef6a' : '#e06a6a',
+      loadTitle: 'ПОРЯДОК ЗАРЯДКИ · ' + s.mag.length + ' ПАТРОНОВ',
+      logCount: 'раунд ' + s.round,
+
+      confirmBtnStyle: "margin-top: 14px; height: 72px; font-family: 'EB Garamond', Georgia, serif; font-size: 24px; font-weight: 700; letter-spacing: .1em; color: #08120b; background: linear-gradient(180deg, #5fff8f, #3fef6a); border: 1px solid #5fff8f; cursor: pointer;" +
+        (pulse ? ' animation: actPulse 1.5s ease-in-out infinite;' : ''),
+      startBtnStyle: "height: 62px; font-family: 'EB Garamond', Georgia, serif; font-size: 22px; font-weight: 700; letter-spacing: .1em; color: #08120b; background: linear-gradient(180deg, #5fff8f, #3fef6a); border: 1px solid #5fff8f; cursor: pointer;",
+      undoStyle: 'height: 34px; padding: 0 13px; font-family: \'JetBrains Mono\', monospace; font-size: 11px; font-weight: 700; letter-spacing: .08em; cursor: pointer; border: 1px solid #7a5c14; background: linear-gradient(180deg, #e5bc3e, #a97f1e); color: #1d1403; opacity: ' + (s.history.length ? '1' : '.4') + ';',
+
+      dealt: s.dealPreview.map((list, i) => {
+        const p = s.players[i] || { id: i + 1, name: 'МЕСТО ' + (i + 1) };
+        return {
+          num: '#' + p.id, name: p.name,
+          items: list.map(id => ({ emoji: ITEMS[id].emoji, label: ITEMS[id].label })),
+          reroll: () => {
+            const fresh = Array.from({ length: s.cfg.items }, () => POOL[Math.floor(Math.random() * POOL.length)]);
+            this.setState(st => ({ dealPreview: st.dealPreview.map((l, k) => k === i ? fresh : l) }));
+            this.note(p.name + ': набор предметов заменён', 'info');
+          }
+        };
+      }),
+
+      lobby: s.players.map(p => ({
+        num: '#' + p.id, name: p.name, state: p.calibrated ? 'готов' : 'без прицела',
+        stateColor: p.calibrated ? '#3fef6a' : '#ffa438',
+        kick: () => { this.apply(st => { st.players = st.players.filter(x => x.id !== p.id); }, p.name + ' убран из лобби', 'info'); }
+      })),
+
+      tvNowLabel: tvNow, tvNowColor: s.tvSource === 'game' ? '#3fef6a' : '#ffa438',
+      tvPreview: s.tvSource === 'message' ? (s.tvSent || '— пусто —') : s.tvSource === 'video' ? s.videoName + (s.video === 'play' ? ' ▶' : ' ⏸') : s.tvSource === 'cctv' ? 'КАМ ' + s.activeCam + ' · прямой сигнал' : cur.name + ' · ход · ' + cur.hp + ' HP',
+      tvMessage: s.tvMessage,
+      tvSendStyle: "flex: 1 1 auto; height: 60px; font-family: 'EB Garamond', Georgia, serif; font-size: 21px; font-weight: 700; letter-spacing: .08em; color: #08120b; background: linear-gradient(180deg, #5fff8f, #3fef6a); border: 1px solid #5fff8f; cursor: pointer;",
+      videoName: s.videoName,
+      videoBtnText: s.video === 'play' ? 'ПАУЗА' : 'ВОСПРОИЗВЕСТИ',
+      videoBtnStyle: 'flex: 1 1 auto; height: 44px; font-family: \'JetBrains Mono\', monospace; font-size: 11px; font-weight: 700; cursor: pointer; border: 1px solid ' +
+        (s.video === 'play' ? '#7a5c14' : '#26443a') + '; background: ' + (s.video === 'play' ? 'linear-gradient(180deg, #e5bc3e, #a97f1e)' : 'linear-gradient(180deg, #5c9180, #33574a)') +
+        '; color: ' + (s.video === 'play' ? '#1d1403' : '#f2ecd9') + ';',
+      volume: s.volume,
+      tvLayouts: [['1', '1 игрок'], ['2', '2 секции'], ['4', '4 секции']].map(([id, label]) => ({
+        label,
+        style: 'flex: 1 1 auto; height: 42px; font-family: \'JetBrains Mono\', monospace; font-size: 11px; font-weight: 700; cursor: pointer; border: 1px solid ' +
+          (s.tvLayout === id ? '#3fef6a' : '#2b2118') + '; background: ' + (s.tvLayout === id ? 'rgba(63,239,106,.12)' : '#14100d') +
+          '; color: ' + (s.tvLayout === id ? '#8fffb4' : '#a4937f') + ';',
+        pick: () => { this.setState({ tvLayout: id }); this.note('TV: раскладка ' + label, 'info'); }
+      })),
+
+      phonesLabel: s.phones.filter(p => !p.dead).length + ' на линии',
+      newSlotNumber: s.newSlotNumber, newSlotSound: s.newSlotSound,
+      chainSummary: chainOk ? 'ВСЁ ЖИВО' : 'ЕСТЬ ПРОБЛЕМА', chainColor: chainOk ? '#3fef6a' : '#e06a6a',
+
+      camsLabel: 'на TV: КАМ ' + s.activeCam,
+
+      calibStatusText: s.calib === 'run'
+        ? 'Ждём выстрел: ' + (s.players[s.calibIdx] ? s.players[s.calibIdx].name : 'в себя')
+        : s.calib === 'done' ? 'Калибровка завершена' : 'Калибровка не запущена',
+      calibStatusStyle: 'font-family: \'Share Tech Mono\', monospace; font-size: 13px; padding: 10px 12px; border: 1px solid ' +
+        (s.calib === 'run' ? '#5a3c18' : s.calib === 'done' ? '#2a4a2c' : '#2b2118') + '; background: ' +
+        (s.calib === 'run' ? 'rgba(255,164,56,.1)' : s.calib === 'done' ? 'rgba(63,239,106,.1)' : '#14100d') + '; color: ' +
+        (s.calib === 'run' ? '#ffd9a0' : s.calib === 'done' ? '#8fffb4' : '#8a7a68') + ';',
+      calibBtnText: s.calib === 'run' ? 'ИДЁТ ОПРОС…' : 'НАЧАТЬ КАЛИБРОВКУ',
+      calibBtnStyle: 'flex: 1 1 auto; height: 54px; font-family: \'JetBrains Mono\', monospace; font-size: 13px; font-weight: 700; letter-spacing: .08em; cursor: pointer; border: 1px solid #7a5c14; background: linear-gradient(180deg, #e5bc3e, #a97f1e); color: #1d1403;' +
+        (s.calib === 'run' && pulse ? ' animation: tabPulse 1.6s ease-in-out infinite;' : ''),
+      gyroText: s.flags.gyro ? 'ВКЛ' : 'ВЫКЛ', gyroLamp: this.lamp(s.flags.gyro), gyroStyle: this.optBtn(s.flags.gyro),
+
+      endTitle: s.players.some(p => p.hp <= 0) ? 'ИГРОК ВЫБИТ' : 'ЗАВЕРШИТЬ ИГРУ?',
+      endText: s.players.map(p => p.name + ' — ' + p.hp + '/' + p.max + ' HP').join(' · ') + '. Раунд ' + s.round + ' из ' + s.cfg.rounds + '.',
+      saveCfgText: s.cfgSaved ? 'НАСТРОЙКИ СОХРАНЕНЫ' : 'СОХРАНИТЬ НАСТРОЙКИ',
+      saveCfgStyle: 'margin-top: 12px; width: 100%; height: 48px; font-family: \'JetBrains Mono\', monospace; font-size: 12px; font-weight: 700; letter-spacing: .1em; cursor: pointer; border: 1px solid ' +
+        (s.cfgSaved ? '#2a4a2c' : '#5fff8f') + '; background: ' + (s.cfgSaved ? '#14100d' : 'linear-gradient(180deg, #5fff8f, #3fef6a)') +
+        '; color: ' + (s.cfgSaved ? '#5a7a60' : '#08120b') + ';',
+
+      solenoidStyle: iconBtn(s.solenoid), soundStyle: iconBtn(s.sound), voiceStyle: iconBtn(s.voice),
+      toggleSolenoid: () => { this.setState(st => ({ solenoid: !st.solenoid })); this.note('Соленоид: ' + (s.solenoid ? 'выкл' : 'вкл'), 'info'); },
+      toggleSound: () => { this.setState(st => ({ sound: !st.sound })); this.note('Звук: ' + (s.sound ? 'выкл' : 'вкл'), 'info'); },
+      toggleVoice: () => { this.setState(st => ({ voice: !st.voice })); this.note('Голос информатора: ' + (s.voice ? 'выкл' : 'вкл'), 'info'); },
+      goServer: () => this.setState(st => ({ tab: 'server', prevTab: st.tab })),
+      askFinish: () => this.setState(st => ({ tab: 'end', prevTab: st.tab })),
+      cancelFinish: () => this.setState(st => ({ tab: st.prevTab === 'end' ? 'turn' : st.prevTab })),
+      newGame: () => {
+        this.apply(st => {
+          st.round = 1; st.phase = 'loading'; st.tab = 'loading';
+          st.mag = ['live', 'blank', 'live', 'blank', 'live'];
+          st.caps = 8; st.saw = false; st.cuffed = null; st.revealed = false; st.turn = st.players[0].id;
+          st.players = st.players.map(p => Object.assign({}, p, { hp: p.max, items: [] }));
+        }, 'Новая игра · раунд 1', 'info');
+      },
+
+      undo: () => {
+        if (!s.history.length) { this.note('Откатывать нечего', 'info'); return; }
+        this.setState(st => Object.assign({}, st.history[0], { history: st.history.slice(1) }));
+      },
+      endRound: () => this.apply(st => {
+        st.round = Math.min(st.cfg ? st.cfg.rounds : st.round + 1, st.round + 1);
+        st.phase = 'items'; st.tab = 'items'; st.mag = []; st.saw = false; st.cuffed = null; st.revealed = false;
+      }, 'Раунд закрыт · выдача предметов', 'info'),
+
+      fireSelf: () => { if (s.mag.length) this.fire(true); else this.note('Магазин пуст — сначала зарядка', 'info'); },
+      fireTarget: () => { if (!target) { this.note('Цели нет', 'info'); return; } if (s.mag.length) this.fire(false); else this.note('Магазин пуст — сначала зарядка', 'info'); },
+      passTurn: () => this.apply(st => { this.nextTurn(st); }, 'Ход передан вручную', 'info'),
+      revealChamber: () => this.apply(st => { st.revealed = true; }, 'Оператор посмотрел патронник: ' + (shell === 'live' ? 'БОЕВОЙ' : 'ХОЛОСТОЙ'), 'item'),
+      setCuffTarget: e => this.setState({ cuffTarget: Number(e.target.value) }),
+      useCuffs: () => this.apply(st => {
+        const p = st.players.find(x => x.id === st.turn);
+        const i = p.items.indexOf('handcuffs');
+        if (i >= 0) p.items.splice(i, 1);
+        st.cuffed = Number(st.cuffTarget) || (opp[0] && opp[0].id);
+      }, cur.name + ' применил НАРУЧНИКИ', 'item'),
+
+      reshuffle: () => this.apply(st => {
+        const arr = st.mag.slice();
+        for (let i = arr.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [arr[i], arr[j]] = [arr[j], arr[i]]; }
+        st.mag = arr; st.revealed = false;
+      }, 'Порядок патронов перетасован', 'info'),
+      printOrder: () => this.note('Порядок: ' + s.mag.map(x => x === 'live' ? 'Б' : 'Х').join(' · '), 'info'),
+      confirmLoaded: () => this.apply(st => {
+        if (!st.mag.length) {
+          const n = st.cfg.shells, live = Math.ceil(n / 2);
+          st.mag = Array.from({ length: n }, (_, i) => i < live ? 'live' : 'blank').sort(() => Math.random() - 0.5);
+        }
+        st.phase = 'turn'; st.tab = 'turn'; st.revealed = false;
+      }, 'Магазин заряжён · ход начат', 'info'),
+      reloadCaps: () => this.apply(st => { st.caps = 8; }, 'Револьвер: 8 капсюлей', 'item'),
+
+      confirmDealt: () => this.apply(st => {
+        st.players = st.players.map((p, i) => Object.assign({}, p, { items: (st.dealPreview[i] || []).slice() }));
+        st.phase = 'loading'; st.tab = 'loading';
+      }, 'Предметы розданы · переходим к зарядке', 'info'),
+
+      addSeat: () => this.apply(st => {
+        const id = Math.max.apply(null, st.players.map(p => p.id)) + 1;
+        st.players.push({ id, name: 'ИГРОК ' + id, hp: st.cfg.hp, max: st.cfg.hp, items: [], seat: '—', calibrated: false });
+        st.dealPreview.push(['beer']);
+      }, 'Добавлено место за столом', 'info'),
+      startGame: () => this.apply(st => {
+        st.round = 1; st.phase = 'items'; st.tab = 'items';
+        st.players = st.players.map(p => Object.assign({}, p, { hp: st.cfg.hp, max: st.cfg.hp, items: [] }));
+        st.mag = []; st.caps = 8; st.saw = false; st.cuffed = null;
+      }, 'Игра начата · раунд 1', 'info'),
+      saveConfig: () => { this.setState({ cfgSaved: true }); this.note('Настройки сохранены в конфиг', 'item'); },
+      addLive: () => this.apply(st => { st.mag.push('live'); }, 'В магазин добавлен боевой', 'shot'),
+      addBlank: () => this.apply(st => { st.mag.push('blank'); }, 'В магазин добавлен холостой', 'info'),
+      clearMag: () => this.apply(st => { st.mag = []; st.revealed = false; }, 'Магазин очищен', 'info'),
+
+      setTvMessage: e => this.setState({ tvMessage: e.target.value, cfgSaved: false }),
+      sendTvMessage: () => {
+        if (!s.tvMessage.trim()) { this.note('Пустое сообщение не отправлено', 'info'); return; }
+        this.setState({ tvSent: s.tvMessage, tvSource: 'message' });
+        this.note('На TV: «' + s.tvMessage + '»', 'item');
+      },
+      clearTv: () => { this.setState({ tvSent: '', tvMessage: '', tvSource: 'game' }); this.note('Экран TV очищен', 'info'); },
+      toggleVideo: () => { const p = s.video !== 'play'; this.setState({ video: p ? 'play' : 'pause', tvSource: 'video' }); this.note('Видео: ' + (p ? 'воспроизведение' : 'пауза'), 'item'); },
+      stopVideo: () => { this.setState({ video: 'stop', tvSource: 'game' }); this.note('Видео остановлено', 'info'); },
+      setVolume: e => this.setState({ volume: Number(e.target.value) }),
+
+      setNewSlotNumber: e => this.setState({ newSlotNumber: e.target.value }),
+      setNewSlotSound: e => this.setState({ newSlotSound: e.target.value }),
+      addSlot: () => {
+        if (!freeNumbers.length) { this.note('Свободных номеров нет', 'info'); return; }
+        const num = s.newSlotNumber && freeNumbers.some(f => f.value === s.newSlotNumber) ? s.newSlotNumber : freeNumbers[0].value;
+        this.setState(st => ({ dialSlots: st.dialSlots.concat([{ number: num, sound: st.newSlotSound }]) }));
+        this.note('Номер ' + num + ' → ' + s.newSlotSound, 'item');
+      },
+      refreshChain: () => { this.setState({ chain: 'ok' }); this.note('Цепочка телефонии проверена: всё живо', 'item'); },
+      resetPorts: () => { this.setState(st => ({ phones: st.phones.map(p => Object.assign({}, p, { busy: false })) })); this.note('Порты FXS сброшены', 'item'); },
+      rebootGw: () => { this.setState({ chain: 'bad' }); this.note('Шлюз перезагружается — 2 минуты', 'shot'); },
+
+      toggleGyro: () => { this.setState(st => ({ flags: Object.assign({}, st.flags, { gyro: !st.flags.gyro }) })); this.note('Гироскоп: ' + (s.flags.gyro ? 'выкл' : 'вкл'), 'info'); },
+      startCalib: () => { this.setState({ calib: 'run', calibIdx: 0 }); this.note('Калибровка начата', 'item'); },
+      cancelCalib: () => { this.setState({ calib: 'idle', calibIdx: 0 }); this.note('Калибровка отменена', 'info'); }
+    };
+  }
+}
+
+</script>
+</body>
+</html>

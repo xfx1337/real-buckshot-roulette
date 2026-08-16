@@ -18,6 +18,7 @@ import logging
 import subprocess
 import tarfile
 import threading
+import http.client
 import urllib.request
 import zipfile
 from pathlib import Path
@@ -39,7 +40,7 @@ from app.game_engine import (
 from app import sound_config
 from app import video_config
 from app import audio_engine
-from app import tts_bridge, voice_farm, voip_service
+from app import memes, test_mode, tts_bridge, voice_farm, voip_service
 
 import tts
 from app.sound_director import director as sound_director, loop_for_state
@@ -260,6 +261,20 @@ tv_video_state: dict = {"action": "idle", "video": None, "loop": False}
 # висит на других экранах, а не остался пустым до следующей отправки.
 tv_message_state: dict = {"action": "message_clear"}
 
+# Инструкция к дисковому набору, висящая на телевизоре прямо сейчас, и номер в
+# ней. Держим по той же причине, что и сообщение выше: телевизор, включённый или
+# перезагруженный посреди набора, должен дорисовать номер, который игрок уже
+# держит в голове, а не встретить его пустым экраном. Срок номера тоже здесь:
+# экран его не показывает, но гайд, переживший собственный номер, показывать
+# нечего — по нему решается, дорисовывать ли его опоздавшему телевизору.
+tv_rotary_state: dict = {"action": "rotary_guide_clear"}
+
+# Висит ли сейчас «ВХОДЯЩИЙ ВЫЗОВ — СНИМИ ТРУБКУ», и на какой трубке. Карточка
+# лупы звонит игроку, и надпись обязана дожить ровно до того момента, когда он
+# трубку положит: снимает её рычаг (см. _on_receiver_replaced), а не таймер, —
+# поэтому нужно знать, что снимать и надо ли вообще.
+tv_incoming_state: dict = {"active": False, "extension": ""}
+
 def _is_tv_muting():
     return bool(tv_video_state.get("action") == "play" and tv_video_state.get("mute_game_sound", False))
 
@@ -325,6 +340,26 @@ async def notify_showscreen(message: str, player_name: str, item: str,
     for ws in dead:
         showscreen_ws_list.remove(ws)
 
+
+async def clear_showscreen() -> None:
+    """Вернуть /showscreen в покой, не дожидаясь его собственного отсчёта.
+
+    Нужно карточке, которая кончилась раньше своего таймера: трубку положили,
+    и «сними трубку» с этой секунды описывает то, чего уже не происходит.
+    """
+    if not showscreen_ws_list:
+        return
+    data = json.dumps({"clear": True}, ensure_ascii=False)
+    dead = []
+    for ws in showscreen_ws_list:
+        try:
+            await ws.send_text(data)
+        except Exception:
+            dead.append(ws)
+    for ws in dead:
+        showscreen_ws_list.remove(ws)
+
+
 # Команда «принудительно щёлкнуть соленоидом» от дилера к плате. Связь с ESP32
 # односторонняя (плата опрашивает сервер), поэтому команду кладём сюда, а плата
 # забирает её флагом fire=true в ближайшем ответе /api/esp/shell_status и
@@ -356,14 +391,30 @@ async def lifespan(app: FastAPI):
             print(f"[audio] серверный звук не поднялся: {e}")
     mode = sound_config.get_sound_mode()
     sound_director.set_enabled(mode == "server")
+    # Журнал репетиции пополняется из рабочих тредов (заглушка телефонии живёт
+    # там же, где жила бы настоящая). Панель узнаёт о новых строках тем же
+    # путём, что и обо всём остальном, — очередным снимком состояния.
+    _game_loop = asyncio.get_running_loop()
+    test_mode.set_listener(lambda: _push_state_from_thread(_game_loop))
+    if test_mode.active():
+        print(f"[test] режим при старте: {test_mode.LABELS[test_mode.mode()]}")
     try:
         yield
     finally:
+        test_mode.set_listener(None)
         audio_engine.stop()
         # Телефония поднимается лениво, при первом обращении к панели, но
         # останавливать её надо всегда: монитор AMI и сторож портов — живые
         # потоки с открытыми сокетами, и без этого uvicorn не выйдет.
         voip_service.stop()
+
+
+def _push_state_from_thread(loop: asyncio.AbstractEventLoop) -> None:
+    """Разослать состояние из чужого треда. Молча, если цикл уже закрыт."""
+    try:
+        asyncio.run_coroutine_threadsafe(broadcast_state(), loop)
+    except RuntimeError:
+        pass
 
 app = FastAPI(
     title="Buckshot Roulette IRL",
@@ -447,24 +498,26 @@ def _queue_sound_state(state: dict):
 async def broadcast_state():
     """Send updated game state to all connected clients."""
     if not game:
-        # Даже без игры шлём калибровку дилеру, чтобы UI обновлялся
+        # Даже без игры шлём калибровку и режим теста: обе вещи настраивают
+        # до партии, часто из второй вкладки, и панель должна увидеть перемену
+        # там, где полного снимка ещё не бывает.
+        partial: dict = {"test_mode": test_mode.state()}
         if is_calibrating or compass_calibration or last_compass_shot:
-            calib_msg = json.dumps({
-                "calibration": {
-                    "is_calibrating": is_calibrating,
-                    "queue": calibration_queue,
-                    "calibrated": compass_calibration,
-                    "last_shot": last_compass_shot,
-                }
-            }, ensure_ascii=False)
-            dead = []
-            for ws in dealer_ws_list:
-                try:
-                    await ws.send_text(calib_msg)
-                except Exception:
-                    dead.append(ws)
-            for ws in dead:
-                dealer_ws_list.remove(ws)
+            partial["calibration"] = {
+                "is_calibrating": is_calibrating,
+                "queue": calibration_queue,
+                "calibrated": compass_calibration,
+                "last_shot": last_compass_shot,
+            }
+        partial_msg = json.dumps(partial, ensure_ascii=False)
+        dead = []
+        for ws in dealer_ws_list:
+            try:
+                await ws.send_text(partial_msg)
+            except Exception:
+                dead.append(ws)
+        for ws in dead:
+            dealer_ws_list.remove(ws)
         return
     # Dealer
     dealer_dict = game.to_dict(for_dealer=True)
@@ -489,6 +542,10 @@ async def broadcast_state():
         "calibrated": compass_calibration,
         "last_shot": last_compass_shot,
     }
+    # Идёт ли репетиция. Едет в каждом снимке, а не берётся один раз при
+    # загрузке панели: режим переключают посреди прогона, и вкладка, из
+    # которой этого не делали, должна узнать об этом сама.
+    dealer_dict["test_mode"] = test_mode.state()
     dealer_data = json.dumps(dealer_dict, ensure_ascii=False)
     dead_ws = []
     for ws in dealer_ws_list:
@@ -887,6 +944,11 @@ async def create_game(
     # Номера прошлой игры не должны переживать её: они называют патроны из
     # магазина, которого больше нет.
     tts_bridge.end_round(None)
+    # Расписание мемов принадлежит партии и умирает с ней. Новое поднимется в
+    # start_game(), когда за столом действительно начнут играть.
+    _meme_stop()
+    await hide_rotary_guide()
+    await _clear_incoming_banner()
 
     # При старте новой игры переводим привязки компаса на символические цели,
     # чтобы калибровка оставалась действительной для новых UUID игроков и Дилера
@@ -1019,6 +1081,10 @@ async def start_game():
     try:
         game.start_game()
         push_undo(prev)
+        # Расписание случайных звонков — с началом партии, а не с её созданием:
+        # в лобби за столом ещё рассаживаются, и звонящий аппарат там означал бы
+        # только то, что кто-то забыл его выключить.
+        _meme_start()
         await broadcast_state()
         return {"ok": True}
     except ValueError as e:
@@ -1139,13 +1205,28 @@ async def _burner_number(player_id: str, result: dict) -> dict:
             round_id=game.current_round,
             position=result.get("position", 0), total=result.get("total", 0),
             shell=result.get("shell", ""), silent=silent,
+            game_mode=game.config.game_mode,
         )
     except Exception as exc:                                    # noqa: BLE001
         print(f"[tts] телефон: не удалось выдать номер: {exc}")
+        # На оба экрана. notify_showscreen идёт только на /showscreen, а игрок
+        # сидит перед /teleplayer, и молчащий экран после потраченной карточки
+        # неотличим от того, что дилер нажал не туда: игрок ждёт номер, которого
+        # не будет, и не знает, что случилось.
         await notify_showscreen("ТЕЛЕФОН НЕ ОТВЕЧАЕТ", player.name,
                                 "burner_phone", instant=True)
+        await broadcast_tv({"action": "message", "text": "ТЕЛЕФОН НЕ ОТВЕЧАЕТ",
+                            "instant": True, "hold": 8, "over_video": False})
         return {"phone_error": str(exc)}
 
+    # Телевизор игрока: инструкция к диску и номер под ней. Аппарат за столом
+    # один и старше всех, кто за ним сидит, поэтому набор показывается, а не
+    # объясняется словами, — иначе первый звонок уходит на то, чтобы понять,
+    # что диск возвращают пальцем не сами, а отпускают.
+    await show_rotary_guide(ticket.number, player.name,
+                            seconds=int(ticket.seconds_left))
+    # Тот же номер — и на общий телевизор, тем же путём, что и раньше: он
+    # висит там, где его видно от аппарата, а гайд играет у игрока.
     await notify_showscreen(tts.phrases.dial_instruction(ticket.number),
                             player.name, "burner_phone", instant=True,
                             seconds=int(ticket.seconds_left))
@@ -1153,31 +1234,345 @@ async def _burner_number(player_id: str, result: dict) -> dict:
     # игрок, ошибившийся диском, спросит именно у него.
     if game.last_burner_result:
         game.last_burner_result = f"{game.last_burner_result} (номер {ticket.number})"
-    game._log(f">> #{player.number}: номер {ticket.number} на экране", "item")
-    return {"number": ticket.number, "seconds_left": ticket.seconds_left}
+    game._log(f">> #{player.number}: номер {ticket.number} на экране "
+              f"(голос {ticket.voice or '?'})", "item")
+    return {"number": ticket.number, "seconds_left": ticket.seconds_left,
+            "voice": ticket.voice}
 
 
 async def _magnifier_call(player_id: str, result: dict) -> dict:
     """Позвонить игроку и приготовить фразу про патрон в стволе."""
     player = game.players[player_id]
 
+    # На репетиции без железа трубку кладёт заглушка, а не рычаг, и сообщает об
+    # этом через того же слушателя. Ставится он вместе со всей проводкой
+    # телефонии — лениво, при первом заходе на панель телефонов, куда во время
+    # прогона никто не заходит. Без этого «сними трубку» досидело бы до таймера.
+    if test_mode.mocking():
+        _voip_ensure_started()
+
     try:
         called = await asyncio.to_thread(
             tts_bridge.ring_player,
             player_id=player_id, player_number=player.number,
             round_id=game.current_round, shell=result.get("shell", ""),
+            game_mode=game.config.game_mode,
         )
     except Exception as exc:                                    # noqa: BLE001
         print(f"[tts] лупа: не удалось позвонить: {exc}")
+        # На оба экрана, по той же причине, что и у телефона выше: игрок ждёт
+        # звонка, которого не будет.
         await notify_showscreen("ЛИНИЯ МОЛЧИТ", player.name,
                                 "magnifying_glass", instant=True)
+        await broadcast_tv({"action": "message", "text": "ЛИНИЯ МОЛЧИТ",
+                            "instant": True, "hold": 8, "over_video": False})
         return {"phone_error": str(exc)}
 
+    # Надпись держится дольше, чем звонят звонки: снимет её рычаг, когда игрок
+    # положит трубку. hold остаётся страховкой на случай, когда трубку так и не
+    # взяли, — иначе «сними трубку» пережило бы вызов, который давно оборвался.
+    hold = tts_bridge.RING_SECONDS + _INCOMING_HOLD_MARGIN
+    tv_incoming_state.update({"active": True,
+                              "extension": called.get("extension", "")})
     await notify_showscreen(tts.phrases.incoming_instruction(), player.name,
                             "magnifying_glass", instant=True,
-                            seconds=tts_bridge.RING_SECONDS)
+                            seconds=hold)
+    await broadcast_tv({"action": "message",
+                        "text": tts.phrases.incoming_instruction(),
+                        "instant": True, "hold": hold,
+                        "over_video": False})
     game._log(f">> #{player.number}: телефон звонит", "item")
     return {"calling": called.get("extension", "")}
+
+
+# Насколько надпись «сними трубку» переживает сами звонки. Снять её должен
+# рычаг, но человек, снявший трубку на последней секунде звонка, ещё слушает
+# фразу — и экран, погасший под неё по таймеру, выглядит как оборванный вызов.
+# Запас покрывает самую длинную реплику информатора с хорошим отрывом.
+_INCOMING_HOLD_MARGIN = 60
+
+
+async def _clear_incoming_banner() -> None:
+    """Убрать «сними трубку» — трубку положили, надпись отслужила."""
+    if not tv_incoming_state.get("active"):
+        return
+    tv_incoming_state.update({"active": False, "extension": ""})
+    await broadcast_tv({"action": "message_clear"})
+    # На /showscreen висит та же надпись, поставленная тем же вызовом, и
+    # снимать её надо тем же движением: экран у неё другой, а повод один.
+    await clear_showscreen()
+
+
+# ── мемы: шум, которого никто не заказывал ──────────────────────────────
+#
+# Всё, что телефон и телевизор делали до сих пор, случалось потому, что кто-то
+# потратил карточку. Здесь — вставка, которой в сценарии нет: в случайный
+# момент партии либо звонит аппарат (мем из МЕМЫ/ в трубку), либо на экране
+# печатается строка из text_memes/memes.json.
+#
+# Работает только в мультиплеере. В solo и сюжетных режимах за столом сидит
+# один человек напротив дилера, и каждая вставка там — часть сценария; чужой
+# голос посреди него сбивает то, что режим и строит.
+#
+# Одно расписание на оба вида, и это главное свойство всей затеи: очередная
+# вставка бывает либо звонком, либо текстом, никогда обоими сразу. Два
+# независимых таймера рано или поздно совпали бы, и совпали бы именно в тот
+# вечер, когда это увидят, — телефон звонит, игрок идёт к нему, и по дороге
+# ему в спину печатается шутка, которую он не прочтёт. Поэтому выбор делается
+# в одной точке (_meme_loop) и после того, как проверено, что линия свободна.
+#
+# Живёт фоновой задачей на весь срок игры, а не таймером на каждую вставку:
+# расписание надо уметь оборвать концом партии, и одна задача, которую
+# отменяют, проще пачки таймеров, которые надо разыскивать.
+
+_meme_task: Optional[asyncio.Task] = None
+
+# Сколько ждать после того, как линия оказалась занята, прежде чем спросить
+# снова. Мем откладывается, а не отменяется: занятость — это идущая карточка
+# телефона, и она кончится через полминуты-минуту.
+_MEME_RETRY_SECONDS = 45.0
+
+# До какого момента экран занят предыдущим текстовым мемом. Печать идёт по
+# знаку и после неё текст ещё висит, так что вставка занимает экран заметно
+# дольше, чем длится отправка команды, — а расписание об этом ничего не знает
+# и при коротком интервале выдало бы вторую строку поверх первой.
+#
+# Время, а не флаг: снимает текст с экрана таймер на самом телевизоре, и
+# события «домигал» сюда не приходит. Считается тем же, чем считает он, —
+# длиной печати плюс выдержкой.
+_meme_screen_until: float = 0.0
+
+
+def _meme_line_free(ext: str) -> bool:
+    """Свободно ли всё настолько, чтобы вклинить мем — хоть звонком, хоть текстом.
+
+    Спрашивается перед любой вставкой, а не только перед звонком, и в этом
+    смысл: телефон и экран здесь одна очередь, а не две. Занятость телефона
+    придерживает и текст — игрок, идущий к аппарату, не должен получить в
+    спину строку, которую не прочтёт, — а недопечатанный текст придерживает
+    звонок по той же причине с другой стороны.
+
+    Телефония считает линию занятой, пока на ней идёт вызов, — но карточка,
+    только что выдавшая номер, вызова ещё не ставит: игрок к аппарату идёт,
+    номер висит на экране, а линия по всем признакам свободна. Мем,
+    зазвонивший в эту секунду, съел бы подсказку про патрон, ради которой
+    предмет и потратили.
+    """
+    # Предыдущая вставка ещё на экране: печатается или досиживает выдержку.
+    if time.time() < _meme_screen_until:
+        return False
+
+    # Идущий вызов — самый прямой признак: что-то играет в капсюль или звонят
+    # звонки.
+    try:
+        state = voip_service.snapshot()
+    except Exception:                                           # noqa: BLE001
+        # Телефония не отвечает — не время для шуток.
+        return False
+    if state.get("calls", {}).get(ext, {}).get("busy"):
+        return False
+    if state.get("armed", {}).get(ext):
+        # Звук взведён и ждёт снятия трубки: аппарат либо звонит, либо только
+        # что отзвонил, и игрок к нему идёт.
+        return False
+
+    # Надпись «сними трубку» на экране — тот же случай, увиденный с другой
+    # стороны: вызов мог уже оборваться по таймауту, а игрок ещё в пути.
+    if tv_incoming_state.get("active"):
+        return False
+
+    # Номер на экране, который ещё не набрали. Линия свободна, но занята
+    # человеком, который к ней идёт.
+    if tv_rotary_state.get("action") == "rotary_guide":
+        return False
+
+    return True
+
+
+def _meme_game_open() -> bool:
+    """Идёт ли партия, в которую мем уместно вклинить.
+
+    Зарядка дробовика — лучшее для этого время, а не худшее: дилер стоит
+    спиной со стволом в руках, стол ждёт и разговаривает, и звонящий посреди
+    этого аппарат попадает в паузу, а не перебивает ход.
+
+    Исключены только две фазы, и обе — потому что партии в них нет. В лобби
+    ещё рассаживаются, после конца игры уже расходятся; звонок и там и там
+    означал бы только, что кто-то забыл выключить телефон.
+    """
+    if game is None or not hasattr(game, "config"):
+        return False
+    if game.config.game_mode != "multiplayer":
+        return False
+    return game.phase not in (GamePhase.LOBBY, GamePhase.GAME_OVER)
+
+
+async def _meme_incoming(meme) -> None:
+    """Позвонить на аппарат и показать на экранах, что он звонит."""
+    ext = tts_bridge.extension()
+    await asyncio.to_thread(tts_bridge.ring_meme, meme, ext=ext)
+
+    # Та же надпись и тот же срок, что у лупы: аппарат звонит одинаково, чем бы
+    # звонок ни был вызван, и игрок за столом не должен различать их по экрану.
+    hold = tts_bridge.RING_SECONDS + _INCOMING_HOLD_MARGIN
+    tv_incoming_state.update({"active": True, "extension": ext})
+    await broadcast_tv({"action": "message",
+                        "text": tts.phrases.incoming_instruction(),
+                        "instant": True, "hold": hold, "over_video": False})
+    if game is not None:
+        game._log(f">> телефон звонит сам ({meme.title})", "item")
+
+
+async def _meme_outgoing(meme) -> None:
+    """Выдать номер на экран и ждать, пока его наберут."""
+    entry = await asyncio.to_thread(memes.issue, meme)
+    if entry is None:
+        # Все мем-номера заняты выданными ранее. Не отказ: следующий подход
+        # застанет их истёкшими.
+        return
+
+    seconds = int(max(0, entry.expires - time.time()))
+    # Гайд к диску — тот же, что у карточки телефона: аппарат за столом один и
+    # старше всех, кто за ним сидит, и набирать на нём учат показом, а не
+    # словами. Мем от игрового номера здесь ничем не отличается.
+    await show_rotary_guide(entry.number, "", seconds=seconds)
+    await broadcast_tv({"action": "message",
+                        "text": tts.phrases.dial_instruction(entry.number),
+                        "instant": True, "hold": seconds, "over_video": False})
+    if game is not None:
+        game._log(f">> телефон просит позвонить: {entry.number} "
+                  f"({meme.title})", "item")
+
+
+async def _meme_text(meme) -> None:
+    """Напечатать текстовый мем на телевизоре.
+
+    Идёт тем же путём, что и сообщение оператора: то же действие, та же
+    анимация печати, тот же таймер, снимающий текст с экрана. Своего пути ему
+    не нужно — на экране это ровно то же самое, отличается только повод.
+
+    Состояние сообщения при этом не запоминается (в отличие от tv_message),
+    и это намеренно: tv_message_state дорисовывается телевизору, который
+    подключился позже, а мем, доживший до следующего телевизора, — это шутка,
+    показанная не тогда, когда её показывали.
+    """
+    global _meme_screen_until
+    settings = memes.config()
+    command = meme.command(settings)
+
+    # Пока экран занят этой строкой. Печать идёт по знаку с паузами на знаках
+    # препинания, поэтому оценивается сверху: лучше придержать следующую
+    # вставку лишнюю секунду, чем наложить её на недопечатанную.
+    typing = len(command["text"]) * command["speed"] / 1000.0
+    _meme_screen_until = time.time() + typing + command["hold"]
+
+    await broadcast_tv(command)
+    if game is not None:
+        game._log(f">> на экране: {meme.title}", "item")
+
+
+async def _meme_once() -> bool:
+    """Одна вставка: либо звонок, либо текст. True, если что-то показали.
+
+    Здесь и только здесь решается, чем будет очередная вставка, — и решается
+    после того, как проверена линия. Порядок обязателен: текст выбирается
+    вместо звонка, а не в дополнение к нему, поэтому одна проверка занятости
+    защищает оба вида. Расписание, спросившее «свободна ли линия» только перед
+    звонком, оставило бы тексту право печататься поверх идущего разговора.
+    """
+    ext = tts_bridge.extension()
+    free = await asyncio.to_thread(_meme_line_free, ext)
+    if not free:
+        # Линия занята делом. Занята она телефоном, но пропускается и текст:
+        # игрок стоит с трубкой у уха или идёт к аппарату, и строка на экране
+        # в этот момент — та самая параллельность, которой быть не должно.
+        return False
+
+    # Текст или звонок. Спрашивается после проверки линии, чтобы решение и
+    # его условие относились к одному и тому же моменту.
+    if memes.text_enabled() and memes.text_next():
+        meme = await asyncio.to_thread(memes.pick_text)
+        if meme is not None:
+            await _meme_text(meme)
+            return True
+        # Список пуст или битый — звоним вместо этого, чтобы пустой
+        # text_memes/ не выключал заодно и телефон.
+        test_mode.note("мем", f"текстов нет: {memes.TEXT_FILE}")
+
+    meme = await asyncio.to_thread(memes.pick)
+    if meme is None:
+        # Папка пуста. Сказать об этом один раз некому — журнал репетиции
+        # для этого и есть.
+        test_mode.note("мем", f"нечего играть: {memes.MEMES_DIR}")
+        return False
+
+    if memes.incoming_next():
+        await _meme_incoming(meme)
+    else:
+        await _meme_outgoing(meme)
+    return True
+
+
+async def _meme_loop() -> None:
+    """Расписание случайных вставок на всю партию.
+
+    Отменяется вместе с игрой, поэтому спит целиком между вставками и не ведёт
+    никакого состояния: всё, что решает следующую, спрашивается заново в
+    момент, когда до неё дошло. Между «пора» и самой вставкой проходят
+    секунды, и за них расклад за столом успевает измениться.
+    """
+    try:
+        while True:
+            await asyncio.sleep(memes.next_delay())
+
+            # Партия кончилась сама, без force_end: расписание больше некому
+            # обрывать снаружи, поэтому оно кончается здесь. Создание новой
+            # игры поднимет своё.
+            if game is None or game.phase == GamePhase.GAME_OVER:
+                return
+
+            if not memes.enabled() or not _meme_game_open():
+                continue
+
+            try:
+                shown = await _meme_once()
+            except Exception as exc:                            # noqa: BLE001
+                # Отказ одной вставки не должен уносить расписание: мем — это
+                # шум за столом, и вечер без него лучше, чем вечер, в котором
+                # первая же ошибка телефонии тихо выключила всё остальное.
+                print(f"[meme] вставка не удалась: {exc}")
+                continue
+
+            if not shown:
+                # Линия занята делом. Ждём короткую паузу и спрашиваем снова,
+                # а не уходим до следующего полного интервала: карточка
+                # телефона кончится раньше, чем истечёт он.
+                await asyncio.sleep(_MEME_RETRY_SECONDS)
+    except asyncio.CancelledError:
+        raise
+
+
+def _meme_start() -> None:
+    """Запустить расписание мемов под текущую партию."""
+    global _meme_task
+    _meme_stop()
+    if not memes.enabled():
+        return
+    memes.forget()
+    memes.clear()
+    _meme_task = asyncio.create_task(_meme_loop())
+
+
+def _meme_stop() -> None:
+    """Оборвать расписание и погасить выданные номера."""
+    global _meme_task, _meme_screen_until
+    if _meme_task is not None:
+        _meme_task.cancel()
+        _meme_task = None
+    memes.clear()
+    # Экран прошлой партии новую не держит: её первая вставка не должна ждать
+    # выдержки строки, показанной до перезапуска.
+    _meme_screen_until = 0.0
 
 
 @app.post(
@@ -1287,6 +1682,7 @@ async def force_end():
         raise HTTPException(400, "Игра не создана")
     prev = copy.deepcopy(game)
     game.force_end_game()
+    _meme_stop()
     push_undo(prev)
     await broadcast_state()
     return {"ok": True}
@@ -1367,6 +1763,8 @@ async def next_round():
     # называют патрон из магазина, которого больше нет, и набранный в новом
     # раунде такой номер соврал бы игроку с полной уверенностью.
     tts_bridge.end_round(ended)
+    await hide_rotary_guide()
+    await _clear_incoming_banner()
     push_undo(prev)
     await broadcast_state()
     return {"ok": True}
@@ -1679,6 +2077,7 @@ async def get_state(dealer: bool = False) -> GameStateResponse | dict:
         data["can_undo"] = len(undo_stack) > 0
         data["global_mute"] = _is_tv_muting()
         data["use_gyro_targeting"] = use_gyro_targeting
+        data["test_mode"] = test_mode.state()
         return data
     d = game.to_dict(for_dealer=False)
     d["global_mute"] = _is_tv_muting()
@@ -1766,6 +2165,106 @@ async def esp_force_fire_cmd():
 
 
 # =====================================================================
+# ТЕСТОВЫЙ РЕЖИМ — прогон сценария без стола
+# =====================================================================
+# Оператор объявляет, что идёт репетиция, и выбирает, есть ли рядом железо.
+# Что это меняет — в app/test_mode.py; здесь только переключатель и те две
+# кнопки, которые в mock заменяют собой физический диск и физический курок.
+
+@app.get("/api/test_mode", tags=["Game Management"],
+         summary="Текущий тестовый режим", include_in_schema=False)
+async def test_mode_state():
+    return test_mode.state()
+
+
+@app.post("/api/test_mode", tags=["Game Management"],
+          summary="Переключить тестовый режим", include_in_schema=False)
+async def test_mode_set(data: dict):
+    """off — боевой режим, hardware — тест со стойкой, mock — тест без железа."""
+    try:
+        test_mode.set_mode(str(data.get("mode", test_mode.OFF)))
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    await broadcast_state()
+    return test_mode.state()
+
+
+@app.post("/api/test_mode/journal/clear", tags=["Game Management"],
+          summary="Очистить журнал репетиции", include_in_schema=False)
+async def test_mode_clear_journal():
+    test_mode.clear_journal()
+    await broadcast_state()
+    return test_mode.state()
+
+
+@app.post("/api/test_mode/dial", tags=["Game Management"],
+          summary="Набрать номер вместо диска", include_in_schema=False)
+async def test_mode_dial(data: dict):
+    """Изобразить набор номера на аппарате, которого нет.
+
+    Тот же путь, что и у настоящего диска: номер уходит в tts_bridge, тот
+    гасит билет, «играет» реплику и сообщает экрану, что инструкцию можно
+    убрать. Без этого карточку телефона в mock не проверить — она кончается
+    там, где игрок должен подойти к аппарату.
+    """
+    if not test_mode.mocking():
+        raise HTTPException(400, "Доступно только в режиме «Тест без железа»")
+    number = str(data.get("number", "")).strip()
+    if not number:
+        raise HTTPException(400, "Укажите номер")
+    # Проводка телефонии ставится лениво, при первом заходе на панель телефонов.
+    # На репетиции туда никто не заходит — смотрят на экран игрока, — и без
+    # этого вызова набор ушёл бы в обработчик, которого ещё нет.
+    _voip_ensure_started()
+    ext = str(data.get("extension", "")).strip() or tts_bridge.extension()
+    test_mode.note("диск", f"набрано {number}")
+    result = await asyncio.to_thread(tts_bridge.redeem_dialled, ext, number)
+    if result is None:
+        test_mode.note("диск", f"номер {number} игрой не выдавался")
+        return {"ok": False, "number": number, "reason": "unknown"}
+    await broadcast_state()
+    return result
+
+
+@app.post("/api/test_mode/trigger", tags=["Game Management"],
+          summary="Дёрнуть курок вместо ESP32", include_in_schema=False)
+async def test_mode_trigger():
+    """Изобразить физический курок дробовика.
+
+    Ровно то же, что делает плата: ставит pending_shot, после чего дилер
+    выбирает, в кого попали. Цель не выбирается сама — выбор цели и есть та
+    часть сценария, которую этой кнопкой и проверяют.
+    """
+    if not test_mode.mocking():
+        raise HTTPException(400, "Доступно только в режиме «Тест без железа»")
+    if not game:
+        raise HTTPException(400, "Игра не создана")
+    result = game.esp_shoot()
+    test_mode.note("курок", "физический выстрел"
+                            if result.get("fired") else "выстрел не прошёл: не та фаза")
+    await broadcast_state()
+    return result
+
+
+@app.post("/api/test_mode/hangup", tags=["Game Management"],
+          summary="Положить трубку вместо рычага", include_in_schema=False)
+async def test_mode_hangup():
+    """Изобразить, что трубку вернули на аппарат.
+
+    То же, что делает рычаг: снимает с экранов «сними трубку». Без этого
+    карточку лупы в mock не досмотреть до конца — надпись висела бы до своего
+    таймера, и проверить, что её снимает именно отбой, было бы нечем.
+    """
+    if not test_mode.mocking():
+        raise HTTPException(400, "Доступно только в режиме «Тест без железа»")
+    hanging = bool(tv_incoming_state.get("active"))
+    test_mode.note("рычаг", "трубку положили" if hanging
+                            else "трубку положили (на экране ничего не висело)")
+    await _clear_incoming_banner()
+    return {"ok": True, "cleared": hanging}
+
+
+# =====================================================================
 # CALIBRATION API  — калибровка компаса дробовика
 # =====================================================================
 # =====================================================================
@@ -1782,6 +2281,10 @@ use_gyro_targeting: bool = True  # Использовать ли гироско�
 async def toggle_gyro(data: dict):
     global use_gyro_targeting
     use_gyro_targeting = data.get("enabled", True)
+    # Рассылаем сразу: флаг едет в снимке состояния, и без пуша пульт узнал бы
+    # о смене режима только со следующим ходом. До редизайна это было незаметно
+    # (флаг нигде не показывался), а теперь режим прицеливания висит в шапке.
+    await broadcast_state()
     return {"ok": True, "use_gyro_targeting": use_gyro_targeting}
 
 
@@ -2238,6 +2741,66 @@ async def broadcast_tv(msg: dict):
             dead.append(ws)
     for ws in dead:
         tv_ws_list.remove(ws)
+
+
+# ── инструкция к дисковому набору ───────────────────────────────────────
+#
+# Карточка телефона выдаёт трёхзначный номер, а набирать его нужно на аппарате,
+# который старше всех за столом. Поэтому на экране игрока показывается не строка
+# «наберите 417», а сам набор: диск крутится до упора, отпускается, возвращается
+# сам, и под ним заполняются три знакоместа. Номер в анимации — тот самый,
+# выданный игроку, иначе гайд учил бы набирать что-то другое.
+#
+# Это состояние экрана, а не сообщение: оно висит, пока номер не наберут или
+# пока он не истечёт, — и по этой же причине его снимают отдельным вызовом, а не
+# таймером на стороне телевизора.
+
+async def show_rotary_guide(number: str, player_name: str = "",
+                            seconds: int = 0) -> None:
+    """Показать на телевизоре игрока, как набрать этот номер."""
+    msg = {
+        "action": "rotary_guide",
+        "number": str(number),
+        "player_name": player_name,
+        # Сколько номеру ещё жить. Телевизор этого не показывает — тикающий
+        # отсчёт торопит того, кто первый раз в жизни крутит диск, — но знать
+        # срок всё равно нужно: по нему решается, показывать ли гайд экрану,
+        # который подключился позже (см. _rotary_resume). Ноль — без срока.
+        "seconds": max(0, int(seconds)),
+    }
+    tv_rotary_state.clear()
+    tv_rotary_state.update({**msg, "issued": time.time()})
+    await broadcast_tv(msg)
+
+
+async def hide_rotary_guide() -> None:
+    """Убрать инструкцию с телевизора."""
+    if tv_rotary_state.get("action") != "rotary_guide":
+        return
+    tv_rotary_state.clear()
+    tv_rotary_state.update({"action": "rotary_guide_clear"})
+    await broadcast_tv({"action": "rotary_guide_clear"})
+
+
+def _rotary_resume() -> Optional[dict]:
+    """Гайд для телевизора, который только что подключился, или None.
+
+    Отсчёт пересчитывается от момента выдачи: висящий номер живёт от того, когда
+    его выдали, а не от того, когда этот экран включился.
+    """
+    if tv_rotary_state.get("action") != "rotary_guide":
+        return None
+    msg = {k: v for k, v in tv_rotary_state.items() if k != "issued"}
+    seconds = int(tv_rotary_state.get("seconds", 0))
+    if seconds:
+        elapsed = time.time() - float(tv_rotary_state.get("issued", 0))
+        left = int(seconds - elapsed)
+        if left <= 0:
+            # Номер истёк, пока экрана не было. Показывать его — врать про
+            # набор, который уже ничего не даст.
+            return None
+        msg["seconds"] = left
+    return msg
 
 
 @app.get("/api/tv/videos", tags=["TV"], summary="Список доступных видеофайлов", include_in_schema=False)
@@ -3007,6 +3570,59 @@ def _voip_on_event(payload: dict) -> None:
         pass
 
 
+def _on_number_dialled(number: str, redeemed: bool) -> None:
+    """Набран игровой номер — снять с экрана инструкцию к нему.
+
+    Из треда считывателя диска, как и всё остальное на этом пути, поэтому
+    в игровой цикл через run_coroutine_threadsafe.
+
+    Снимается и погашенный номер, и уже использованный: в обоих случаях игрок
+    стоит у аппарата с трубкой у уха, и висящая инструкция «набери 417» либо
+    описывает то, что уже сделано, либо предлагает повторить то, что второй
+    раз не сработает.
+
+    Сверяемся с номером на экране: два игрока могут держать номера
+    одновременно, и набор одного не должен убирать инструкцию другого.
+    """
+    loop = _voip_loop
+    if loop is None:
+        return
+    if str(tv_rotary_state.get("number", "")) != str(number):
+        return
+    try:
+        asyncio.run_coroutine_threadsafe(hide_rotary_guide(), loop)
+    except RuntimeError:
+        pass
+
+
+def _on_receiver_replaced(extension: str) -> None:
+    """Трубку положили — снять с экрана «сними трубку».
+
+    Из треда считывателя рычага, как и набор выше, поэтому в игровой цикл через
+    run_coroutine_threadsafe.
+
+    Приходит только по трубке, которую перед этим действительно снимали:
+    отличить настоящий отбой от дрожи рычага под звонками — забота
+    voip_service, и без неё первый же звонок гасил бы надпись, которую сам и
+    поставил.
+    """
+    loop = _voip_loop
+    if loop is None:
+        return
+    if not tv_incoming_state.get("active"):
+        return
+    # Тот ли это аппарат. За столом он один, но экран не должен гаснуть от
+    # трубки, к вызову отношения не имеющей, — например от оператора,
+    # проверяющего соседний порт с панели телефонов.
+    waiting = str(tv_incoming_state.get("extension", ""))
+    if waiting and str(extension) != waiting:
+        return
+    try:
+        asyncio.run_coroutine_threadsafe(_clear_incoming_banner(), loop)
+    except RuntimeError:
+        pass
+
+
 def _voip_ensure_started() -> None:
     """Поднять монитор AMI и сторож портов, если они ещё не подняты.
 
@@ -3022,6 +3638,15 @@ def _voip_ensure_started() -> None:
     # обработчик имеет смысл только когда телефония поднята, и снимать его не
     # приходится — он сам отвечает «не мой» на всё, чего игра не выдавала.
     tts_bridge.install()
+    tts_bridge.set_dial_listener(_on_number_dialled)
+    tts_bridge.set_hangup_listener(_on_receiver_replaced)
+    if test_mode.mocking():
+        # Монитор AMI и сторож портов ходят к Asterisk, которого на репетиции
+        # без железа нет. Поднимать их — значит получить тред, бесконечно
+        # переподключающийся к пустому адресу, и панель, полную ошибок связи,
+        # которые к проверяемому сценарию отношения не имеют.
+        test_mode.note("телефония", "АТС не поднимается: тест без железа")
+        return
     voip_service.start()
 
 
@@ -3167,7 +3792,7 @@ async def voices_farm():
         return await asyncio.to_thread(voice_farm.health)
     except voice_farm.FarmError as exc:
         return {"ok": False, "configured": voice_farm.configured(),
-                "url": voice_farm.FARM, "error": str(exc)}
+                "url": voice_farm.HOST, "error": str(exc)}
 
 
 @app.get("/api/voices/jobs", tags=["VoIP"], summary="Голоса в работе", include_in_schema=False)
@@ -3181,16 +3806,26 @@ async def voices_jobs():
     # Голоса, установленные за столом, — отдельный факт: голос может быть готов
     # на ферме и ещё не скачан сюда, и наоборот.
     state["local"] = await asyncio.to_thread(tts.engine.available)
+    # Список движков едет здесь же, а не отдельным запросом: панель опрашивает
+    # этот маршрут в цикле, а движки нужны ей на каждой перерисовке. Если ферма
+    # не ответила, берём список отсюда — он одинаковый на обеих машинах.
+    if not state.get("engines"):
+        state["engines"] = tts.engines.catalogue()
+    state.setdefault("engine_default", tts.engines.DEFAULT)
     return state
 
 
 @app.post("/api/voices/upload", tags=["VoIP"], summary="Загрузить запись голоса", include_in_schema=False)
 async def voices_upload(name: str = Form(...), file: UploadFile = File(...),
-                        song: str = Form("0"), seconds: int = Form(30)):
+                        song: str = Form("0")):
     """Отправить запись на ферму и вырезать из неё образец.
 
-    Отсюда голос ещё не звучит: образец — это то, на что XTTS будет опираться,
-    и услышать надо не его, а пробные фразы, которые он породит.
+    Отсюда голос ещё не звучит: образец — это то, на что модель будет
+    опираться, и услышать надо не его, а фразу, которую он породит.
+
+    Сколько секунд взять, панель не спрашивает: это решается на ферме по
+    длительности самой записи. Короткая берётся целиком, из длинной выбираются
+    куски, где действительно говорят.
     """
     content = await file.read()
     if not content:
@@ -3201,57 +3836,48 @@ async def voices_upload(name: str = Form(...), file: UploadFile = File(...),
     try:
         return await asyncio.to_thread(
             voice_farm.upload, name, file.filename or "voice.mp3", content,
-            song=song in ("1", "true", "on"), seconds=seconds)
+            song=song in ("1", "true", "on"))
     except voice_farm.FarmError as exc:
         raise HTTPException(502, str(exc))
 
 
-@app.post("/api/voices/audition", tags=["VoIP"], summary="Сгенерировать пробные фразы", include_in_schema=False)
-async def voices_audition(request: Request):
-    """Наговорить несколько фраз этим голосом, чтобы было что послушать.
+@app.post("/api/voices/speak", tags=["VoIP"], summary="Озвучить фразу этим голосом", include_in_schema=False)
+async def voices_speak(request: Request):
+    """Наговорить одну фразу этим голосом и принести файл сюда.
 
-    Сколько именно — решает дилер: по одной фразе не всегда видно, повезло
-    клону или он действительно похож, и обычная причина нажать ещё раз —
-    что предыдущих не хватило, чтобы решить.
+    Короткий путь через всё это: образец есть, дилер вписал предложение, через
+    минуту здесь лежит wav. Словарь не трогается — это отдельная и куда более
+    долгая история.
+
+    Ответ приходит только когда фраза готова: одна фраза — это десятки секунд,
+    а не час, и ждать её проще, чем опрашивать состояние.
     """
     data = await request.json()
     name = str(data.get("name", "")).strip()
-    count = int(data.get("count", 3))
+    text = str(data.get("text", "")).strip()
     if not name:
         raise HTTPException(400, "Не указан голос")
+    if not text:
+        raise HTTPException(400, "Не указан текст")
     try:
-        return await asyncio.to_thread(voice_farm.audition, name, count)
+        return await asyncio.to_thread(voice_farm.speak, name, text)
     except voice_farm.FarmError as exc:
         raise HTTPException(502, str(exc))
 
 
-@app.post("/api/voices/approve", tags=["VoIP"], summary="Утвердить голос и генерировать всё", include_in_schema=False)
-async def voices_approve(request: Request):
-    """Дилер сказал «да». Ферма начинает всю тысячу фраз."""
-    data = await request.json()
-    name = str(data.get("name", "")).strip()
-    if not name:
-        raise HTTPException(400, "Не указан голос")
-    try:
-        return await asyncio.to_thread(voice_farm.approve, name)
-    except voice_farm.FarmError as exc:
-        raise HTTPException(502, str(exc))
+@app.post("/api/voices/generate", tags=["VoIP"], summary="Сгенерировать весь словарь", include_in_schema=False)
+async def voices_generate(request: Request):
+    """Дилер сказал «да». Ферма начинает всю тысячу фраз.
 
-
-@app.post("/api/voices/reject", tags=["VoIP"], summary="Перерезать образец заново", include_in_schema=False)
-async def voices_reject(request: Request):
-    """Не тот кусок записи. Взять другой и переслушать.
-
-    Обычный ход, а не ошибка: с первого раза попадает не всегда, и вернуться
-    на шаг назад должно стоить одного нажатия.
+    Отвечает сразу, а не по завершении: это час работы, и панель дальше следит
+    за ним опросом /api/voices/jobs.
     """
     data = await request.json()
     name = str(data.get("name", "")).strip()
     if not name:
         raise HTTPException(400, "Не указан голос")
     try:
-        return await asyncio.to_thread(voice_farm.reject, name,
-                                       data.get("seconds"))
+        return await asyncio.to_thread(voice_farm.generate, name)
     except voice_farm.FarmError as exc:
         raise HTTPException(502, str(exc))
 
@@ -3273,25 +3899,22 @@ async def voices_fetch(request: Request):
         raise HTTPException(502, str(exc))
 
 
-@app.get("/api/voices/audition/{name}/{filename}", tags=["VoIP"], summary="Проиграть пробную фразу", include_in_schema=False)
-async def voices_audition_file(name: str, filename: str):
-    """Отдать пробную фразу браузеру.
+@app.get("/api/voices/spoken/{filename}", tags=["VoIP"], summary="Проиграть озвученную фразу", include_in_schema=False)
+async def voices_spoken_file(filename: str):
+    """Отдать браузеру фразу, которую уже забрали с фермы.
 
-    Через игровой сервер, а не напрямую с фермы: браузер дилера может не
-    видеть ферму вовсе — она бывает за туннелем, — а сервер её видит по
-    определению, иначе ничего из этого не работало бы.
+    Читается с диска, а не тянется по сети: /api/voices/speak возвращается
+    только после того, как файл скачан сюда, так что к моменту нажатия «играть»
+    он лежит рядом. Раньше здесь был проброс к ферме через туннель, и каждое
+    нажатие было ещё одним шансом, что связь оборвётся посреди передачи.
     """
-    def run() -> Response:
-        url = voice_farm.audition_url(name, filename)
-        with urllib.request.urlopen(url, timeout=60) as response:
-            return Response(content=response.read(), media_type="audio/wav")
-
-    try:
-        return await asyncio.to_thread(run)
-    except voice_farm.FarmError as exc:
-        raise HTTPException(502, str(exc))
-    except Exception as exc:                                    # noqa: BLE001
-        raise HTTPException(502, f"не получить пробную фразу: {exc}")
+    # Имя приходит из адресной строки и становится путём: берём только
+    # последний сегмент, чтобы «../» не увёл чтение из каталога.
+    safe = Path(filename).name
+    path = voice_farm.spoken_dir() / safe
+    if not path.is_file():
+        raise HTTPException(404, "Нет такой фразы — озвучьте её заново")
+    return FileResponse(path, media_type="audio/wav", filename=safe)
 
 
 @app.delete("/api/voices/{name}", tags=["VoIP"], summary="Забыть голос в работе", include_in_schema=False)
@@ -3306,7 +3929,12 @@ async def voices_forget(name: str):
 @app.post("/api/tts/clear", tags=["VoIP"], summary="Сбросить выданные номера", include_in_schema=False)
 async def tts_clear():
     """Убить все живые номера. Для дилера, когда что-то пошло не так."""
-    return {"ok": True, "cleared": await asyncio.to_thread(tts_bridge.end_round, None)}
+    cleared = await asyncio.to_thread(tts_bridge.end_round, None)
+    # Экран следом: номер, который больше не сработает, не должен продолжать
+    # висеть инструкцией к набору — это ровно то, что дилер и убирает.
+    await hide_rotary_guide()
+    await _clear_incoming_banner()
+    return {"ok": True, "cleared": cleared}
 
 
 @app.get("/api/voip/health", tags=["VoIP"], summary="Состояние АТС, шлюза и портов", include_in_schema=False)
@@ -3865,6 +4493,11 @@ async def ws_tv(ws: WebSocket):
         # который только что переподключился, дорисует его без повторной отправки.
         if tv_message_state.get("action") == "message":
             await ws.send_text(json.dumps({**tv_message_state, "instant": True}, ensure_ascii=False))
+        # Инструкция к набору, если номер ещё жив: игрок мог отойти к аппарату
+        # ровно в тот момент, когда телевизор перезагрузился.
+        resume = _rotary_resume()
+        if resume:
+            await ws.send_text(json.dumps(resume, ensure_ascii=False))
         while True:
             msg = await ws.receive_text()
             try:
