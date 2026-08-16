@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Phone Stream - QR Code</title>
+    <link rel="stylesheet" href="/static/style.css">
+    <style>
+        body {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            padding: 20px;
+            text-align: center;
+            font-family: 'Share Tech Mono', monospace;
+        }
+        
+        .container {
+            max-width: 600px;
+            background: rgba(255,255,255,0.05);
+            border: 2px solid var(--green);
+            padding: 40px;
+            border-radius: 8px;
+            box-shadow: 0 0 20px rgba(63, 239, 106, 0.3);
+        }
+        
+        h1 {
+            color: var(--green-bright);
+            margin-top: 0;
+            font-size: 32px;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+        }
+        
+        .qr-container {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            display: inline-block;
+            margin: 30px 0;
+        }
+        
+        #qrcode {
+            margin: 0 auto;
+        }
+        
+        .url-display {
+            background: rgba(0,0,0,0.3);
+            border: 1px solid var(--border-light);
+            padding: 15px;
+            margin: 20px 0;
+            border-radius: 4px;
+            word-break: break-all;
+            font-size: 14px;
+            color: var(--green);
+        }
+        
+        .instructions {
+            color: var(--text-color);
+            font-size: 14px;
+            line-height: 1.8;
+            text-align: left;
+            margin-top: 20px;
+        }
+        
+        .instructions li {
+            margin-bottom: 10px;
+        }
+        
+        .copy-btn {
+            background: none;
+            border: 2px solid var(--green);
+            color: var(--green);
+            padding: 10px 20px;
+            cursor: pointer;
+            font-family: 'Share Tech Mono', monospace;
+            font-size: 14px;
+            margin-top: 10px;
+            transition: all 0.3s;
+        }
+        
+        .copy-btn:hover {
+            background: var(--green);
+            color: black;
+        }
+    </style>
+</head>
+<body>
+    <div class="crt-vignette" style="z-index:1;"></div>
+    <div class="crt-scanlines" style="z-index:2; opacity:.3;"></div>
+    
+    <div class="container" style="position:relative; z-index:3;">
+        <h1>📱 Phone Camera Stream</h1>
+        
+        <p style="color: var(--text-bright); margin-bottom: 20px;">
+            Отсканируйте QR-код телефоном для доступа к странице стриминга камеры
+        </p>
+        
+        <div class="qr-container">
+            <div id="qrcode"></div>
+        </div>
+        
+        <div class="url-display" id="url-display">
+            Загрузка...
+        </div>
+        
+        <button class="copy-btn" onclick="copyUrl()">📋 Копировать URL</button>
+        
+        <div class="instructions">
+            <h3 style="color: var(--green-bright);">Инструкция:</h3>
+            <ol>
+                <li>Отсканируйте QR-код камерой телефона</li>
+                <li>Разрешите доступ к камере в браузере</li>
+                <li>Выберите камеру и качество</li>
+                <li>Нажмите "Start Stream"</li>
+                <li>В панели дилера назначьте стрим на слот (CAM 1-4)</li>
+                <li>Включите режим CCTV на TV-экранах</li>
+            </ol>
+        </div>
+    </div>
+    
+    <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
+    <script>
+        const url = `${location.protocol}//${location.host}/phonestream`;
+        
+        document.getElementById('url-display').textContent = url;
+        
+        new QRCode(document.getElementById('qrcode'), {
+            text: url,
+            width: 256,
+            height: 256,
+            colorDark: '#000000',
+            colorLight: '#ffffff',
+            correctLevel: QRCode.CorrectLevel.H
+        });
+        
+        function copyUrl() {
+            navigator.clipboard.writeText(url).then(() => {
+                const btn = event.target;
+                const originalText = btn.textContent;
+                btn.textContent = '✅ Скопировано!';
+                btn.style.borderColor = 'var(--green-bright)';
+                btn.style.color = 'var(--green-bright)';
+                setTimeout(() => {
+                    btn.textContent = originalText;
+                    btn.style.borderColor = 'var(--green)';
+                    btn.style.color = 'var(--green)';
+                }, 2000);
+            }).catch(err => {
+                alert('Ошибка копирования: ' + err);
+            });
+        }
+    </script>
+</body>
+</html>

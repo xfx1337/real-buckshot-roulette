@@ -1,0 +1,369 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Player #{{ player.number }}</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body class="page-player">
+    <div class="crt-vignette" style="z-index:5;"></div>
+    <div class="crt-scanlines" style="z-index:6; opacity:.4;"></div>
+    <div id="player-app" data-player-id="{{ player.id }}">
+
+        <!-- Connecting -->
+        <div id="connecting" class="player-screen">
+            <div class="player-lobby-msg">
+                подключение<span class="cursor-blink">_</span>
+            </div>
+        </div>
+
+        <!-- Lobby -->
+        <div id="state-lobby" class="player-screen" style="display:none">
+            <div class="player-lobby-msg">
+                ожидание игры<span class="cursor-blink">_</span>
+            </div>
+        </div>
+
+        <!-- In Game -->
+        <div id="state-game" class="player-screen" style="display:none">
+            
+            <!-- MULTIPLAYER MODE -->
+            <div id="mp-layout" style="display:none; width:100%; height:100%; flex-direction:column; align-items:center;">
+                <div class="turn-label" id="turn-label-mp">[ ваш ход ]</div>
+                <div class="lightning-container" id="lightning-container-mp"></div>
+            </div>
+
+            <!-- SOLO MODE -->
+            <div id="solo-layout" class="solo-layout" style="display:none">
+                <div class="solo-t-horizontal"></div>
+                <div class="solo-t-vertical"></div>
+                
+                <div class="solo-half left-half">
+                    <div class="solo-turn-label" id="solo-dealer-turn"></div>
+                    <div class="solo-label" id="solo-dealer-label">ДИЛЕР</div>
+                    <div class="solo-bolts" id="opponent-lightning-container"></div>
+                </div>
+                
+                <div class="solo-half right-half">
+                    <div class="solo-turn-label" id="solo-player-turn"></div>
+                    <div class="solo-label" id="solo-player-label">ИГРОК</div>
+                    <div class="solo-bolts" id="solo-lightning-container"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Dead -->
+        <div id="state-dead" class="dead-screen" style="display:none">
+            <div class="dead-text">убит</div>
+        </div>
+
+        <!-- Game Over -->
+        <div id="state-gameover" class="gameover-screen" style="display:none">
+            <div class="gameover-text" id="gameover-text">конец игры</div>
+            <div class="gameover-winner" id="gameover-winner"></div>
+        </div>
+
+        <!-- Round Over -->
+        <div id="state-roundover" class="gameover-screen" style="display:none">
+            <div class="round-transition-container">
+                <div class="round-indicators" id="round-indicators">
+                    <!-- injected by JS -->
+                </div>
+                <div class="player-lobby-msg" id="roundover-msg" style="margin-top: 30px; opacity: 0; transition: opacity 0.5s;">
+                    ожидание дилера<span class="cursor-blink">_</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Dealer Loading -->
+        <div id="state-loading" class="player-screen" style="display:none">
+            <div class="player-lobby-msg" id="player-loading-msg">
+                дилер заряжает дробовик<span class="cursor-blink">_</span>
+            </div>
+        </div>
+    </div>
+
+    <div id="fullscreen-gate" class="fullscreen-gate">
+        <div class="fullscreen-gate-inner">
+            <div class="player-lobby-msg">нажмите чтобы начать<span class="cursor-blink">_</span></div>
+        </div>
+    </div>
+
+    <!-- NoSleep.js — фолбэк удержания экрана (http / браузеры без Wake Lock API). -->
+    <script src="/static/nosleep.min.js"></script>
+    <script src="/static/wakeLock.js"></script>
+    <script>
+    // ── Fullscreen + удержание экрана ──
+    // Оверлей fullscreen-gate ловит первый тап (жест пользователя нужен для
+    // fullscreen и wake lock). По тапу: fullscreen + включаем wake lock через
+    // модуль wakeLock.js (нативный Wake Lock API, фолбэк — NoSleep.js).
+    // Wake lock работает молча — без визуального индикатора на экране.
+    const wakeLockMgr = createWakeLockManager();
+
+    function enterImmersiveMode() {
+        const el = document.documentElement;
+        const req = el.requestFullscreen || el.webkitRequestFullscreen;
+        if (req) {
+            req.call(el).catch(() => {});
+        }
+        wakeLockMgr.enable().catch(() => {});   // только из пользовательского жеста
+        document.getElementById('fullscreen-gate').classList.add('hidden');
+    }
+
+    document.getElementById('fullscreen-gate').addEventListener('click', enterImmersiveMode);
+    document.getElementById('fullscreen-gate').addEventListener('touchend', (e) => {
+        e.preventDefault();
+        enterImmersiveMode();
+    });
+    </script>
+
+    <script>
+    const playerId = document.getElementById('player-app').dataset.playerId;
+    let ws;
+    let reconnectTimer;
+
+    function connect() {
+        const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+        ws = new WebSocket(`${proto}://${location.host}/ws/player/${playerId}`);
+
+        ws.onopen = () => {
+            document.getElementById('connecting').style.display = 'none';
+            clearTimeout(reconnectTimer);
+        };
+
+        ws.onmessage = (e) => {
+            const data = JSON.parse(e.data);
+            updateUI(data);
+        };
+
+        ws.onclose = () => {
+            document.getElementById('connecting').style.display = 'flex';
+            reconnectTimer = setTimeout(connect, 2000);
+        };
+    }
+
+    let gameOverTimeout = null;
+    let roundOverTimeout = null;
+    let showingRoundOverScreen = false;
+
+    function updateUI(data) {
+        if (data.error) {
+            window.location.href = '/';
+            return;
+        }
+
+        const screens = ['state-lobby', 'state-game', 'state-dead', 'state-gameover', 'state-roundover', 'state-loading'];
+        screens.forEach(s => document.getElementById(s).style.display = 'none');
+
+        if (data.phase === 'lobby') {
+            document.getElementById('state-lobby').style.display = 'flex';
+            return;
+        }
+
+        if (data.phase === 'game_over') {
+            document.getElementById('state-gameover').style.display = 'flex';
+            if (data.winner_name) {
+                document.getElementById('gameover-text').textContent = 'победитель';
+                document.getElementById('gameover-winner').textContent = data.winner_name;
+            } else {
+                document.getElementById('gameover-text').textContent = 'конец игры';
+                document.getElementById('gameover-winner').textContent = '';
+            }
+            if (!gameOverTimeout) {
+                gameOverTimeout = setTimeout(() => {
+                    window.location.href = '/';
+                }, 8000); // 8 seconds delay before throwing them to main menu
+            }
+            return;
+        } else {
+            if (gameOverTimeout) {
+                clearTimeout(gameOverTimeout);
+                gameOverTimeout = null;
+            }
+        }
+
+        if (data.phase !== 'round_over') {
+            if (roundOverTimeout) {
+                clearTimeout(roundOverTimeout);
+                roundOverTimeout = null;
+            }
+            showingRoundOverScreen = false;
+        }
+
+        if (data.phase === 'round_over') {
+            if (!roundOverTimeout && !showingRoundOverScreen) {
+                roundOverTimeout = setTimeout(() => {
+                    showingRoundOverScreen = true;
+                    const screens = ['state-lobby', 'state-game', 'state-dead', 'state-gameover', 'state-roundover', 'state-loading'];
+                    screens.forEach(s => document.getElementById(s).style.display = 'none');
+                    document.getElementById('state-roundover').style.display = 'flex';
+                    
+                    const container = document.getElementById('round-indicators');
+                    const msg = document.getElementById('roundover-msg');
+                    const ROMAN = ["I", "II", "III", "IV", "V", "VI", "VII"];
+                    let html = '';
+                    for (let i = 1; i <= data.total_rounds; i++) {
+                        const isFinal = i === data.total_rounds;
+                        let icon = isFinal ? '<img class="skull-icon-svg" src="/static/icons/skull.png" alt="">' : ROMAN[i - 1];
+                        html += `
+                            <div class="round-col">
+                                <div class="round-icon">${icon}</div>
+                                <div class="round-circle ${i === data.current_round ? 'active' : ''}" id="round-circle-${i}">
+                                    <img class="inner-circle" src="/static/icons/round-dot.png" alt="">
+                                </div>
+                            </div>
+                        `;
+                    }
+                    container.innerHTML = html;
+                    msg.style.opacity = '0';
+                    
+                    setTimeout(() => {
+                        const cur = document.getElementById(`round-circle-${data.current_round}`);
+                        if (cur) cur.classList.remove('active');
+                        
+                        const next = document.getElementById(`round-circle-${data.current_round + 1}`);
+                        if (next) next.classList.add('active');
+                        
+                        setTimeout(() => {
+                            msg.style.opacity = '1';
+                        }, 1000);
+                    }, 1500);
+                    
+                }, 5000);
+            }
+            
+            if (showingRoundOverScreen) {
+                document.getElementById('state-roundover').style.display = 'flex';
+                return;
+            }
+            // If the 5 seconds haven't passed yet, fall through to render the actual HP/Dead state
+        }
+
+        if (data.phase === 'dealer_loading') {
+            // Зарядка: HP и число патронов НЕ показываем (патроны видны в лотке).
+            document.getElementById('state-loading').style.display = 'flex';
+            document.getElementById('player-loading-msg').innerHTML =
+                `дилер заряжает дробовик<span class="cursor-blink">_</span>`;
+            return;
+        }
+
+        if (data.phase === 'dealer_reloading') {
+            document.getElementById('state-loading').style.display = 'flex';
+            document.getElementById('player-loading-msg').innerHTML =
+                `дилер дозаряжает<span class="cursor-blink">_</span>`;
+            return;
+        }
+
+        // Dead
+        if (data.game_mode === 'solo' || data.game_mode === 'story' || data.game_mode === 'story_one_round') {
+            // In solo/story-like 1v1 mode, show game over screen if either dies.
+            if (!data.my_alive || (data.opponent_alive !== undefined && !data.opponent_alive)) {
+                // If it's not game_over phase yet, it will be soon. Just wait.
+                if (data.phase !== 'game_over') return;
+            }
+        } else {
+            if (!data.my_alive) {
+                document.getElementById('state-dead').style.display = 'flex';
+                return;
+            }
+        }
+
+        // In game — show lightning bolts
+        document.getElementById('state-game').style.display = 'flex';
+
+        // Solo / story-like 1v1 adjustments
+        if (data.game_mode === 'solo' || data.game_mode === 'story' || data.game_mode === 'story_one_round') {
+            document.getElementById('mp-layout').style.display = 'none';
+            document.getElementById('solo-layout').style.display = 'flex';
+            
+            // Opponent Turn label (DEALER)
+            const dLabel = document.getElementById('solo-dealer-label');
+            const dTurn = document.getElementById('solo-dealer-turn');
+            if (data.opponent_handcuffed) {
+                dLabel.style.color = 'var(--red)';
+                dLabel.classList.remove('active');
+                dTurn.textContent = '[ в наручниках ]';
+                dTurn.style.color = 'var(--red)';
+            } else if (data.is_opponent_turn) {
+                dLabel.style.color = 'var(--red)';
+                dLabel.classList.add('active');
+                dTurn.textContent = '[ ход дилера ]';
+                dTurn.style.color = 'var(--red)';
+            } else {
+                dLabel.style.color = 'var(--text-bright)';
+                dLabel.classList.remove('active');
+                dTurn.textContent = '';
+            }
+            
+            // Player Turn label (PLAYER)
+            const pLabel = document.getElementById('solo-player-label');
+            const pTurn = document.getElementById('solo-player-turn');
+            if (data.my_handcuffed) {
+                pLabel.style.color = 'var(--red)';
+                pLabel.classList.remove('active');
+                pTurn.textContent = '[ в наручниках ]';
+                pTurn.style.color = 'var(--red)';
+            } else if (data.is_my_turn) {
+                pLabel.style.color = 'var(--green-bright)';
+                pLabel.classList.add('active');
+                pTurn.textContent = '[ ваш ход ]';
+                pTurn.style.color = 'var(--green-bright)';
+            } else {
+                pLabel.style.color = 'var(--text-bright)';
+                pLabel.classList.remove('active');
+                pTurn.textContent = '';
+            }
+            
+            // Bolts
+            renderBolts(data.opponent_hp, data.opponent_max_hp, 'opponent-lightning-container', data.game_mode, data.current_round);
+            renderBolts(data.my_hp, data.my_max_hp, 'solo-lightning-container', data.game_mode, data.current_round);
+        } else {
+            document.getElementById('mp-layout').style.display = 'flex';
+            document.getElementById('solo-layout').style.display = 'none';
+
+            // Player Turn label
+            const turnLabel = document.getElementById('turn-label-mp');
+            if (data.my_handcuffed) {
+                turnLabel.textContent = '[ в наручниках ]';
+                turnLabel.style.color = 'var(--red)';
+                turnLabel.classList.add('active');
+                turnLabel.style.animation = 'none';
+            } else if (data.is_my_turn) {
+                turnLabel.textContent = '[ ваш ход ]';
+                turnLabel.style.color = 'var(--green-bright)';
+                turnLabel.classList.add('active');
+                turnLabel.style.animation = ''; // Restore blink
+            } else {
+                turnLabel.classList.remove('active');
+            }
+
+            renderBolts(data.my_hp, data.my_max_hp, 'lightning-container-mp', data.game_mode, data.current_round);
+        }
+    }
+
+    function renderBolts(hp, maxHp, containerId, gameMode, currentRound) {
+        const container = document.getElementById(containerId);
+        const isCritical = hp === 1 && maxHp > 1;
+        // Стори мод, стадия 3: первые 2 заряда «с перерезанными кабелями» —
+        // не восстанавливаются лечением, показываем их приглушёнными
+        const isStoryStage3 = gameMode === 'story' && currentRound === 3;
+        let html = '';
+        for (let i = 0; i < maxHp; i++) {
+            const alive = i < hp;
+            let cls = alive ? (isCritical ? 'alive critical' : 'alive') : 'dead';
+            if (isStoryStage3 && i < 2) {
+                cls += alive ? ' faded-charge' : ' faded-charge-dead';
+            }
+            const src = (alive && isCritical) ? '/static/icons/bolt-critical.png' : '/static/icons/bolt-alive.png';
+            html += `<div class="lightning-bolt ${cls}"><img src="${src}" alt=""></div>`;
+        }
+        container.innerHTML = html;
+    }
+
+    connect();
+    </script>
+</body>
+</html>

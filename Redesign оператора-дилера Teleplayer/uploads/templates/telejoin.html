@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>telejoin — buckshot roulette</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link rel="stylesheet" href="/static/style.css">
+    <style>
+        /* Tuned for a 4:3 14" LG display (≈640×480). Everything sized in vmin
+           so it scales with the short side and always fits without scrolling. */
+        body.page-join .center-content{
+            min-height:0; height:100vh; height:100dvh;
+            padding:3vmin; gap:3vmin; justify-content:center; overflow:hidden;
+        }
+        body.page-join .logo-block.small h1{ font-size:5.5vmin; letter-spacing:.4vmin; }
+        body.page-join .card{ max-width:min(70vw,460px); width:100%; padding:4vmin; }
+        body.page-join .join-form{ gap:2.6vmin; }
+        body.page-join .join-form label{ font-size:3vmin; }
+        body.page-join .join-form input{ font-size:3.4vmin; padding:2.4vmin; }
+        body.page-join .btn-player{ font-size:3.4vmin; padding:2.8vmin; }
+        body.page-join .btn-back{ font-size:2.8vmin; margin-top:2vmin; }
+        body.page-join .alert-error{ font-size:2.8vmin; }
+    </style>
+</head>
+<body class="page-join crt-bg">
+    <div class="crt-ambient-smoke"><span></span><span></span></div>
+    <div class="crt-vignette"></div>
+    <div class="crt-grain"></div>
+    <div class="crt-scanlines"></div>
+
+    <div class="container center-content">
+        <div class="logo-block small">
+            <h1>ПОДКЛЮЧЕНИЕ (TV)</h1>
+        </div>
+        <div class="card" style="max-width:420px; width:100%;">
+            {% if error %}
+            <div class="alert-error">{{ error }}</div>
+            {% endif %}
+            <form method="POST" action="/api/telejoin" class="join-form">
+                <label for="name">имя:</label>
+                <input type="text" id="name" name="name" placeholder="ВВЕДИТЕ ИМЯ..." required maxlength="20" autocomplete="off" value="{{ saved_name|default('', true) }}">
+                <button type="submit" class="btn btn-player">▸ СПУСТИТЬ КУРОК</button>
+            </form>
+            <a href="/" class="btn btn-back">&lt; назад</a>
+        </div>
+    </div>
+</body>
+</html>

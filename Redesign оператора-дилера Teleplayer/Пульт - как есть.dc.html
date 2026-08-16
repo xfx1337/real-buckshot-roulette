@@ -1,0 +1,311 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=EB+Garamond:ital,wght@0,400;0,500;0,600;0,700;0,800;1,400;1,600&family=Share+Tech+Mono&family=Special+Elite&family=JetBrains+Mono:wght@300;400;500;600&display=swap" />
+<style>
+  body { margin: 0; background: #0a0a0a; }
+  a { color: #3fef6a; text-decoration: none; }
+  a:hover { color: #5fff8f; }
+  @keyframes redPulse { 0%,100% { opacity: 1 } 50% { opacity: .35 } }
+  @keyframes magring {
+    0%,100% { opacity: .9; box-shadow: 0 0 16px rgba(63,239,106,.55), inset 0 0 10px rgba(63,239,106,.25); }
+    50% { opacity: .35; box-shadow: 0 0 6px rgba(63,239,106,.3); }
+  }
+  @keyframes chamberBreathe { 0%,100% { filter: brightness(1) } 50% { filter: brightness(1.35) } }
+  @keyframes drift {
+    0%,100% { transform: translate(0,0) scale(1); opacity: .5 }
+    50% { transform: translate(20px,-14px) scale(1.15); opacity: .75 }
+  }
+  @keyframes lampGreen {
+    0%,100% { box-shadow: 0 0 26px rgba(63,239,106,.45), inset 0 1px 0 rgba(255,255,255,.4), inset 0 -3px 8px rgba(0,0,0,.25); }
+    50% { box-shadow: 0 0 14px rgba(63,239,106,.25), inset 0 1px 0 rgba(255,255,255,.3), inset 0 -3px 8px rgba(0,0,0,.3); }
+  }
+  @keyframes lampRed {
+    0%,100% { box-shadow: 0 0 16px rgba(160,45,30,.5), inset 0 1px 0 rgba(255,248,225,.6), inset 0 -2px 4px rgba(120,60,40,.35); filter: brightness(1); }
+    50% { box-shadow: 0 0 12px rgba(160,45,30,.35), inset 0 1px 0 rgba(255,248,225,.6), inset 0 -2px 4px rgba(120,60,40,.35); filter: brightness(.95); }
+  }
+  @keyframes feedArrow {
+    0% { opacity: .25; transform: translateX(-4px) }
+    50% { opacity: 1; transform: translateX(2px) }
+    100% { opacity: .25; transform: translateX(-4px) }
+  }
+</style>
+</helmet>
+<div style="width: 1280px; height: 832px; margin: 0 auto; position: relative; overflow: hidden; display: flex; flex-direction: column; background: radial-gradient(120% 90% at 70% 0%, #1a0d0d 0%, #121010 40%, #0a0a0a 100%); border: 1px solid #241614; font-family: 'EB Garamond', Georgia, serif; color: #cdbfae;">
+
+  <div style="position: absolute; inset: 0; pointer-events: none; z-index: 1;">
+    <i style="position: absolute; bottom: -80px; left: -60px; width: 420px; height: 420px; border-radius: 50%; background: radial-gradient(circle, rgba(43,20,20,.55), transparent 65%); filter: blur(24px); animation: drift 14s ease-in-out infinite;"></i>
+    <i style="position: absolute; top: -100px; right: -80px; width: 460px; height: 460px; border-radius: 50%; background: radial-gradient(circle, rgba(26,13,13,.6), transparent 65%); filter: blur(24px); animation: drift 18s ease-in-out infinite reverse;"></i>
+  </div>
+  <div style="position: absolute; inset: 0; pointer-events: none; z-index: 60; box-shadow: inset 0 0 160px 30px rgba(0,0,0,.85), inset 0 0 50px rgba(0,0,0,.6);"></div>
+  <div style="position: absolute; inset: 0; pointer-events: none; z-index: 62; opacity: .3; background: repeating-linear-gradient(to bottom, rgba(0,0,0,0) 0px, rgba(0,0,0,0) 2px, rgba(0,0,0,.35) 3px, rgba(0,0,0,0) 4px);"></div>
+
+  <div style="position: relative; z-index: 15; flex: 1; min-height: 0; display: flex; flex-direction: column;">
+
+    <header style="flex: 0 0 auto; display: flex; align-items: center; justify-content: space-between; flex-wrap: nowrap; gap: 8px 10px; padding: 9px 16px; border-bottom: 1px solid #241614; background: linear-gradient(180deg, rgba(20,16,16,.94), rgba(10,10,10,.82));">
+      <h1 style="display: flex; align-items: center; gap: 9px; margin: 0; flex: 0 0 auto; white-space: nowrap; font-family: 'JetBrains Mono', monospace; font-weight: 400; font-size: 12px; letter-spacing: 2px; color: #f2e9da;" style-before="content: ''; width: 11px; height: 11px; border: 2px solid #a83232; border-radius: 50%; box-shadow: 0 0 6px #7a1f1f; flex: 0 0 auto; background: radial-gradient(circle at 50% 50%, #a83232 0 30%, transparent 42%); animation: redPulse 1.6s infinite;">
+        <span style="font-family: 'JetBrains Mono', monospace; font-size: 10px; letter-spacing: .25em; color: #a83232; margin-right: 2px;">REC</span>ПУЛЬТ ОПЕРАТОРА
+      </h1>
+      <nav style="display: flex; gap: 6px; flex: 0 0 auto;">
+        <button style="font-family: 'JetBrains Mono', monospace; font-size: 11px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; padding: 7px 13px; border: 1px solid #5fff8f; background: linear-gradient(180deg, #5fff8f, #3fef6a); color: #08120b; cursor: pointer; white-space: nowrap;">Ход</button>
+        <button style="font-family: 'JetBrains Mono', monospace; font-size: 11px; letter-spacing: .12em; text-transform: uppercase; padding: 7px 13px; border: 1px solid #3a2a22; background: #161110; color: #a4937f; cursor: pointer; white-space: nowrap;">Зарядка</button>
+        <button style="font-family: 'JetBrains Mono', monospace; font-size: 11px; letter-spacing: .12em; text-transform: uppercase; padding: 7px 13px; border: 1px solid #3a2a22; background: #161110; color: #a4937f; cursor: pointer; white-space: nowrap;">Предметы</button>
+        <button style="font-family: 'JetBrains Mono', monospace; font-size: 11px; letter-spacing: .12em; text-transform: uppercase; padding: 7px 13px; border: 1px solid #3a2a22; background: #161110; color: #a4937f; cursor: pointer; white-space: nowrap;">Настройки</button>
+        <button style="font-family: 'JetBrains Mono', monospace; font-size: 11px; letter-spacing: .12em; text-transform: uppercase; padding: 7px 13px; border: 1px solid #3a2a22; background: #161110; color: #a4937f; cursor: pointer; white-space: nowrap;">📺 TV</button>
+        <button style="font-family: 'JetBrains Mono', monospace; font-size: 11px; letter-spacing: .12em; text-transform: uppercase; padding: 7px 13px; border: 1px solid #3a2a22; background: #161110; color: #a4937f; cursor: pointer; white-space: nowrap;">☎ Телефоны</button>
+      </nav>
+      <span style="flex: 1 1 auto;"></span>
+      <div style="display: flex; align-items: center; gap: 6px; flex-wrap: nowrap; flex: 0 0 auto;">
+        <span style="font-family: 'Share Tech Mono', monospace; font-size: 11px; letter-spacing: 1px; padding: 6px 9px; border: 1px solid #3fef6a; white-space: nowrap; color: #0a0a0a; background: #3fef6a; box-shadow: 0 0 12px rgba(63,239,106,.35); font-weight: 700;">ХОД ИГРОКА</span>
+        <span style="font-family: 'Share Tech Mono', monospace; font-size: 11px; letter-spacing: 1px; padding: 6px 9px; border: 1px solid #8a7040; white-space: nowrap; color: #241a06; font-weight: 700; background: linear-gradient(180deg, #ead9ae 0%, #d9c48e 60%, #c9b47e 100%); box-shadow: 0 0 10px rgba(255,190,90,.22), inset 0 1px 0 rgba(255,248,225,.7), 0 2px 3px rgba(0,0,0,.5);">РАУНД 2</span>
+        <button style="font-family: 'JetBrains Mono', monospace; font-weight: 700; font-size: 11px; letter-spacing: .08em; text-transform: uppercase; padding: 7px 10px; white-space: nowrap; background: linear-gradient(180deg, #e5bc3e 0%, #d0a52e 55%, #a97f1e 100%); border: 1px solid #7a5c14; border-bottom-color: #54400c; color: #1d1403; cursor: pointer; box-shadow: 0 0 14px rgba(229,188,62,.35), inset 0 1px 0 rgba(255,235,170,.7), inset 0 -2px 4px rgba(0,0,0,.3), 0 2px 4px rgba(0,0,0,.55);">Откатить</button>
+        <button style="font-family: 'JetBrains Mono', monospace; font-weight: 700; font-size: 11px; letter-spacing: .08em; text-transform: uppercase; padding: 7px 10px; white-space: nowrap; background: linear-gradient(180deg, #5c9180 0%, #487564 55%, #33574a 100%); border: 1px solid #26443a; border-bottom-color: #182e26; color: #f2ecd9; text-shadow: 0 1px 2px rgba(0,0,0,.55); cursor: pointer; box-shadow: 0 0 14px rgba(92,145,128,.35), inset 0 1px 0 rgba(200,235,220,.35), inset 0 -2px 4px rgba(0,0,0,.35), 0 2px 4px rgba(0,0,0,.55);">Конец раунда</button>
+        <button style="font-family: 'JetBrains Mono', monospace; font-weight: 700; font-size: 11px; padding: 7px 10px; background: linear-gradient(180deg, #e5bc3e 0%, #d0a52e 55%, #a97f1e 100%); border: 1px solid #7a5c14; color: #1d1403; cursor: pointer; box-shadow: 0 0 14px rgba(229,188,62,.35), inset 0 1px 0 rgba(255,235,170,.7);">⚡</button>
+        <button style="font-family: 'JetBrains Mono', monospace; font-weight: 700; font-size: 11px; padding: 7px 10px; background: linear-gradient(180deg, #5c9180 0%, #487564 55%, #33574a 100%); border: 1px solid #26443a; color: #f2ecd9; cursor: pointer;">🔊</button>
+        <button style="font-family: 'JetBrains Mono', monospace; font-weight: 700; font-size: 11px; padding: 7px 10px; background: linear-gradient(180deg, #5c9180 0%, #487564 55%, #33574a 100%); border: 1px solid #26443a; color: #f2ecd9; cursor: pointer;">🎙</button>
+        <button style="font-family: 'JetBrains Mono', monospace; font-weight: 700; font-size: 11px; padding: 7px 10px; background: linear-gradient(180deg, #5c9180 0%, #487564 55%, #33574a 100%); border: 1px solid #26443a; color: #f2ecd9; cursor: pointer;">⚙</button>
+        <button style="position: relative; overflow: hidden; font-family: 'JetBrains Mono', monospace; font-weight: 700; font-size: 11px; letter-spacing: .08em; text-transform: uppercase; padding: 7px 10px; white-space: nowrap; background: linear-gradient(180deg, #9a3226 0%, #7a241a 55%, #54160e 100%); border: 1px solid #4a120c; border-bottom-color: #300a06; color: #f5e6c8; text-shadow: 0 1px 2px rgba(0,0,0,.6); cursor: pointer; animation: lampRed 2.6s infinite;" style-after="content: ''; position: absolute; inset: 0; pointer-events: none; opacity: .55; background: linear-gradient(63deg, transparent 42%, rgba(0,0,0,.6) 42.6%, transparent 43.2%), linear-gradient(-48deg, transparent 60%, rgba(0,0,0,.5) 60.5%, transparent 61.1%), linear-gradient(102deg, transparent 25%, rgba(0,0,0,.45) 25.4%, transparent 26%);">Завершить</button>
+      </div>
+    </header>
+
+    <div style="flex: 1; min-height: 0; padding: 12px 16px 14px; overflow: hidden;">
+      <div style="display: grid; grid-template-columns: minmax(0, 1fr) 330px 296px; gap: 12px; height: 100%;">
+
+        <div style="display: flex; flex-direction: column; gap: 12px; min-height: 0; overflow: hidden; padding-right: 4px;">
+          <div style="display: flex; align-items: center; gap: 12px; flex: 0 0 auto; margin-bottom: 2px;">
+            <h2 style="font-family: 'EB Garamond', Georgia, serif; font-weight: 800; font-size: 22px; color: #f2e9da; text-shadow: 0 2px 0 #000; line-height: 1; margin: 0; white-space: nowrap;" style-before="content: '// '; font-family: 'Share Tech Mono', monospace; font-weight: 400; font-size: .5em; letter-spacing: 2px; color: #3fef6a;">ХОД: #2 ИГРОК</h2>
+            <span style="font-family: 'Share Tech Mono', monospace; font-size: 11px; letter-spacing: 2px; padding: 6px 11px; color: #e0c86a; border: 1px solid #5a4a20; background: #1c1a12;">СТВОЛ ОТПИЛЕН ×2</span>
+          </div>
+
+          <div style="position: relative; background: linear-gradient(160deg, #181310, #120e0d); border: 1px solid #322217; padding: 12px 14px; display: flex; flex-direction: column; min-height: 0; box-shadow: inset 0 1px 0 rgba(255,255,255,.03), 0 10px 24px rgba(0,0,0,.4);">
+            <h3 style="font-family: 'Share Tech Mono', monospace; font-size: 10px; letter-spacing: 2.5px; color: #3fef6a; margin: 0 0 10px; text-transform: uppercase; text-shadow: 0 0 6px #3fef6a; border-bottom: 1px solid #322217; padding-bottom: 8px; flex: 0 0 auto; display: flex; align-items: center; justify-content: space-between; gap: 8px;">Дробовик <span style="color: #8a7a68; font-size: 9px; letter-spacing: .15em;">магазин · патронник</span></h3>
+
+            <div style="position: relative; margin: 0; padding: 12px 12px 10px; border: 1px solid #322217; border-radius: 12px; background: linear-gradient(180deg, #100c0b, #0a0706); box-shadow: inset 0 0 30px rgba(0,0,0,.6); overflow: hidden;">
+              <div style="display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 14px;">
+                <div style="font-family: 'JetBrains Mono', monospace; font-size: 10px; letter-spacing: .3em; color: #8a7a68; text-transform: uppercase;">Помповый дробовик · 5 патр.</div>
+                <div style="display: flex; gap: 8px; align-items: center;">
+                  <button style="font-family: 'Share Tech Mono', monospace; font-size: 10px; letter-spacing: 1px; text-transform: uppercase; padding: 4px 8px; border: 1px solid #3e2e22; background: #171210; color: #cdbfae; cursor: pointer;">Весь список</button>
+                  <div style="font-family: 'JetBrains Mono', monospace; font-size: 10px; letter-spacing: .2em; color: #a83232; text-shadow: 0 0 8px rgba(168,50,50,.6);">◉ БОЕВОЙ</div>
+                </div>
+              </div>
+
+              <div style="position: relative; height: 104px;">
+                <div style="position: absolute; left: 0; right: 0; top: 0; height: 58px; display: flex; align-items: stretch; border-radius: 28px; background: linear-gradient(180deg, #3a322c 0%, #14100e 32%, #0a0807 70%, #2a221c 100%); border: 1.5px solid #3a2a22; box-shadow: inset 0 3px 12px rgba(0,0,0,.85), inset 0 -2px 6px rgba(130,100,90,.08), 0 1px 0 #000; overflow: hidden; z-index: 2;" style-before="content: ''; position: absolute; left: 0; right: 0; top: 7px; height: 10px; background: linear-gradient(90deg, transparent, rgba(190,160,140,.16), transparent); border-radius: 50%; pointer-events: none;">
+                  <div style="position: relative; display: flex; align-items: center; flex: 0 0 100px; justify-content: center; padding-left: 14px;" style-before="content: ''; position: absolute; top: 5px; bottom: 5px; width: 2px; left: 6px; background: linear-gradient(180deg, #4a3a30, #181210, #4a3a30);" style-after="content: ''; position: absolute; top: 5px; bottom: 5px; width: 2px; right: 0; background: linear-gradient(180deg, #4a3a30, #181210, #4a3a30);">
+                    <div style="position: relative; flex: 0 0 auto; width: 78px; height: 32px; border-radius: 15px; display: flex; align-items: stretch; animation: chamberBreathe 1.6s ease-in-out infinite;">
+                      <div style="position: relative; flex: 0 0 30%; border-radius: 15px 3px 3px 15px; background: linear-gradient(180deg, #e6c26a 0%, #c9962e 42%, #8a6a20 72%, #6a4e1c 100%); border: 1px solid #4a3512; border-right: 1px solid rgba(0,0,0,.5); box-shadow: inset 0 2px 2px rgba(255,240,190,.5), inset 0 -2px 3px rgba(0,0,0,.4);"></div>
+                      <div style="position: absolute; left: -2px; top: 50%; transform: translateY(-50%); width: 5px; height: 60%; border-radius: 3px; background: linear-gradient(180deg, #3a2c14, #1a1206); border: 1px solid #120c04;"></div>
+                      <div style="position: relative; flex: 1 1 auto; border-radius: 3px 15px 15px 3px; border: 1px solid rgba(0,0,0,.35); border-left: none; overflow: hidden; background: linear-gradient(180deg, #c94040 0%, #a83232 55%, #7a1f1f 100%); box-shadow: 0 0 10px rgba(201,64,64,.55), inset 0 1px 2px rgba(255,150,150,.35);"></div>
+                    </div>
+                  </div>
+                  <div style="position: relative; display: flex; align-items: center; flex: 1 1 auto; justify-content: flex-end; padding-right: 4px;">
+                    <div style="width: 26px; height: 40px; border-radius: 0 20px 20px 0 / 0 50% 50% 0; background: radial-gradient(ellipse at 100% 50%, #000 40%, #1a1210 75%, transparent); border: 1.5px solid #2a2018; border-left: none; box-shadow: inset 6px 0 14px rgba(0,0,0,.9);"></div>
+                  </div>
+                </div>
+
+                <div style="position: absolute; left: 14px; right: 26px; top: 66px; height: 26px; border-radius: 13px; background: linear-gradient(180deg, #332b26, #0e0a09 55%, #050403); border: 1.5px solid #3a2a22; box-shadow: inset 0 2px 6px rgba(0,0,0,.8); z-index: 1;" style-after="content: ''; position: absolute; right: -2px; top: -4px; bottom: -4px; width: 12px; border-radius: 6px; background: linear-gradient(180deg, #4a3a30, #181210, #4a3a30);"></div>
+
+                <div style="position: absolute; left: 16px; right: 30px; top: 66px; height: 26px; display: flex; justify-content: flex-start; align-items: center; gap: 4px; z-index: 2;">
+                  <div style="position: relative; flex: 1 1 0; min-width: 34px; max-width: 110px; height: 22px; border-radius: 11px; display: flex; align-items: stretch;">
+                    <div style="position: relative; flex: 0 0 30%; border-radius: 11px 3px 3px 11px; background: linear-gradient(180deg, #e6c26a 0%, #c9962e 42%, #8a6a20 72%, #6a4e1c 100%); border: 1px solid #4a3512;"></div>
+                    <div style="position: relative; flex: 1 1 auto; border-radius: 3px 11px 11px 3px; border: 1px solid rgba(0,0,0,.35); border-left: none; background: linear-gradient(180deg, #4a8ac9 0%, #3a6ea8 55%, #244a72 100%); box-shadow: 0 0 10px rgba(74,138,201,.5), inset 0 1px 2px rgba(170,210,255,.35);"></div>
+                  </div>
+                  <div style="position: relative; flex: 1 1 0; min-width: 34px; max-width: 110px; height: 22px; border-radius: 11px; display: flex; align-items: stretch;">
+                    <div style="position: relative; flex: 0 0 30%; border-radius: 11px 3px 3px 11px; background: linear-gradient(180deg, #e6c26a 0%, #c9962e 42%, #8a6a20 72%, #6a4e1c 100%); border: 1px solid #4a3512;"></div>
+                    <div style="position: relative; flex: 1 1 auto; border-radius: 3px 11px 11px 3px; border: 1px solid rgba(0,0,0,.35); border-left: none; background: linear-gradient(180deg, #c94040 0%, #a83232 55%, #7a1f1f 100%); box-shadow: 0 0 10px rgba(201,64,64,.55), inset 0 1px 2px rgba(255,150,150,.35);"></div>
+                  </div>
+                  <div style="position: relative; flex: 1 1 0; min-width: 34px; max-width: 110px; height: 22px; border-radius: 11px; display: flex; align-items: stretch;">
+                    <div style="position: relative; flex: 0 0 30%; border-radius: 11px 3px 3px 11px; background: linear-gradient(180deg, #e6c26a 0%, #c9962e 42%, #8a6a20 72%, #6a4e1c 100%); border: 1px solid #4a3512;"></div>
+                    <div style="position: relative; flex: 1 1 auto; border-radius: 3px 11px 11px 3px; border: 1px solid rgba(0,0,0,.35); border-left: none; background: linear-gradient(180deg, #4a8ac9 0%, #3a6ea8 55%, #244a72 100%); box-shadow: 0 0 10px rgba(74,138,201,.5), inset 0 1px 2px rgba(170,210,255,.35);"></div>
+                  </div>
+                  <div style="position: relative; flex: 1 1 0; min-width: 34px; max-width: 110px; height: 22px; border-radius: 11px; display: flex; align-items: stretch;">
+                    <div style="position: relative; flex: 0 0 30%; border-radius: 11px 3px 3px 11px; background: linear-gradient(180deg, #e6c26a 0%, #c9962e 42%, #8a6a20 72%, #6a4e1c 100%); border: 1px solid #4a3512;"></div>
+                    <div style="position: relative; flex: 1 1 auto; border-radius: 3px 11px 11px 3px; border: 1px solid rgba(0,0,0,.35); border-left: none; background: linear-gradient(180deg, #c94040 0%, #a83232 55%, #7a1f1f 100%); box-shadow: 0 0 10px rgba(201,64,64,.55), inset 0 1px 2px rgba(255,150,150,.35);"></div>
+                  </div>
+                  <div style="flex: 0 0 auto; margin-left: auto; width: 8px; height: 22px; border-radius: 3px; background: repeating-linear-gradient(180deg, #3a2a2a 0 3px, #0e0808 3px 6px);"></div>
+                </div>
+
+                <div style="position: absolute; right: 34px; top: 60px; width: 150px; height: 38px; border-radius: 12px; background: linear-gradient(180deg, #453029 0%, #2a1c16 20%, #191009 55%, #0e0806 100%); border: 1.5px solid #52392e; box-shadow: 0 3px 8px rgba(0,0,0,.7), inset 0 2px 0 rgba(210,170,145,.18), inset 0 -3px 5px rgba(0,0,0,.6); z-index: 4;" style-before="content: ''; position: absolute; inset: 6px 12px; background: repeating-linear-gradient(90deg, rgba(0,0,0,.55) 0 3px, rgba(120,86,66,.35) 3px 5px, rgba(0,0,0,.55) 5px 8px); border-radius: 6px; opacity: .85;" style-after="content: ''; position: absolute; right: -6px; top: 4px; bottom: 4px; width: 14px; border-radius: 0 10px 10px 0; background: linear-gradient(180deg, #3a281f, #140c08); border: 1px solid #4a3428; border-left: none;"></div>
+              </div>
+            </div>
+
+            <div style="display: flex; gap: 10px; flex-wrap: wrap; margin: 12px 0 0;">
+              <div style="flex: 1 1 120px; display: flex; align-items: center; gap: 10px; border: 1px solid #241614; background: rgba(13,8,8,.8); padding: 8px 12px; box-shadow: inset 0 0 20px rgba(0,0,0,.4);">
+                <div style="width: 42px; height: 19px; border-radius: 11px; flex: 0 0 auto; position: relative; background: linear-gradient(180deg, #2a0c0c, #160606); border: 1.5px solid #a83232; box-shadow: 0 0 12px rgba(168,50,50,.5);">
+                  <span style="position: absolute; left: 0; top: 0; bottom: 0; width: 19px; border-radius: 11px 3px 3px 11px; display: flex; align-items: center; justify-content: center; background: linear-gradient(180deg, #7a5e28, #4a3818);"><span style="width: 9px; height: 9px; border-radius: 50%; display: block; background: radial-gradient(circle, #ff6b6b, #7a1a1a); box-shadow: 0 0 6px #ff5555;"></span></span>
+                </div>
+                <div>
+                  <div style="font-family: 'JetBrains Mono', monospace; font-size: 10px; letter-spacing: .28em; text-transform: uppercase; color: #6a3a3a;">Боевых</div>
+                  <div style="font-family: 'JetBrains Mono', monospace; font-size: 24px; font-weight: 600; line-height: 1; color: #a83232; text-shadow: 0 0 14px rgba(168,50,50,.55);">3</div>
+                </div>
+              </div>
+              <div style="flex: 1 1 120px; display: flex; align-items: center; gap: 10px; border: 1px solid #241614; background: rgba(13,8,8,.8); padding: 8px 12px; box-shadow: inset 0 0 20px rgba(0,0,0,.4);">
+                <div style="width: 42px; height: 19px; border-radius: 11px; flex: 0 0 auto; position: relative; background: linear-gradient(180deg, #0f1712, #0a0f0c); border: 1.5px solid #2f4a34;">
+                  <span style="position: absolute; left: 0; top: 0; bottom: 0; width: 19px; border-radius: 11px 3px 3px 11px; display: flex; align-items: center; justify-content: center; background: linear-gradient(180deg, #3a3a30, #24241c);"><span style="width: 9px; height: 9px; border-radius: 50%; display: block; background: radial-gradient(circle, #3a5a42, #16221a);"></span></span>
+                </div>
+                <div>
+                  <div style="font-family: 'JetBrains Mono', monospace; font-size: 10px; letter-spacing: .28em; text-transform: uppercase; color: #3a5a42;">Холостых</div>
+                  <div style="font-family: 'JetBrains Mono', monospace; font-size: 24px; font-weight: 600; line-height: 1; color: #5a7a60;">2</div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div style="position: relative; flex: 1 1 auto; background: linear-gradient(160deg, #181310, #120e0d); border: 1px solid #322217; padding: 12px 14px; display: flex; flex-direction: column; min-height: 0; box-shadow: inset 0 1px 0 rgba(255,255,255,.03), 0 10px 24px rgba(0,0,0,.4);">
+            <h3 style="font-family: 'Share Tech Mono', monospace; font-size: 10px; letter-spacing: 2.5px; color: #3fef6a; margin: 0 0 10px; text-transform: uppercase; text-shadow: 0 0 6px #3fef6a; border-bottom: 1px solid #322217; padding-bottom: 8px; flex: 0 0 auto; display: flex; align-items: center; justify-content: space-between; gap: 8px;">Выстрел <span style="color: #8a7a68; font-size: 9px; letter-spacing: .15em;">выберите цель</span></h3>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+              <button style="width: 100%; padding: 14px 15px; border: 1.5px solid rgba(63,239,106,.35); font-family: 'Special Elite', monospace; font-size: 15px; letter-spacing: .06em; text-align: left; cursor: pointer; background: #0a1409; color: #3fef6a;">▶ ВЫСТРЕЛ В СЕБЯ</button>
+              <button style="width: 100%; padding: 14px 15px; border: 1.5px solid rgba(168,50,50,.35); font-family: 'Special Elite', monospace; font-size: 15px; letter-spacing: .06em; text-align: left; cursor: pointer; background: #140707; color: #d86a6a;">▶ ВЫСТРЕЛ В #1 ДИЛЕР</button>
+            </div>
+          </div>
+        </div>
+
+        <div style="display: flex; flex-direction: column; gap: 12px; min-height: 0; overflow: hidden; padding-right: 4px;">
+          <div style="position: relative; flex: 1 1 auto; background: linear-gradient(160deg, #181310, #120e0d); border: 1px solid #322217; padding: 12px 14px; display: flex; flex-direction: column; min-height: 0; box-shadow: inset 0 1px 0 rgba(255,255,255,.03), 0 10px 24px rgba(0,0,0,.4);">
+            <h3 style="font-family: 'Share Tech Mono', monospace; font-size: 10px; letter-spacing: 2.5px; color: #3fef6a; margin: 0 0 10px; text-transform: uppercase; text-shadow: 0 0 6px #3fef6a; border-bottom: 1px solid #322217; padding-bottom: 8px; flex: 0 0 auto;">Предметы игрока</h3>
+            <div style="overflow-y: auto; min-height: 0; flex: 1; display: grid; grid-template-columns: 1fr; gap: 8px; align-content: start;">
+              <button style="display: flex; align-items: center; gap: 11px; text-align: left; width: 100%; padding: 10px 12px; border: 1px solid #322217; background: #120a0a; color: #f2e9da; cursor: pointer;">
+                <span style="font-size: 22px; line-height: 1; flex: 0 0 auto;">🍺</span>
+                <span style="min-width: 0;">
+                  <span style="display: block; font-family: 'Special Elite', monospace; font-size: 13px; letter-spacing: .05em; color: #f2e9da;">Пиво</span>
+                  <span style="display: block; font-family: 'JetBrains Mono', monospace; font-size: 9px; color: #8a7a68; margin-top: 2px; line-height: 1.4;">Выбросить патрон из патронника без выстрела</span>
+                </span>
+              </button>
+              <button style="display: flex; align-items: center; gap: 11px; text-align: left; width: 100%; padding: 10px 12px; border: 1px solid #322217; background: #120a0a; color: #f2e9da; cursor: pointer;">
+                <span style="font-size: 22px; line-height: 1; flex: 0 0 auto;">🔍</span>
+                <span style="min-width: 0;">
+                  <span style="display: block; font-family: 'Special Elite', monospace; font-size: 13px; letter-spacing: .05em; color: #f2e9da;">Лупа</span>
+                  <span style="display: block; font-family: 'JetBrains Mono', monospace; font-size: 9px; color: #8a7a68; margin-top: 2px; line-height: 1.4;">Показать тип патрона в патроннике</span>
+                </span>
+              </button>
+              <div style="display: flex; align-items: center; gap: 8px; padding: 9px 11px; border: 1px solid #322217; background: #120a0a; margin: 0 0 8px; flex-wrap: wrap;">
+                <span style="font-size: 22px;">⛓️</span>
+                <span style="font-family: 'Special Elite', monospace; font-size: 13px; color: #f2e9da; min-width: 90px;">Наручники</span>
+                <select style="flex: 1 1 130px; min-width: 120px; font-family: 'Share Tech Mono', monospace; font-size: 13px; color: #3fef6a; background: #100c0b; border: 1px solid #3a2a22; padding: 8px 10px;">
+                  <option>#1 ДИЛЕР</option>
+                </select>
+                <button style="font-family: 'Share Tech Mono', monospace; font-size: 13px; letter-spacing: 2px; text-transform: uppercase; padding: 12px 20px; border: 1px solid #4a382c; background: linear-gradient(180deg, #201a15, #15100d); color: #f2e9da; cursor: pointer;">Use</button>
+              </div>
+            </div>
+          </div>
+
+          <div style="position: relative; flex: 0 0 auto; align-items: center; background: linear-gradient(160deg, #181310, #120e0d); border: 1px solid #322217; padding: 12px 14px; display: flex; flex-direction: column; box-shadow: inset 0 1px 0 rgba(255,255,255,.03), 0 10px 24px rgba(0,0,0,.4);">
+            <h3 style="align-self: stretch; font-family: 'Share Tech Mono', monospace; font-size: 10px; letter-spacing: 2.5px; color: #3fef6a; margin: 0 0 10px; text-transform: uppercase; text-shadow: 0 0 6px #3fef6a; border-bottom: 1px solid #322217; padding-bottom: 8px; flex: 0 0 auto;">Реквизит-револьвер</h3>
+            <div style="width: 100%; font-family: 'Share Tech Mono', monospace; font-size: 13px; color: #cdbfae;">
+              <div style="text-align: center; font-size: 11px; margin-bottom: 0; letter-spacing: .5px;">🔫 РЕВОЛЬВЕР (капсюли): <b>8 / 8</b></div>
+              <div style="position: relative; width: 230px; height: 230px; border-radius: 50%; margin: -46px auto; transform: scale(.58); transform-origin: center; background: radial-gradient(circle at 50% 42%, #1c1310 0%, #120d0b 55%, #0a0706 100%); border: 2px solid #3a2a22; box-shadow: inset 0 0 34px rgba(0,0,0,.85), 0 0 26px rgba(122,31,31,.18), 0 0 0 6px #0d0908, 0 0 0 7px #2a1c16;">
+                <div style="position: absolute; left: 50%; top: 50%; width: 58px; height: 58px; margin: -29px; transform: translateY(-76px); border-radius: 50%; border: 2px dashed #3fef6a; pointer-events: none; animation: magring 1.15s ease-in-out infinite; z-index: 3;" style-before="content: '▼'; position: absolute; top: -20px; left: 50%; transform: translateX(-50%); color: #3fef6a; font-size: 11px; text-shadow: 0 0 8px rgba(63,239,106,.7);"></div>
+                <sc-for list="{{ chambers }}" as="ch" hint-placeholder-count="8">
+                  <div style="position: absolute; left: 50%; top: 50%; width: 46px; height: 46px; margin: -23px; border-radius: 50%; border: 2px solid #3a2c2c; background: #14100e; box-shadow: inset 0 2px 7px rgba(0,0,0,.75); display: flex; align-items: center; justify-content: center; transform: {{ ch.transform }};">
+                    <span style="width: 26px; height: 26px; border-radius: 50%; background: radial-gradient(circle at 35% 30%, #ffd27a, #c9962e 70%); box-shadow: 0 0 12px rgba(224,178,58,.55);"></span>
+                    <span style="position: absolute; bottom: -17px; left: 50%; transform: translateX(-50%); font-family: 'JetBrains Mono', monospace; font-size: 9px; color: #8a7a68; letter-spacing: .05em;">{{ ch.n }}</span>
+                  </div>
+                </sc-for>
+                <div style="position: absolute; left: 50%; top: 50%; width: 56px; height: 56px; margin: -28px; border-radius: 50%; border: 2px solid #3a2a22; background: radial-gradient(circle at 40% 35%, #241a15, #0e0908 70%); box-shadow: inset 0 2px 8px rgba(0,0,0,.8);"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div style="display: flex; flex-direction: column; gap: 12px; min-height: 0; overflow: hidden; padding-right: 4px;">
+          <div style="position: relative; flex: 0 0 auto; background: linear-gradient(160deg, #181310, #120e0d); border: 1px solid #322217; padding: 12px 14px; display: flex; flex-direction: column; box-shadow: inset 0 1px 0 rgba(255,255,255,.03), 0 10px 24px rgba(0,0,0,.4);">
+            <h3 style="font-family: 'Share Tech Mono', monospace; font-size: 10px; letter-spacing: 2.5px; color: #3fef6a; margin: 0 0 10px; text-transform: uppercase; text-shadow: 0 0 6px #3fef6a; border-bottom: 1px solid #322217; padding-bottom: 8px; flex: 0 0 auto; display: flex; align-items: center; justify-content: space-between;">Игроки <span style="color: #8a7a68; font-size: 9px; letter-spacing: .15em;">2 в игре</span></h3>
+            <div>
+              <div style="padding: 8px 10px; margin-bottom: 7px; background: #100c0b; border: 1px solid #322217; border-left: 3px solid #3fef6a; box-shadow: 0 0 8px rgba(63,239,106,.08);">
+                <div style="display: flex; align-items: center; gap: 9px; margin-bottom: 6px;">
+                  <span style="font-family: 'JetBrains Mono', monospace; font-size: 11px; color: #3fef6a;">#1</span>
+                  <span style="flex: 1; font-family: 'Special Elite', monospace; font-size: 12px; letter-spacing: .05em; color: #f2e9da; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">ДИЛЕР</span>
+                  <span style="font-family: 'JetBrains Mono', monospace; font-size: 13px; color: #a83232; font-weight: bold;">4/5</span>
+                </div>
+                <div style="display: flex; gap: 3px; flex-wrap: wrap; margin-bottom: 6px;">
+                  <div style="width: 11px; height: 11px; border-radius: 2px; border: 1px solid #3fef6a; background: rgba(63,239,106,.2); box-shadow: 0 0 5px rgba(63,239,106,.35);"></div>
+                  <div style="width: 11px; height: 11px; border-radius: 2px; border: 1px solid #3fef6a; background: rgba(63,239,106,.2); box-shadow: 0 0 5px rgba(63,239,106,.35);"></div>
+                  <div style="width: 11px; height: 11px; border-radius: 2px; border: 1px solid #3fef6a; background: rgba(63,239,106,.2); box-shadow: 0 0 5px rgba(63,239,106,.35);"></div>
+                  <div style="width: 11px; height: 11px; border-radius: 2px; border: 1px solid #3fef6a; background: rgba(63,239,106,.2); box-shadow: 0 0 5px rgba(63,239,106,.35);"></div>
+                  <div style="width: 11px; height: 11px; border-radius: 2px; border: 1px solid #222; background: #111;"></div>
+                </div>
+                <div style="display: flex; gap: 7px; margin-top: 2px;">
+                  <button style="flex: 1; font-family: 'Share Tech Mono', monospace; font-size: 11px; letter-spacing: 1px; padding: 4px 7px; background: #1d1715; color: #d99; border: 1px solid #4a2020; cursor: pointer;">-1</button>
+                  <button style="flex: 1; font-family: 'Share Tech Mono', monospace; font-size: 11px; letter-spacing: 1px; padding: 4px 7px; background: #1d1715; color: #3fef6a; border: 1px solid #2a4a2c; cursor: pointer;">+1</button>
+                </div>
+              </div>
+              <div style="padding: 8px 10px; margin-bottom: 0; background: #0a130a; border: 1px solid rgba(63,239,106,.3); border-left: 3px solid #3fef6a; box-shadow: 0 0 8px rgba(63,239,106,.12);">
+                <div style="display: flex; align-items: center; gap: 9px; margin-bottom: 6px;">
+                  <span style="font-family: 'JetBrains Mono', monospace; font-size: 11px; color: #3fef6a;">▶</span>
+                  <span style="flex: 1; font-family: 'Special Elite', monospace; font-size: 12px; letter-spacing: .05em; color: #f2e9da; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">ИГРОК</span>
+                  <span style="font-family: 'JetBrains Mono', monospace; font-size: 13px; color: #a83232; font-weight: bold;">1/5</span>
+                </div>
+                <div style="display: flex; gap: 3px; flex-wrap: wrap; margin-bottom: 6px;">
+                  <div style="width: 11px; height: 11px; border-radius: 2px; border: 1px solid #a83232; background: rgba(168,50,50,.2); box-shadow: 0 0 5px rgba(168,50,50,.35);"></div>
+                  <div style="width: 11px; height: 11px; border-radius: 2px; border: 1px solid #222; background: #111;"></div>
+                  <div style="width: 11px; height: 11px; border-radius: 2px; border: 1px solid #222; background: #111;"></div>
+                  <div style="width: 11px; height: 11px; border-radius: 2px; border: 1px solid #222; background: #111;"></div>
+                  <div style="width: 11px; height: 11px; border-radius: 2px; border: 1px solid #222; background: #111;"></div>
+                </div>
+                <div style="display: flex; gap: 7px; margin-top: 2px;">
+                  <button style="flex: 1; font-family: 'Share Tech Mono', monospace; font-size: 11px; letter-spacing: 1px; padding: 4px 7px; background: #1d1715; color: #d99; border: 1px solid #4a2020; cursor: pointer;">-1</button>
+                  <button style="flex: 1; font-family: 'Share Tech Mono', monospace; font-size: 11px; letter-spacing: 1px; padding: 4px 7px; background: #1d1715; color: #3fef6a; border: 1px solid #2a4a2c; cursor: pointer;">+1</button>
+                </div>
+              </div>
+              <div style="margin-top: 12px; padding: 10px; background: linear-gradient(180deg, #1b1109, #120d08); border: 1px solid #4a3113; border-left: 3px solid #ffa438; box-shadow: 0 0 10px rgba(255,164,56,.1), inset 0 0 18px rgba(255,164,56,.05);">
+                <div style="display: flex; align-items: center; gap: 7px; margin-bottom: 9px; padding-bottom: 7px; border-bottom: 1px solid #3a2712; font-family: 'Share Tech Mono', monospace; font-size: 11px; letter-spacing: 2px; text-transform: uppercase; color: #ffa438; text-shadow: 0 0 6px rgba(255,164,56,.55);"><span style="font-size: 13px; animation: feedArrow 1.6s ease-in-out infinite;">▶</span>Следующая выдача</div>
+                <div style="display: flex; align-items: flex-start; gap: 8px; margin-bottom: 7px;">
+                  <span style="flex: 0 0 auto; max-width: 78px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: 'Special Elite', monospace; font-size: 11px; color: #f2e9da; padding-top: 3px;"><span style="font-family: 'JetBrains Mono', monospace; color: #ffa438; margin-right: 3px;">#1</span>ДИЛЕР</span>
+                  <span style="flex: 1; display: flex; flex-wrap: wrap; gap: 5px;">
+                    <span style="display: inline-flex; align-items: center; gap: 4px; font-family: 'JetBrains Mono', monospace; font-size: 10px; line-height: 1; color: #ffd9a0; background: rgba(255,164,56,.1); border: 1px solid #5a3c18; border-radius: 2px; padding: 3px 5px;"><span style="font-size: 12px;">🍺</span>Пиво<span style="color: #ffa438; font-weight: bold;">×2</span></span>
+                    <span style="display: inline-flex; align-items: center; gap: 4px; font-family: 'JetBrains Mono', monospace; font-size: 10px; line-height: 1; color: #ffd9a0; background: rgba(255,164,56,.1); border: 1px solid #5a3c18; border-radius: 2px; padding: 3px 5px;"><span style="font-size: 12px;">🔪</span>Пила</span>
+                  </span>
+                </div>
+                <div style="display: flex; align-items: flex-start; gap: 8px;">
+                  <span style="flex: 0 0 auto; max-width: 78px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: 'Special Elite', monospace; font-size: 11px; color: #f2e9da; padding-top: 3px;"><span style="font-family: 'JetBrains Mono', monospace; color: #ffa438; margin-right: 3px;">#2</span>ИГРОК</span>
+                  <span style="flex: 1; display: flex; flex-wrap: wrap; gap: 5px;">
+                    <span style="display: inline-flex; align-items: center; gap: 4px; font-family: 'JetBrains Mono', monospace; font-size: 10px; line-height: 1; color: #ffd9a0; background: rgba(255,164,56,.1); border: 1px solid #5a3c18; border-radius: 2px; padding: 3px 5px;"><span style="font-size: 12px;">💊</span>Лекарство</span>
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div style="position: relative; flex: 1 1 auto; min-height: 0; background: linear-gradient(160deg, #181310, #120e0d); border: 1px solid #322217; padding: 12px 14px; display: flex; flex-direction: column; box-shadow: inset 0 1px 0 rgba(255,255,255,.03), 0 10px 24px rgba(0,0,0,.4);">
+            <h3 style="font-family: 'Share Tech Mono', monospace; font-size: 10px; letter-spacing: 2.5px; color: #3fef6a; margin: 0 0 10px; text-transform: uppercase; text-shadow: 0 0 6px #3fef6a; border-bottom: 1px solid #322217; padding-bottom: 8px; flex: 0 0 auto;">Лог событий</h3>
+            <div style="flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 5px;">
+              <div style="font-family: 'Share Tech Mono', monospace; font-size: 11px; line-height: 1.4; padding: 6px 9px; background: #0d0a09; color: #e0a0a0; border-left: 2px solid #a83232;">ИГРОК стреляет в ДИЛЕРА — боевой, −1 HP</div>
+              <div style="font-family: 'Share Tech Mono', monospace; font-size: 11px; line-height: 1.4; padding: 6px 9px; background: #0d0a09; color: #3fef6a; border-left: 2px solid #2a4a2c;">ДИЛЕР использует ЛУПУ: холостой</div>
+              <div style="font-family: 'Share Tech Mono', monospace; font-size: 11px; line-height: 1.4; padding: 6px 9px; background: #0d0a09; color: #a4937f; border-left: 2px solid #2a2018;">Ход ДИЛЕРА</div>
+              <div style="font-family: 'Share Tech Mono', monospace; font-size: 11px; line-height: 1.4; padding: 6px 9px; background: #0d0a09; color: #e0a0a0; border-left: 2px solid #a83232;">ДИЛЕР стреляет в себя — холостой</div>
+              <div style="font-family: 'Share Tech Mono', monospace; font-size: 11px; line-height: 1.4; padding: 6px 9px; background: #0d0a09; color: #a4937f; border-left: 2px solid #2a2018;">Раунд 2 начат · 3 боевых / 2 холостых</div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </div>
+</div>
+
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:1280,&quot;height&quot;:832}}">
+class Component extends DCLogic {
+  renderVals() {
+    const cap = 8, ammo = 8, step = 360 / cap;
+    const offset = (ammo > 0 ? ammo - 1 : 0) * step;
+    return {
+      chambers: Array.from({ length: cap }, (_, i) => {
+        const a = (i * step - offset).toFixed(1);
+        return { n: i + 1, transform: `rotate(${a}deg) translateY(-76px) rotate(${-a}deg)` };
+      })
+    };
+  }
+}
+
+</script>
+</body>
+</html>

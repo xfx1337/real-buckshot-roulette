@@ -39,11 +39,57 @@ def mediamtx_binary() -> Path:
     return MEDIAMTX_DIR / ("mediamtx.exe" if sys.platform == "win32" else "mediamtx")
 
 
+def _default_route_ip() -> str | None:
+    """Адрес интерфейса, через который уходит маршрут по умолчанию.
+
+    Спрашиваем систему про сам интерфейс, а не про исходящий адрес: при
+    поднятом VPN маршрут наружу идёт в туннель, и адрес получается туннельный
+    (10.x), с которого телефоны игроков из Wi-Fi до сервера не достучатся.
+    Имя интерфейса же остаётся физическим, и его адрес — тот самый LAN."""
+    if sys.platform == "win32":
+        return None
+    try:
+        if sys.platform == "darwin":
+            route = subprocess.run(["route", "-n", "get", "default"],
+                                   capture_output=True, text=True, timeout=3).stdout
+            iface = next((ln.split()[-1] for ln in route.splitlines()
+                          if "interface:" in ln), None)
+            if not iface:
+                return None
+            out = subprocess.run(["ipconfig", "getifaddr", iface],
+                                 capture_output=True, text=True, timeout=3).stdout.strip()
+            return out or None
+        out = subprocess.run(["hostname", "-I"], capture_output=True,
+                             text=True, timeout=3).stdout.split()
+        return out[0] if out else None
+    except (OSError, subprocess.SubprocessError):
+        return None
+
+
 def lan_ip() -> str:
     """LAN-адрес этого хоста — тот, по которому до сервера достучатся телефон и
-    ESP32. Берём через UDP-сокет к внешнему адресу: пакет никуда не уходит
-    (UDP без соединения), но ядро выбирает исходящий интерфейс и его адрес.
-    Надёжнее, чем hostname -I: не путается в loopback и docker-мостах."""
+    ESP32.
+
+    Три источника, в порядке доверия. Первый — config.json: туда адрес вписал
+    scripts/net_config.sh, который знает про Wi-Fi этой машины больше, чем
+    можно выяснить из процесса. Второй — интерфейс маршрута по умолчанию.
+    Третий — UDP-сокет к внешнему адресу: пакет никуда не уходит (UDP без
+    соединения), но ядро выбирает исходящий интерфейс и его адрес; годится,
+    пока не поднят VPN, при котором этот адрес оказывается туннельным."""
+    try:
+        with open(CONFIG_PATH, encoding="utf-8") as f:
+            url = json.load(f).get("esp", {}).get("server_base_url", "")
+        host = url.split("//", 1)[-1].split(":")[0].split("/")[0]
+        # Заглушка из config.example.json — не адрес этой машины.
+        if host and host not in ("localhost", "127.0.0.1", "192.168.1.100"):
+            return host
+    except (OSError, ValueError, KeyError):
+        pass
+
+    routed = _default_route_ip()
+    if routed:
+        return routed
+
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     try:
         s.connect(("8.8.8.8", 80))

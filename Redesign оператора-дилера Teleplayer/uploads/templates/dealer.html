@@ -3473,16 +3473,10 @@
         }
 
         /* ── фиксированная сцена 1280×832 (viewport MacBook Air 13.3") ── */
-        /* Сцена панели. Макет нарисован под 1280×832, и на таком экране она
-           выглядит ровно так; но пульт открывают и на 13" ноутбуке, поэтому
-           фиксированный размер здесь — потолок, а не требование: ниже 1280
-           сцена ужимается, а не уезжает за край экрана. */
         .rd-stage {
             position: relative;
-            width: 100%;
-            max-width: 1280px;
+            width: 1280px;
             height: 832px;
-            max-height: 100vh;
             margin: 0 auto;
             overflow: hidden;
             display: flex;
@@ -3534,31 +3528,19 @@
             height: 11px;
         }
 
-        /* ── полоса вкладок ──
-           Отдельной строкой под шапкой, а не внутри неё: вкладок семь, и в
-           одну строку с бейджами фазы они начинали жать друг друга на 13". */
         .rd-tabs {
-            position: relative;
-            z-index: 20;
-            flex: 0 0 auto;
             display: flex;
-            align-items: stretch;
-            gap: 4px;
-            padding: 6px 16px 0;
-            background: #0f0d0c;
-            border-bottom: 1px solid var(--border);
+            gap: 6px;
+            flex: 0 0 auto;
         }
 
         .rd-tab {
-            display: flex;
-            flex-direction: column;
-            align-items: flex-start;
-            justify-content: center;
-            gap: 1px;
-            min-width: 92px;
-            padding: 5px 13px 7px;
+            font-family: var(--font-tube);
+            font-size: 11px;
+            letter-spacing: .12em;
+            text-transform: uppercase;
+            padding: 7px 13px;
             border: 1px solid var(--border-metal);
-            border-bottom: none;
             background: #161110;
             color: var(--text-dim);
             cursor: pointer;
@@ -3566,72 +3548,16 @@
             white-space: nowrap;
         }
 
-        .rd-tab-key {
-            font-family: var(--font-tube);
-            font-size: 9px;
-            letter-spacing: .1em;
-            opacity: .55;
-        }
-
-        .rd-tab-label {
-            display: flex;
-            align-items: center;
-            gap: 6px;
-            font-family: var(--font-tube);
-            font-size: 12px;
-            font-weight: 700;
-            letter-spacing: .06em;
-        }
-
         .rd-tab:hover {
             color: var(--text-bright);
             border-color: #4a382c;
-            background: #1c1614;
         }
 
         .rd-tab.active {
             color: #08120b;
             background: linear-gradient(180deg, var(--green-bright), var(--green));
             border-color: var(--green-bright);
-        }
-
-        /* Точка «здесь ждут действия»: экран фазы, на котором оператор сейчас
-           не стоит. Гасится, когда вкладка активна — сама вкладка уже сигнал. */
-        .rd-tab-dot {
-            width: 7px;
-            height: 7px;
-            border-radius: 50%;
-            background: var(--orange);
-            box-shadow: 0 0 8px var(--orange);
-            animation: dotPulse 1.4s ease-in-out infinite;
-            display: none;
-        }
-
-        .rd-tab-dot.on {
-            display: block;
-        }
-
-        .rd-tab.active .rd-tab-dot {
-            display: none;
-        }
-
-        @keyframes dotPulse {
-
-            0%,
-            100% {
-                opacity: 1;
-            }
-
-            50% {
-                opacity: .25;
-            }
-        }
-
-        .rd-tabs-actions {
-            display: flex;
-            align-items: center;
-            gap: 6px;
-            padding-bottom: 6px;
+            font-weight: 700;
         }
 
         .rd-spacer {
@@ -3642,39 +3568,6 @@
             gap: 6px;
             flex-wrap: nowrap;
             flex: 0 0 auto;
-            align-items: center;
-        }
-
-        /* Квадратные клавиши железа в шапке: одинаковый след, чтобы ряд читался
-           как приборная панель, а не как строка разноширинных кнопок. */
-        .hdr-icon {
-            width: 34px;
-            height: 30px;
-            display: inline-flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 14px;
-            background: #191412;
-            border: 1px solid var(--border-metal);
-            color: var(--text);
-            cursor: pointer;
-            transition: all .12s;
-        }
-
-        .hdr-icon:hover {
-            background: #241a17;
-            border-color: #4a382c;
-            color: var(--text-bright);
-        }
-
-        .hdr-icon-gear {
-            background: linear-gradient(180deg, #5c9180, #33574a);
-            border-color: #26443a;
-            color: #f2ecd9;
-        }
-
-        .hdr-icon-gear:hover {
-            background: linear-gradient(180deg, #6ea593, #3d6657);
         }
 
         .dealer-header .btn-small {
@@ -3691,34 +3584,6 @@
             white-space: nowrap;
         }
 
-        /* Чем выбирают цель. Плашка, а не серая подпись: это состояние железа
-           в одном ряду с фазой и раундом, и различать их надо взглядом.
-           Гироскоп решает сам — оранжевый, как всё автоматическое на пульте;
-           ручной выбор спокойный, потому что цель нажимает сам оператор. */
-        .mode-badge {
-            font-family: var(--font-tube);
-            font-size: 11px;
-            font-weight: 700;
-            letter-spacing: 1.5px;
-            padding: 7px 10px;
-            white-space: nowrap;
-            border: 1px solid var(--border-metal);
-            color: var(--text-dim);
-            background: #14100d;
-        }
-
-        /* До первого состояния по WS текста нет — пустая рамка в шапке лишняя. */
-        .mode-badge:empty {
-            display: none;
-        }
-
-        .mode-badge.gyro {
-            color: #1a1206;
-            background: linear-gradient(180deg, #ffb75c, var(--orange));
-            border-color: var(--orange);
-            box-shadow: 0 0 12px rgba(255, 164, 56, .35);
-        }
-
         /* ── область экрана ── */
         .rd-body {
             flex: 1;
@@ -3733,216 +3598,6 @@
 
         .rd-screen[hidden] {
             display: none;
-        }
-
-        /* ── экран настроек ──
-           Настройки глубокие: конфиг ESP, три группы аудио-устройств, ферма
-           голосов. Поэтому единственное место в панели, где прокрутка внутри
-           экрана разрешена — обрезать эти блоки некуда. */
-        .cfg-wrap {
-            height: 100%;
-            display: flex;
-            flex-direction: column;
-            min-height: 0;
-        }
-
-        .cfg-tabs {
-            flex: 0 0 auto;
-            display: flex;
-            align-items: center;
-            gap: 4px;
-            margin-bottom: 10px;
-            border-bottom: 1px solid var(--border-light);
-            padding-bottom: 8px;
-        }
-
-        .cfg-tab {
-            font-family: var(--font-tube);
-            font-size: 10px;
-            font-weight: 700;
-            letter-spacing: .14em;
-            padding: 7px 13px;
-            border: 1px solid var(--border-metal);
-            background: #14100d;
-            color: var(--text-dim);
-            cursor: pointer;
-            transition: all .12s;
-            white-space: nowrap;
-        }
-
-        .cfg-tab:hover {
-            color: var(--text-bright);
-            border-color: #4a382c;
-        }
-
-        .cfg-tab.active {
-            color: var(--green);
-            border-color: var(--green);
-            background: rgba(63, 239, 106, .08);
-        }
-
-        .cfg-tabs-actions {
-            display: flex;
-            align-items: center;
-            gap: 10px;
-        }
-
-        .cfg-msg {
-            font-family: var(--font-mono);
-            font-size: 11px;
-            color: var(--text-faint);
-        }
-
-        /* .btn-dealer — крупная кнопка игрового действия («ВЫСТРЕЛ»). В полосе
-           вкладок она держит зелёный цвет, но не размер: здесь это не действие
-           за столом, а сохранение файла. */
-        .cfg-tabs #cfg-save-btn {
-            padding: 7px 13px;
-            font-size: 11px;
-            letter-spacing: .1em;
-            box-shadow: none;
-            animation: none;
-        }
-
-        .cfg-pane {
-            flex: 1 1 auto;
-            min-height: 0;
-            overflow-y: auto;
-            padding-right: 4px;
-        }
-
-        .cfg-pane[hidden] {
-            display: none;
-        }
-
-        /* Две колонки: настройки читаются группами, и в одну колонку на
-           широком экране они вытягиваются в бесконечную ленту. */
-        .cfg-cols {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 12px;
-            align-items: start;
-        }
-
-        .cfg-col {
-            display: flex;
-            flex-direction: column;
-            gap: 12px;
-            min-width: 0;
-        }
-
-        .cfg-col-narrow {
-            max-width: 340px;
-        }
-
-        @media (max-width: 1100px) {
-            .cfg-cols {
-                grid-template-columns: 1fr;
-            }
-
-            .cfg-col-narrow {
-                max-width: none;
-            }
-        }
-
-        .cfg-block {
-            background: var(--panel);
-            border: 1px solid var(--border-light);
-            padding: 11px 13px 13px;
-        }
-
-        .cfg-block-grow {
-            flex: 1 1 auto;
-            min-height: 0;
-        }
-
-        .cfg-block-head {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            font-family: var(--font-tube);
-            font-size: 10px;
-            letter-spacing: .22em;
-            color: var(--green);
-            border-bottom: 1px solid var(--border-light);
-            padding-bottom: 8px;
-            margin-bottom: 11px;
-        }
-
-        .cfg-block-head span:first-child {
-            flex: 1 1 auto;
-        }
-
-        /* Галочка целиком кликабельна вместе с подписью: попадать курсором в
-           16px квадрат на пульте, где работают быстро, неудобно. */
-        .cfg-check {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            margin-bottom: 10px;
-            font-family: var(--font-mono);
-            font-size: 13px;
-            color: var(--text);
-            cursor: pointer;
-            user-select: none;
-        }
-
-        .cfg-check input {
-            width: 16px;
-            height: 16px;
-            margin: 0;
-            cursor: pointer;
-            flex: 0 0 auto;
-        }
-
-        .cfg-val {
-            flex: 0 0 42px;
-            text-align: right;
-            color: var(--green);
-            font-family: var(--font-mono);
-            font-size: 12px;
-        }
-
-        .cfg-list {
-            display: flex;
-            flex-direction: column;
-            gap: 8px;
-        }
-
-        .cfg-pane .scfg-row {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            margin-bottom: 10px;
-        }
-
-        .cfg-pane .scfg-row label {
-            flex: 0 0 128px;
-            font-family: var(--font-mono);
-            font-size: 12px;
-            color: var(--text-dim);
-        }
-
-        .cfg-pane .scfg-row select,
-        .cfg-pane .scfg-row input[type="text"],
-        .cfg-pane .scfg-row input[type="range"],
-        .cfg-pane .scfg-row textarea {
-            flex: 1 1 auto;
-            min-width: 0;
-        }
-
-        .cfg-pane .scfg-note {
-            font-family: var(--font-mono);
-            font-size: 11px;
-            line-height: 1.5;
-            color: var(--text-faint);
-            margin: 6px 0 0;
-        }
-
-        .cfg-pane .event-log {
-            max-height: none;
-            height: 100%;
-            min-height: 180px;
         }
 
         /* ── компактная карточка-секция ── */
@@ -4910,71 +4565,42 @@
         <div id="fire-fx"></div>
 
         <div id="dealer-app">
-            <!-- Шапка редизайна: две полосы. Верхняя — кто мы и что сейчас
-                 (фаза, раунд, режим) плюс ручное железо; нижняя — вкладки с
-                 цифровыми клавишами и кнопки, действующие на любом экране. -->
             <header class="dealer-header">
                 <h1><span class="rec-tag">REC</span>ПУЛЬТ ОПЕРАТОРА</h1>
-                <span id="header-phase" class="phase-badge">---</span>
-                <span id="header-round" class="round-badge">---</span>
-                <span id="header-mode" class="mode-badge"></span>
-                <!-- Метка репетиции. В шапке, а не полосой поверх панели:
-                     полоса либо крала бы высоту у сцены, либо ложилась на
-                     вкладки. Клик ведёт в настройки, где тест выключают. -->
-                <span id="tm-banner" class="tm-banner" onclick="showScreen('server')"
-                    title="Идёт тестовый прогон — нажмите, чтобы открыть настройки"></span>
+                <nav class="rd-tabs">
+                    <button class="rd-tab" data-screen="turn" onclick="showScreen('turn')">Ход</button>
+                    <button class="rd-tab" data-screen="loading" onclick="showScreen('loading')">Зарядка</button>
+                    <button class="rd-tab" data-screen="items" onclick="showScreen('items')">Предметы</button>
+                    <button class="rd-tab" data-screen="lobby" onclick="showScreen('lobby')">Настройки</button>
+                    <button class="rd-tab" data-screen="tv" onclick="showScreen('tv')">📺 TV</button>
+                    <button class="rd-tab" data-screen="voip" onclick="showScreen('voip')">☎ ТЕЛЕФОНЫ</button>
+                </nav>
                 <span class="rd-spacer"></span>
                 <div class="header-controls">
+                    <!-- Метка репетиции. В шапке, а не полосой поверх панели:
+                         сцена фиксированной высоты с overflow: hidden, и
+                         полоса либо крала бы у неё высоту, либо ложилась на
+                         вкладки. Клик открывает настройки, где тест выключают. -->
+                    <span id="tm-banner" class="tm-banner" onclick="openServerConfig()"
+                        title="Идёт тестовый прогон — нажмите, чтобы открыть настройки"></span>
+                    <span id="header-phase" class="phase-badge">---</span>
+                    <span id="header-round" class="round-badge">---</span>
+                    <button class="btn btn-plate plate-yellow btn-small" onclick="undoAction()" id="btn-undo"
+                        style="display:none;">ОТКАТИТЬ</button>
+                    <button class="btn btn-plate plate-teal btn-small" id="btn-force-round" onclick="forceRoundOver()"
+                        style="display:none">КОНЕЦ РАУНДА</button>
                     <!-- Ручное управление железом — доступно всегда (пульт оператора). -->
-                    <button class="hdr-icon" onclick="forceFireSolenoid(this)"
+                    <button class="btn btn-plate plate-yellow btn-small" onclick="forceFireSolenoid(this)"
                         title="Принудительно щёлкнуть соленоидом на плате">⚡</button>
-                    <button class="hdr-icon" onclick="showScreen('server', 'audio')"
+                    <button class="btn btn-plate plate-teal btn-small" onclick="openAudioConfig()"
                         title="Настройки звука / озвучки">🔊</button>
-                    <button class="hdr-icon" onclick="showScreen('server', 'voice')"
+                    <button class="btn btn-plate plate-teal btn-small" onclick="openVoiceConfig()"
                         title="Голоса информатора: клонирование и выбор">🎙</button>
-                    <button class="hdr-icon hdr-icon-gear" onclick="showScreen('server', 'hw')"
+                    <button class="btn btn-plate plate-teal btn-small" onclick="openServerConfig()"
                         title="Настройки сервера и ESP32">⚙</button>
                     <button class="btn btn-danger btn-small" onclick="forceEnd()">ЗАВЕРШИТЬ</button>
                 </div>
             </header>
-
-            <nav class="rd-tabs">
-                <button class="rd-tab" data-screen="turn" onclick="showScreen('turn')">
-                    <span class="rd-tab-key">1</span>
-                    <span class="rd-tab-label">ХОД<span class="rd-tab-dot" data-dot="turn"></span></span>
-                </button>
-                <button class="rd-tab" data-screen="loading" onclick="showScreen('loading')">
-                    <span class="rd-tab-key">2</span>
-                    <span class="rd-tab-label">ЗАРЯДКА<span class="rd-tab-dot" data-dot="loading"></span></span>
-                </button>
-                <button class="rd-tab" data-screen="items" onclick="showScreen('items')">
-                    <span class="rd-tab-key">3</span>
-                    <span class="rd-tab-label">ПРЕДМЕТЫ<span class="rd-tab-dot" data-dot="items"></span></span>
-                </button>
-                <button class="rd-tab" data-screen="lobby" onclick="showScreen('lobby')">
-                    <span class="rd-tab-key">4</span>
-                    <span class="rd-tab-label">ЛОББИ<span class="rd-tab-dot" data-dot="lobby"></span></span>
-                </button>
-                <button class="rd-tab" data-screen="tv" onclick="showScreen('tv')">
-                    <span class="rd-tab-key">5</span>
-                    <span class="rd-tab-label">TV</span>
-                </button>
-                <button class="rd-tab" data-screen="voip" onclick="showScreen('voip')">
-                    <span class="rd-tab-key">6</span>
-                    <span class="rd-tab-label">ТЕЛЕФОНЫ</span>
-                </button>
-                <button class="rd-tab" data-screen="server" onclick="showScreen('server')">
-                    <span class="rd-tab-key">7</span>
-                    <span class="rd-tab-label">СЕРВЕР</span>
-                </button>
-                <span class="rd-spacer"></span>
-                <div class="rd-tabs-actions">
-                    <button class="btn btn-plate plate-yellow btn-small" onclick="undoAction()" id="btn-undo"
-                        style="display:none;">↩ ОТКАТИТЬ</button>
-                    <button class="btn btn-plate plate-teal btn-small" id="btn-force-round" onclick="forceRoundOver()"
-                        style="display:none">КОНЕЦ РАУНДА</button>
-                </div>
-            </nav>
 
             <!-- ИНДИКАТОР ВЫСТРЕЛА С КОМПАСА -->
             <div id="compass-shot-banner"
@@ -5679,338 +5305,175 @@
                         </div>
                     </div>
                 </div>
+            </div>
 
-                <!-- ══ СЕРВЕР / НАСТРОЙКИ ═══════════════════════════════════
-                     Всё, что раньше жило в трёх модалках поверх игры, теперь
-                     полноценный экран с под-вкладками: настройки глубокие, а
-                     модалка держала их в окне на 80vh с внутренней прокруткой.
-                     Идентификаторы контролов сохранены один в один — вся
-                     логика (loadServerConfig, аудио, ферма голосов) работает
-                     без изменений, поменялась только оболочка. -->
-                <div class="rd-screen" id="rd-screen-server" hidden>
-                    <div class="cfg-wrap">
-                        <nav class="cfg-tabs">
-                            <button class="cfg-tab" data-cfgtab="hw"
-                                onclick="showConfigTab('hw')">ЖЕЛЕЗО И СЕРВЕР</button>
-                            <button class="cfg-tab" data-cfgtab="audio"
-                                onclick="showConfigTab('audio')">АУДИО / ОЗВУЧКА</button>
-                            <button class="cfg-tab" data-cfgtab="voice"
-                                onclick="showConfigTab('voice')">ГОЛОСА ИНФОРМАТОРА</button>
-                            <button class="cfg-tab" data-cfgtab="test"
-                                onclick="showConfigTab('test')">ТЕСТОВЫЙ РЕЖИМ</button>
-                            <span class="rd-spacer"></span>
-                            <div class="cfg-tabs-actions">
-                                <span class="cfg-msg" id="server-config-msg"></span>
-                                <button class="btn btn-dealer btn-small" id="cfg-save-btn"
-                                    onclick="saveServerConfig(this)">СОХРАНИТЬ В CONFIG.JSON</button>
+            <!-- Модалка «Сервер/Железо»: редактирует config.json (Wi-Fi, IP, код курка,
+         пины, тайминги ESP). Скрыта по умолчанию, открывается кнопкой ⚙. -->
+            <div id="server-config-modal" class="scfg-overlay" style="display:none;">
+                <div class="scfg-box">
+                    <div class="scfg-head">
+                        <h2>СЕРВЕР / ЖЕЛЕЗО</h2>
+                        <button class="btn btn-small" onclick="closeServerConfig()">✕</button>
+                    </div>
+                    <div class="scfg-body">
+                        <!-- Тестовый режим. Отдельно от полей конфига ниже:
+                             те перерисовываются целиком при каждой загрузке
+                             /api/server_config, а этот блок живёт своей
+                             жизнью и обновляется из снимка состояния. -->
+                        <h4 style="margin-top:0;">ТЕСТОВЫЙ РЕЖИМ</h4>
+                        <div id="tm-block" class="tm-block">
+                            <div class="tm-modes" id="tm-modes">
+                                <button class="tm-mode" data-mode="off" onclick="setTestMode('off')">
+                                    Боевой режим<small>обычная партия</small>
+                                </button>
+                                <button class="tm-mode" data-mode="hardware" onclick="setTestMode('hardware')">
+                                    Тест со стойкой<small>железо на столе и работает</small>
+                                </button>
+                                <button class="tm-mode" data-mode="mock" onclick="setTestMode('mock')">
+                                    Тест без железа<small>телефон и курок изображаются</small>
+                                </button>
                             </div>
-                        </nav>
-
-                        <!-- ── ЖЕЛЕЗО И СЕРВЕР ── -->
-                        <div class="cfg-pane" data-cfgpane="hw">
-                            <div class="cfg-cols">
-                                <div class="cfg-col">
-                                    <!-- Поля config.json: Wi-Fi, IP, код курка, пины, тайминги
-                                         ESP. Тело рисует loadServerConfig() по схеме с сервера,
-                                         поэтому здесь только рамка. -->
-                                    <section class="cfg-block cfg-block-grow">
-                                        <div class="cfg-block-head"><span>CONFIG.JSON</span>
-                                            <button class="btn btn-small btn-tiny" onclick="loadServerConfig()"
-                                                title="Перечитать с диска">⟲</button>
-                                        </div>
-                                        <div id="server-config-body">
-                                            <p class="hint">Загрузка…</p>
-                                        </div>
-                                    </section>
-                                </div>
-
-                                <div class="cfg-col cfg-col-narrow">
-                                    <!-- Прицеливание и калибровка живут на «Лобби»: там же
-                                         стол с местами, к которому привязаны углы. Дублировать
-                                         сюда галочку нельзя — она одна на всю панель. -->
-                                    <section class="cfg-block">
-                                        <div class="cfg-block-head"><span>ПРИЦЕЛИВАНИЕ</span></div>
-                                        <p class="scfg-note" style="margin-top:0;">
-                                            Выбор цели гироскопом и калибровка углов — на вкладке
-                                            «Лобби», рядом со схемой стола, к которой привязаны места.
-                                        </p>
-                                        <button class="btn btn-small" onclick="showScreen('lobby')"
-                                            style="margin-top:8px;">ОТКРЫТЬ ЛОББИ</button>
-                                    </section>
-
-                                    <section class="cfg-block cfg-block-grow">
-                                        <div class="cfg-block-head"><span>ЛОГ СОБЫТИЙ</span></div>
-                                        <div class="event-log js-log"></div>
-                                    </section>
-                                </div>
+                            <p class="scfg-note" id="tm-note"></p>
+                            <!-- Диск и курок, которых на репетиции нет. Видны
+                                 только в mock: со стойкой их нажимают руками. -->
+                            <div class="tm-tools" id="tm-tools" style="display:none;">
+                                <input type="text" id="tm-number" placeholder="номер"
+                                    autocomplete="off" inputmode="numeric">
+                                <button class="btn btn-small" onclick="testDial(this)">НАБРАТЬ</button>
+                                <button class="btn btn-small" onclick="testTrigger(this)">ДЁРНУТЬ КУРОК</button>
+                                <button class="btn btn-small" onclick="clearTestJournal()">ОЧИСТИТЬ ЖУРНАЛ</button>
                             </div>
+                            <div class="tm-journal" id="tm-journal" style="display:none;"></div>
                         </div>
 
-                        <!-- ── АУДИО ── -->
-                        <div class="cfg-pane" data-cfgpane="audio" hidden>
-                            <div class="cfg-cols">
-                                <div class="cfg-col">
-                                    <section class="cfg-block">
-                                        <div class="cfg-block-head"><span>ОБЩЕЕ</span></div>
-                                        <div class="scfg-row" style="margin-bottom:14px;">
-                                            <label>Общая громкость</label>
-                                            <input type="range" id="aud-volume" min="0" max="100" value="80"
-                                                oninput="onVolumeChange(this.value)">
-                                            <span id="aud-volume-val" class="cfg-val">80%</span>
-                                        </div>
-                                        <label class="cfg-check">
-                                            <input type="checkbox" id="aud-ducking"
-                                                onchange="onDuckingChange(this.checked)">
-                                            <span>Приглушать музыку при выстреле</span>
-                                        </label>
-                                    </section>
-
-                                    <!-- Серверный звук: PortAudio из Python, минуя браузер. -->
-                                    <section class="cfg-block" id="aud-server-box">
-                                        <div class="cfg-block-head"><span>СЕРВЕРНЫЙ ЗВУК (PYTHON)</span>
-                                            <button class="btn btn-small btn-tiny" onclick="restartServerAudio()"
-                                                title="Переоткрыть устройства (наушники подключили/отключили)">⟲</button>
-                                        </div>
-                                        <label class="cfg-check">
-                                            <input type="checkbox" id="aud-server-mode"
-                                                onchange="onSoundModeChange(this.checked)">
-                                            <span>Играть звук из Python, а не в браузере</span>
-                                        </label>
-                                        <div class="scfg-row aud-out-row">
-                                            <label for="aud-srv-game">Игра и эффекты</label>
-                                            <select id="aud-srv-game" onchange="onServerDeviceChange('game', this)">
-                                                <option value="">Системное по умолчанию</option>
-                                            </select>
-                                            <button class="btn btn-small btn-tiny" onclick="testServerAudio('game')"
-                                                title="Проверить вывод">▶</button>
-                                        </div>
-                                        <p class="scfg-note" id="aud-server-note">Загрузка…</p>
-                                    </section>
-
-                                    <!-- Трубка телефона: свой кабель в ноутбук, свой выход. -->
-                                    <section class="cfg-block" id="aud-phone-box">
-                                        <div class="cfg-block-head"><span>ТЕЛЕФОННАЯ ТРУБКА</span>
-                                            <button class="btn btn-small btn-tiny" onclick="refreshPhoneOutput()"
-                                                title="Обновить список устройств">⟲</button>
-                                        </div>
-                                        <div class="scfg-row aud-out-row">
-                                            <label for="aud-srv-phone">Капсюль трубки</label>
-                                            <select id="aud-srv-phone" onchange="onServerDeviceChange('phone', this)">
-                                                <option value="">Системное по умолчанию</option>
-                                            </select>
-                                            <button class="btn btn-small btn-tiny" onclick="testPhoneOutput()"
-                                                title="Сказать проверочную фразу в трубку">▶</button>
-                                        </div>
-                                        <!-- Чьим голосом говорит информатор. Каталог заранее
-                                             сгенерированных фраз; см. tts/README.md. -->
-                                        <div class="scfg-row aud-out-row">
-                                            <label for="aud-phone-voice">Голос информатора</label>
-                                            <select id="aud-phone-voice" onchange="onVoiceChange(this)">
-                                                <option value="">Загрузка…</option>
-                                            </select>
-                                            <button class="btn btn-small btn-tiny" onclick="speakToPhone()"
-                                                title="Сказать случайную игровую фразу в трубку">▶</button>
-                                        </div>
-                                        <p class="scfg-note" id="aud-voice-note">Загрузка…</p>
-                                        <p class="scfg-note" id="aud-phone-note">Загрузка…</p>
-                                    </section>
-                                </div>
-
-                                <div class="cfg-col">
-                                    <!-- Раздельный вывод: эффекты в наушники, ролики в динамики. -->
-                                    <section class="cfg-block">
-                                        <div class="cfg-block-head"><span>УСТРОЙСТВА ВЫВОДА (БРАУЗЕР)</span>
-                                            <button class="btn btn-small btn-tiny" onclick="refreshAudioOutputs(true)"
-                                                title="Обновить список устройств">⟲</button>
-                                        </div>
-                                        <div class="scfg-row aud-out-row">
-                                            <label for="aud-out-game">Игра и эффекты</label>
-                                            <select id="aud-out-game" onchange="onAudioOutputChange('game', this)">
-                                                <option value="">Системное по умолчанию</option>
-                                            </select>
-                                            <button class="btn btn-small btn-tiny" onclick="testAudioOutput('game')"
-                                                title="Проверить вывод здесь">▶</button>
-                                            <button class="btn btn-small btn-tiny"
-                                                onclick="testAudioOutput('game', true)"
-                                                title="Проверить вывод на экране игрока">▶TV</button>
-                                        </div>
-                                        <div class="scfg-row aud-out-row">
-                                            <label for="aud-out-video">Видеоролики</label>
-                                            <select id="aud-out-video" onchange="onAudioOutputChange('video', this)">
-                                                <option value="">Системное по умолчанию</option>
-                                            </select>
-                                            <button class="btn btn-small btn-tiny" onclick="testAudioOutput('video')"
-                                                title="Проверить вывод на экране игрока">▶</button>
-                                        </div>
-                                        <p class="scfg-note" id="aud-out-note">
-                                            Канал «Игра и эффекты» — наушники: звуки этой панели плюс шум
-                                            CCTV-перехода на экране игрока. Канал «Видеоролики» — динамики:
-                                            звук видео на /teleplayer. Живые CCTV-потоки идут через встроенный
-                                            плеер камер и на выбор устройства не реагируют.
-                                        </p>
-                                    </section>
-
-                                    <section class="cfg-block">
-                                        <div class="cfg-block-head"><span>ПРОЧЕЕ</span></div>
-                                        <div id="audio-config-body">
-                                            <p class="hint">Загрузка…</p>
-                                        </div>
-                                        <p class="scfg-note" id="audio-config-msg"></p>
-                                        <p class="scfg-note">Изменения применяются мгновенно</p>
-                                    </section>
-                                </div>
-                            </div>
+                        <div id="server-config-body">
+                            <p class="hint">Загрузка…</p>
                         </div>
-
-                        <!-- ── ГОЛОСА ИНФОРМАТОРА ──
-                             Клонирование идёт на машине с видеокартой, здесь только
-                             разговор с ней: загрузить запись, послушать, утвердить. -->
-                        <div class="cfg-pane" data-cfgpane="voice" hidden>
-                            <p class="scfg-note" id="vc-farm-note" style="margin-bottom:12px;">Загрузка…</p>
-                            <div class="cfg-cols">
-                                <div class="cfg-col">
-                                    <!-- Готовые голоса: те, которыми игра умеет говорить сейчас. -->
-                                    <section class="cfg-block">
-                                        <div class="cfg-block-head"><span>УСТАНОВЛЕНЫ ЗА СТОЛОМ</span>
-                                            <button class="btn btn-small btn-tiny" onclick="refreshVoicePanel()"
-                                                title="Обновить">⟲</button>
-                                        </div>
-                                        <div id="vc-installed" class="cfg-list">
-                                            <p class="scfg-note">Загрузка…</p>
-                                        </div>
-                                    </section>
-
-                                    <!-- Чем озвучивать. Движок один — F5-TTS с ударениями, —
-                                         так что здесь не выбор, а состояние: умеет ферма
-                                         говорить прямо сейчас или чего-то не хватает. -->
-                                    <section class="cfg-block">
-                                        <div class="cfg-block-head"><span>ЧЕМ ОЗВУЧИВАТЬ</span></div>
-                                        <div id="vc-engines" class="cfg-list">
-                                            <p class="scfg-note">Загрузка…</p>
-                                        </div>
-                                    </section>
-
-                                    <!-- Голоса в работе: от записи до готовой тысячи фраз. -->
-                                    <section class="cfg-block">
-                                        <div class="cfg-block-head"><span>В РАБОТЕ НА ФЕРМЕ</span></div>
-                                        <div id="vc-jobs" class="cfg-list">
-                                            <p class="scfg-note">Загрузка…</p>
-                                        </div>
-                                    </section>
-                                </div>
-
-                                <div class="cfg-col">
-                                    <!-- Новый голос. Отсюда начинается весь путь. -->
-                                    <section class="cfg-block">
-                                        <div class="cfg-block-head"><span>ДОБАВИТЬ ГОЛОС</span></div>
-                                        <div class="scfg-row aud-out-row">
-                                            <label for="vc-name">Имя</label>
-                                            <input type="text" id="vc-name" placeholder="dealer"
-                                                style="flex:1; min-width:0;">
-                                        </div>
-                                        <div class="scfg-row aud-out-row">
-                                            <label for="vc-file">Запись</label>
-                                            <input type="file" id="vc-file" accept="audio/*,video/*"
-                                                style="flex:1; min-width:0;">
-                                        </div>
-                                        <label class="cfg-check">
-                                            <input type="checkbox" id="vc-song">
-                                            <span>Это песня — отделить голос от музыки</span>
-                                        </label>
-                                        <div class="scfg-row aud-out-row" style="justify-content:flex-end;">
-                                            <button class="btn btn-small" id="vc-upload-btn"
-                                                onclick="uploadVoice()">ЗАГРУЗИТЬ</button>
-                                        </div>
-                                        <p class="scfg-note" id="vc-upload-note">
-                                            Годится разговор или песня, 1–3 минуты. Чем чище запись, тем
-                                            похожее клон. Голос должен говорить по-русски: акцент тянется
-                                            из образца. Сколько секунд взять, решает ферма по длине самой
-                                            записи — короткая идёт целиком.
-                                        </p>
-                                    </section>
-
-                                    <!-- Озвучить одну фразу. Короткий путь: образец есть,
-                                         текст вписан, через минуту здесь лежит файл. -->
-                                    <section class="cfg-block">
-                                        <div class="cfg-block-head"><span>ОЗВУЧИТЬ ФРАЗУ</span></div>
-                                        <div class="scfg-row aud-out-row">
-                                            <label for="vc-speak-voice">Голос</label>
-                                            <select id="vc-speak-voice" style="flex:1; min-width:0;"></select>
-                                        </div>
-                                        <div class="scfg-row aud-out-row" style="align-items:flex-start;">
-                                            <label for="vc-speak-text" style="padding-top:6px;">Текст</label>
-                                            <textarea id="vc-speak-text" rows="2"
-                                                placeholder="Что должен сказать информатор"
-                                                style="flex:1; min-width:0; resize:vertical;"></textarea>
-                                        </div>
-                                        <div class="scfg-row aud-out-row" style="justify-content:flex-end;">
-                                            <button class="btn btn-small" id="vc-speak-btn"
-                                                onclick="speakPhrase()">ОЗВУЧИТЬ</button>
-                                        </div>
-                                        <div id="vc-spoken" class="cfg-list"></div>
-                                        <p class="scfg-note" style="margin-top:8px;">
-                                            Ждать примерно минуту: фраза считается на ферме и приезжает
-                                            сюда файлом. Словарь это не трогает.
-                                        </p>
-                                        <p class="scfg-note" id="vc-msg">&nbsp;</p>
-                                    </section>
-                                </div>
-                            </div>
-                        </div>
-
-                        <!-- ── ТЕСТОВЫЙ РЕЖИМ ──
-                             Отдельной вкладкой, а не полем конфига: поля выше
-                             перерисовываются целиком при каждой загрузке
-                             /api/server_config, а этот блок живёт своей жизнью
-                             и обновляется из снимка состояния. -->
-                        <div class="cfg-pane" data-cfgpane="test" hidden>
-                            <div class="cfg-cols">
-                                <div class="cfg-col">
-                                    <section class="cfg-block">
-                                        <div class="cfg-block-head"><span>РЕЖИМ ПРОГОНА</span></div>
-                                        <div id="tm-block" class="tm-block">
-                                            <div class="tm-modes" id="tm-modes">
-                                                <button class="tm-mode" data-mode="off" onclick="setTestMode('off')">
-                                                    Боевой режим<small>обычная партия</small>
-                                                </button>
-                                                <button class="tm-mode" data-mode="hardware"
-                                                    onclick="setTestMode('hardware')">
-                                                    Тест со стойкой<small>железо на столе и работает</small>
-                                                </button>
-                                                <button class="tm-mode" data-mode="mock"
-                                                    onclick="setTestMode('mock')">
-                                                    Тест без железа<small>телефон и курок изображаются</small>
-                                                </button>
-                                            </div>
-                                            <p class="scfg-note" id="tm-note"></p>
-                                            <!-- Диск и курок, которых на репетиции нет. Видны
-                                                 только в mock: со стойкой их нажимают руками. -->
-                                            <div class="tm-tools" id="tm-tools" style="display:none;">
-                                                <input type="text" id="tm-number" placeholder="номер"
-                                                    autocomplete="off" inputmode="numeric">
-                                                <button class="btn btn-small" onclick="testDial(this)">НАБРАТЬ</button>
-                                                <button class="btn btn-small" onclick="testTrigger(this)">ДЁРНУТЬ
-                                                    КУРОК</button>
-                                                <button class="btn btn-small" onclick="testHangup(this)">ПОЛОЖИТЬ
-                                                    ТРУБКУ</button>
-                                                <button class="btn btn-small" onclick="clearTestJournal()">ОЧИСТИТЬ
-                                                    ЖУРНАЛ</button>
-                                            </div>
-                                        </div>
-                                    </section>
-                                </div>
-                                <div class="cfg-col">
-                                    <section class="cfg-block">
-                                        <div class="cfg-block-head"><span>ЖУРНАЛ ПРОГОНА</span></div>
-                                        <div class="tm-journal" id="tm-journal" style="display:none;"></div>
-                                    </section>
-                                </div>
-                            </div>
-                        </div>
+                    </div>
+                    <div class="scfg-foot">
+                        <div id="server-config-msg" class="scfg-msg"></div>
+                        <button class="btn btn-dealer" onclick="saveServerConfig(this)">СОХРАНИТЬ В CONFIG.JSON</button>
                     </div>
                 </div>
             </div>
 
+            <!-- Модалка «Аудио»: настройка озвучки. -->
+            <div id="audio-config-modal" class="scfg-overlay" style="display:none;">
+                <div class="scfg-box">
+                    <div class="scfg-head">
+                        <h2>АУДИО / ОЗВУЧКА</h2>
+                        <button class="btn btn-small" onclick="closeAudioConfig()">✕</button>
+                    </div>
+                    <div class="scfg-body">
+                        <div class="scfg-row" style="margin-bottom:14px;">
+                            <label>Общая громкость</label>
+                            <input type="range" id="aud-volume" min="0" max="100" value="80"
+                                oninput="onVolumeChange(this.value)">
+                            <span id="aud-volume-val"
+                                style="flex:0 0 42px; text-align:right; color:var(--green,#3fef6a);">80%</span>
+                        </div>
+                        <div class="scfg-row"
+                            style="margin-bottom:14px; align-items:center; justify-content:flex-start; gap:8px;">
+                            <input type="checkbox" id="aud-ducking" onchange="onDuckingChange(this.checked)"
+                                style="width:16px; height:16px; margin:0; cursor:pointer;">
+                            <label for="aud-ducking"
+                                style="cursor:pointer; user-select:none; margin:0; font-size:13px;">Приглушать музыку
+                                при выстреле</label>
+                        </div>
+                        <!-- Серверный звук: PortAudio из Python, минуя браузер. -->
+                        <div class="aud-outs" id="aud-server-box">
+                            <div class="aud-outs-head">
+                                <span>СЕРВЕРНЫЙ ЗВУК (PYTHON)</span>
+                                <button class="btn btn-small btn-tiny" onclick="restartServerAudio()"
+                                    title="Переоткрыть устройства (наушники подключили/отключили)">⟲</button>
+                            </div>
+                            <div class="scfg-row"
+                                style="margin-bottom:10px; align-items:center; justify-content:flex-start; gap:8px;">
+                                <input type="checkbox" id="aud-server-mode" onchange="onSoundModeChange(this.checked)"
+                                    style="width:16px; height:16px; margin:0; cursor:pointer;">
+                                <label for="aud-server-mode"
+                                    style="cursor:pointer; user-select:none; margin:0; font-size:13px;">Играть звук из
+                                    Python, а не в браузере</label>
+                            </div>
+                            <div class="scfg-row aud-out-row">
+                                <label for="aud-srv-game">Игра и эффекты</label>
+                                <select id="aud-srv-game" onchange="onServerDeviceChange('game', this)">
+                                    <option value="">Системное по умолчанию</option>
+                                </select>
+                                <button class="btn btn-small btn-tiny" onclick="testServerAudio('game')"
+                                    title="Проверить вывод">▶</button>
+                            </div>
+                            <p class="scfg-note" id="aud-server-note">Загрузка…</p>
+                        </div>
+                        <!-- Трубка телефона: свой кабель в ноутбук, свой выход. -->
+                        <div class="aud-outs" id="aud-phone-box">
+                            <div class="aud-outs-head">
+                                <span>ТЕЛЕФОННАЯ ТРУБКА</span>
+                                <button class="btn btn-small btn-tiny" onclick="refreshPhoneOutput()"
+                                    title="Обновить список устройств">⟲</button>
+                            </div>
+                            <div class="scfg-row aud-out-row">
+                                <label for="aud-srv-phone">Капсюль трубки</label>
+                                <select id="aud-srv-phone" onchange="onServerDeviceChange('phone', this)">
+                                    <option value="">Системное по умолчанию</option>
+                                </select>
+                                <button class="btn btn-small btn-tiny" onclick="testPhoneOutput()"
+                                    title="Сказать проверочную фразу в трубку">▶</button>
+                            </div>
+                            <!-- Чьим голосом говорит информатор. Каталог заранее
+                                 сгенерированных фраз; см. tts/README.md. -->
+                            <div class="scfg-row aud-out-row">
+                                <label for="aud-phone-voice">Голос информатора</label>
+                                <select id="aud-phone-voice" onchange="onVoiceChange(this)">
+                                    <option value="">Загрузка…</option>
+                                </select>
+                                <button class="btn btn-small btn-tiny" onclick="speakToPhone()"
+                                    title="Сказать случайную игровую фразу в трубку">▶</button>
+                            </div>
+                            <p class="scfg-note" id="aud-voice-note">Загрузка…</p>
+                            <p class="scfg-note" id="aud-phone-note">Загрузка…</p>
+                        </div>
+                        <!-- Раздельный вывод: эффекты в наушники, видеоролики в динамики. -->
+                        <div class="aud-outs">
+                            <div class="aud-outs-head">
+                                <span>УСТРОЙСТВА ВЫВОДА (БРАУЗЕР)</span>
+                                <button class="btn btn-small btn-tiny" onclick="refreshAudioOutputs(true)"
+                                    title="Обновить список устройств">⟲</button>
+                            </div>
+                            <div class="scfg-row aud-out-row">
+                                <label for="aud-out-game">Игра и эффекты</label>
+                                <select id="aud-out-game" onchange="onAudioOutputChange('game', this)">
+                                    <option value="">Системное по умолчанию</option>
+                                </select>
+                                <button class="btn btn-small btn-tiny" onclick="testAudioOutput('game')"
+                                    title="Проверить вывод здесь">▶</button>
+                                <button class="btn btn-small btn-tiny" onclick="testAudioOutput('game', true)"
+                                    title="Проверить вывод на экране игрока">▶TV</button>
+                            </div>
+                            <div class="scfg-row aud-out-row">
+                                <label for="aud-out-video">Видеоролики</label>
+                                <select id="aud-out-video" onchange="onAudioOutputChange('video', this)">
+                                    <option value="">Системное по умолчанию</option>
+                                </select>
+                                <button class="btn btn-small btn-tiny" onclick="testAudioOutput('video')"
+                                    title="Проверить вывод на экране игрока">▶</button>
+                            </div>
+                            <p class="scfg-note" id="aud-out-note">
+                                Канал «Игра и эффекты» — наушники: звуки этой панели плюс шум CCTV-перехода
+                                на экране игрока. Канал «Видеоролики» — динамики: звук видео на /teleplayer.
+                                Живые CCTV-потоки идут через встроенный плеер камер и на выбор устройства не реагируют.
+                            </p>
+                        </div>
+                        <div id="audio-config-body">
+                            <p class="hint">Загрузка…</p>
+                        </div>
+                    </div>
+                    <div class="scfg-foot">
+                        <div id="audio-config-msg" class="scfg-msg"></div>
+                        <span class="scfg-note" style="flex:0;">Изменения применяются мгновенно</span>
+                    </div>
+                </div>
+            </div>
 
             <!-- Модалка «Осмотр магазина» -->
             <div id="mag-inspect-modal" class="scfg-overlay" style="display:none; z-index:200;">
@@ -6029,6 +5492,110 @@
                 </div>
             </div>
 
+            <!-- Модалка «Голоса информатора».
+                 Клонирование идёт на машине с видеокартой, здесь только разговор
+                 с ней: загрузить запись, послушать, утвердить, забрать. -->
+            <div id="voice-config-modal" class="scfg-overlay" style="display:none; z-index:210;">
+                <div class="scfg-box" style="width:620px; max-height:86vh; overflow-y:auto;">
+                    <div class="scfg-head">
+                        <h2>ГОЛОСА ИНФОРМАТОРА</h2>
+                        <button class="btn btn-small btn-tiny" onclick="refreshVoicePanel()"
+                            title="Обновить">⟲</button>
+                        <button class="btn btn-small" onclick="closeVoiceConfig()">✕</button>
+                    </div>
+                    <div class="scfg-body">
+                        <p class="scfg-note" id="vc-farm-note" style="margin-bottom:12px;">Загрузка…</p>
+
+                        <!-- Готовые голоса: те, которыми игра умеет говорить прямо сейчас. -->
+                        <div class="aud-outs">
+                            <div class="aud-outs-head"><span>УСТАНОВЛЕНЫ ЗА СТОЛОМ</span></div>
+                            <div id="vc-installed" style="display:flex; flex-direction:column; gap:6px;">
+                                <p class="scfg-note">Загрузка…</p>
+                            </div>
+                        </div>
+
+                        <!-- Чем озвучивать. Движок один — F5-TTS с ударениями, —
+                             так что здесь не выбор, а состояние: умеет ферма
+                             говорить прямо сейчас или чего-то не хватает. -->
+                        <div class="aud-outs" style="margin-top:12px;">
+                            <div class="aud-outs-head"><span>ЧЕМ ОЗВУЧИВАТЬ</span></div>
+                            <div id="vc-engines" style="display:flex; flex-direction:column; gap:8px;">
+                                <p class="scfg-note">Загрузка…</p>
+                            </div>
+                        </div>
+
+                        <!-- Голоса в работе: от загруженной записи до готовой тысячи фраз. -->
+                        <div class="aud-outs" style="margin-top:12px;">
+                            <div class="aud-outs-head"><span>В РАБОТЕ НА ФЕРМЕ</span></div>
+                            <div id="vc-jobs" style="display:flex; flex-direction:column; gap:10px;">
+                                <p class="scfg-note">Загрузка…</p>
+                            </div>
+                        </div>
+
+                        <!-- Новый голос. Отсюда начинается весь путь. -->
+                        <div class="aud-outs" style="margin-top:12px;">
+                            <div class="aud-outs-head"><span>ДОБАВИТЬ ГОЛОС</span></div>
+                            <div class="scfg-row aud-out-row">
+                                <label for="vc-name">Имя</label>
+                                <input type="text" id="vc-name" placeholder="dealer"
+                                    style="flex:1; min-width:0;">
+                            </div>
+                            <div class="scfg-row aud-out-row">
+                                <label for="vc-file">Запись</label>
+                                <input type="file" id="vc-file" accept="audio/*,video/*"
+                                    style="flex:1; min-width:0;">
+                            </div>
+                            <div class="scfg-row aud-out-row"
+                                style="align-items:center; justify-content:flex-start; gap:8px;">
+                                <input type="checkbox" id="vc-song"
+                                    style="width:16px; height:16px; margin:0; cursor:pointer;">
+                                <label for="vc-song"
+                                    style="cursor:pointer; user-select:none; margin:0; font-size:13px;">
+                                    Это песня — отделить голос от музыки</label>
+                            </div>
+                            <div class="scfg-row aud-out-row"
+                                style="justify-content:flex-end;">
+                                <button class="btn btn-small" id="vc-upload-btn"
+                                    onclick="uploadVoice()">ЗАГРУЗИТЬ</button>
+                            </div>
+                            <p class="scfg-note" id="vc-upload-note">
+                                Годится разговор или песня, 1–3 минуты. Чем чище запись, тем
+                                похожее клон. Голос должен говорить по-русски: акцент тянется
+                                из образца. Сколько секунд взять, решает ферма по длине самой
+                                записи — короткая идёт целиком.
+                            </p>
+                        </div>
+
+                        <!-- Озвучить одну фразу. Короткий путь: образец есть,
+                             текст вписан, через минуту здесь лежит файл. -->
+                        <div class="aud-outs" style="margin-top:12px;">
+                            <div class="aud-outs-head"><span>ОЗВУЧИТЬ ФРАЗУ</span></div>
+                            <div class="scfg-row aud-out-row">
+                                <label for="vc-speak-voice">Голос</label>
+                                <select id="vc-speak-voice" style="flex:1; min-width:0;"></select>
+                            </div>
+                            <div class="scfg-row aud-out-row" style="align-items:flex-start;">
+                                <label for="vc-speak-text" style="padding-top:6px;">Текст</label>
+                                <textarea id="vc-speak-text" rows="2"
+                                    placeholder="Что должен сказать информатор"
+                                    style="flex:1; min-width:0; resize:vertical;"></textarea>
+                            </div>
+                            <div class="scfg-row aud-out-row" style="justify-content:flex-end;">
+                                <button class="btn btn-small" id="vc-speak-btn"
+                                    onclick="speakPhrase()">ОЗВУЧИТЬ</button>
+                            </div>
+                            <div id="vc-spoken" style="display:flex; flex-direction:column; gap:6px;"></div>
+                            <p class="scfg-note" style="margin-top:8px;">
+                                Ждать примерно минуту: фраза считается на ферме и приезжает
+                                сюда файлом. Словарь это не трогает.
+                            </p>
+                        </div>
+                    </div>
+                    <div class="scfg-foot">
+                        <span class="scfg-note" id="vc-msg" style="flex:1;">&nbsp;</span>
+                    </div>
+                </div>
+            </div>
 
         </div>
     </div>
@@ -6103,7 +5670,7 @@
         // Фаза сервера → экран новой вкладочной раскладки. Сервер — источник истины:
         // на каждый push переключаемся на экран текущей фазы. Вкладки позволяют
         // оператору «подсмотреть» другой экран между обновлениями (showScreen).
-        const SCREENS = ['turn', 'loading', 'items', 'lobby', 'nogame', 'roundover', 'gameover', 'tv', 'voip', 'server'];
+        const SCREENS = ['turn', 'loading', 'items', 'lobby', 'nogame', 'roundover', 'gameover', 'tv', 'voip'];
         const PHASE_TO_SCREEN = {
             lobby: 'lobby',
             round_start: 'loading', dealer_loading: 'loading', dealer_reloading: 'loading',
@@ -6117,10 +5684,6 @@
         // чтобы очередной push состояния не выбросил обратно на экран текущей фазы.
         let pinnedScreen = null;
 
-        // Экраны-пульты: оператор работает на них руками, и push состояния не
-        // должен утаскивать его обратно на экран фазы посреди операции.
-        const PINNED_SCREENS = ['tv', 'voip', 'server'];
-
         function showScreenEl(name) {
             SCREENS.forEach(n => {
                 const el = document.getElementById('rd-screen-' + n);
@@ -6128,75 +5691,23 @@
             });
             // Активная вкладка только для 4 основных экранов (у простых экранов вкладки нет).
             document.querySelectorAll('.rd-tab').forEach(t => t.classList.toggle('active', t.dataset.screen === name));
-
-            // Точка на вкладке фазы, пока оператор смотрит на другой экран:
-            // подсказывает, где его ждут, не выдёргивая с текущей вкладки.
-            // Здесь, а не только в render(): вкладку переключают и вручную,
-            // между пушами состояния.
-            const phaseScreen = gameState ? (PHASE_TO_SCREEN[gameState.phase] || 'nogame') : null;
-            document.querySelectorAll('.rd-tab-dot').forEach(d => {
-                d.classList.toggle('on', d.dataset.dot === phaseScreen && name !== phaseScreen);
-            });
         }
 
         // Ручное переключение вкладки — предпросмотр по последнему состоянию.
         // Следующий push с сервера восстановит экран текущей фазы.
-        // cfgTab — на какую под-вкладку настроек встать (только для 'server').
-        function showScreen(name, cfgTab) {
-            // TV, телефоны и настройки держим закреплёнными: все три — пульты
-            // железа, и очередной push состояния не должен выбрасывать оператора
-            // с них посреди операции. Любой другой таб — снимаем закрепление.
-            pinnedScreen = PINNED_SCREENS.includes(name) ? name : null;
-            // Уходим с настроек — гасим опрос фермы, он ходит по ssh.
-            if (name !== 'server') stopVoicePolling();
+        function showScreen(name) {
+            // TV и телефоны держим закреплёнными: обе вкладки — пульты железа, и
+            // очередной push состояния не должен выбрасывать оператора с них посреди
+            // операции. Любой другой таб — снимаем закрепление.
+            pinnedScreen = (name === 'tv' || name === 'voip') ? name : null;
             showScreenEl(name);
             if (name === 'voip') voipDealerOpen();
-            if (name === 'server') showConfigTab(cfgTab || currentConfigTab);
             if (!gameState) return;
             if (name === 'turn') renderTurn(gameState);
             else if (name === 'loading') renderLoading(gameState);
             else if (name === 'items') renderItems(gameState);
             else if (name === 'lobby') renderLobby(gameState);
             else if (name === 'tv') loadTvConfig();
-        }
-
-        // ── Под-вкладки экрана настроек ──
-        // Каждая тянет своё содержимое в момент открытия, а не при загрузке
-        // страницы: аудио-устройства и ферма голосов опрашиваются небыстро,
-        // и делать это ради вкладки, куда оператор может не зайти, незачем.
-        let currentConfigTab = 'hw';
-
-        function showConfigTab(name) {
-            currentConfigTab = name;
-            document.querySelectorAll('.cfg-pane').forEach(p => {
-                p.hidden = p.dataset.cfgpane !== name;
-            });
-            document.querySelectorAll('.cfg-tab').forEach(t => {
-                t.classList.toggle('active', t.dataset.cfgtab === name);
-            });
-            // Кнопка сохранения правит config.json и на других вкладках смысла
-            // не имеет: аудио и голоса применяются сразу.
-            const save = document.getElementById('cfg-save-btn');
-            if (save) save.style.display = name === 'hw' ? 'inline-flex' : 'none';
-
-            if (name !== 'voice') stopVoicePolling();
-
-            if (name === 'hw') {
-                loadServerConfig();
-            } else if (name === 'audio') {
-                loadAudioTab();
-            } else if (name === 'voice') {
-                refreshVoicePanel();
-            } else if (name === 'test') {
-                loadTestMode();
-            }
-        }
-
-        // Видна ли под-вкладка настроек прямо сейчас. Нужна тем циклам, что
-        // перезапускают себя по таймеру и должны сами остановиться.
-        function isConfigTabVisible(name) {
-            const screen = document.getElementById('rd-screen-server');
-            return !!screen && !screen.hidden && currentConfigTab === name;
         }
 
         // Экраны без вкладки: попасть на них можно только автоматически по фазе.
@@ -6221,14 +5732,6 @@
 
             document.getElementById('header-phase').textContent = phaseLabel(s.phase);
             document.getElementById('header-round').textContent = `РАУНД ${s.current_round}/${s.total_rounds}`;
-
-            // Режим прицеливания — в шапке, потому что от него зависит, кто
-            // выбирает цель: оператор кнопкой или угол дробовика.
-            const modeEl = document.getElementById('header-mode');
-            if (modeEl) {
-                modeEl.textContent = s.use_gyro_targeting ? 'ГИРОСКОП' : 'РУЧНОЙ ВЫБОР';
-                modeEl.classList.toggle('gyro', !!s.use_gyro_targeting);
-            }
 
             const chkGyro = document.getElementById('chk-use-gyro');
             if (chkGyro && s.use_gyro_targeting !== undefined) {
@@ -7351,21 +6854,6 @@
             setTimeout(() => { btn.disabled = false; btn.textContent = orig; }, 1200);
         }
 
-        // Кнопка вместо рычага: снимает с экранов «сними трубку» ровно так же,
-        // как это делает возвращённая на аппарат трубка.
-        async function testHangup(btn) {
-            const orig = btn.textContent;
-            btn.disabled = true;
-            try {
-                const r = await fetch('/api/test_mode/hangup', { method: 'POST' });
-                const d = await r.json();
-                btn.textContent = (r.ok && d.cleared) ? '✓ СНЯТО' : '— НЕЧЕГО СНИМАТЬ';
-            } catch (e) {
-                btn.textContent = '✗ ОШИБКА';
-            }
-            setTimeout(() => { btn.disabled = false; btn.textContent = orig; }, 1200);
-        }
-
         async function clearTestJournal() {
             try {
                 const r = await fetch('/api/test_mode/journal/clear', { method: 'POST' });
@@ -7373,15 +6861,14 @@
             } catch (e) { /* журнал не критичен */ }
         }
 
-        // ── Вкладка «Сервер/Железо» (config.json) ──
-        // Раньше это была модалка; теперь экран с под-вкладками, поэтому
-        // «открыть» — это перейти на него. Имена сохранены: их зовут из
-        // старых мест (баннер репетиции, ошибки железа).
+        // ── Модалка «Сервер/Железо» (config.json) ──
         function openServerConfig() {
-            showScreen('server', 'hw');
+            document.getElementById('server-config-modal').style.display = 'flex';
+            loadTestMode();
+            loadServerConfig();
         }
         function closeServerConfig() {
-            showScreen('turn');
+            document.getElementById('server-config-modal').style.display = 'none';
         }
 
         async function loadServerConfig() {
@@ -7492,13 +6979,9 @@
             btn.disabled = false;
         }
 
-        // ── Вкладка «Аудио» (озвучка) ──
+        // ── Модалка «Аудио» (озвучка) ──
         function openAudioConfig() {
-            showScreen('server', 'audio');
-        }
-        // Наполнение вкладки. Отдельно от перехода: showConfigTab зовёт это
-        // при каждом открытии, а openAudioConfig — только точка входа снаружи.
-        function loadAudioTab() {
+            document.getElementById('audio-config-modal').style.display = 'flex';
             if (window.SoundEngine) {
                 SoundEngine.play('ui_settings_open');
                 document.getElementById('aud-volume').value = Math.round(SoundEngine.getVolume() * 100);
@@ -7513,7 +6996,8 @@
             refreshVoices();
         }
         function closeAudioConfig() {
-            showScreen('turn');
+            document.getElementById('audio-config-modal').style.display = 'none';
+            if (window.SoundEngine) SoundEngine.play('ui_settings_close');
         }
         // Громкость и приглушение правим в обоих движках: браузерный помнит их в
         // localStorage, серверный — в своём процессе. Так переключение режима не
@@ -7741,18 +7225,15 @@
         }
 
         function openVoiceConfig() {
-            showScreen('server', 'voice');
+            document.getElementById('voice-config-modal').style.display = 'flex';
+            if (window.SoundEngine) SoundEngine.play('ui_settings_open');
+            refreshVoicePanel();
         }
 
         function closeVoiceConfig() {
-            showScreen('turn');
-        }
-
-        // Опрос фермы идёт, пока вкладка голосов открыта. Уход с неё — на
-        // другую под-вкладку или на другой экран — гасит таймер: ферма
-        // отвечает по ssh, и держать этот опрос фоном незачем.
-        function stopVoicePolling() {
+            document.getElementById('voice-config-modal').style.display = 'none';
             if (voicePollTimer) { clearTimeout(voicePollTimer); voicePollTimer = null; }
+            if (window.SoundEngine) SoundEngine.play('ui_settings_close');
         }
 
         // Что стадия значит для того, кто на неё смотрит. Словами, а не кодом:
@@ -7773,10 +7254,8 @@
         let voiceEngines = [];
 
         async function refreshVoicePanel() {
-            // Опрашиваем ферму только пока вкладка голосов на виду: цикл
-            // перезапускает сам себя по таймеру, и без этой проверки он
-            // продолжал бы ходить по ssh после ухода оператора на другой экран.
-            if (!isConfigTabVisible('voice')) return;
+            const modal = document.getElementById('voice-config-modal');
+            if (!modal || modal.style.display === 'none') return;
 
             try {
                 // Со своим сроком: опрос идёт по ssh до фермы, и если она

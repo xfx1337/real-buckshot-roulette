@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Buckshot Roulette IRL</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body class="page-index crt-bg">
+    <div class="crt-ambient-smoke"><span></span><span></span></div>
+    <div class="crt-vignette"></div>
+    <div class="crt-grain"></div>
+    <div class="crt-scanlines"></div>
+
+    <div class="container center-content">
+        <div class="session-tag">СЕАНС&nbsp;ОТКРЫТ&nbsp;//&nbsp;ПОДВАЛ&nbsp;№7</div>
+        <div class="logo-block">
+            <h1>BUCKSHOT<br>ROULETTE</h1>
+            <p class="subtitle">IRL EDITION</p>
+        </div>
+
+        <div class="card" style="max-width:420px; width:100%;">
+            {% if error %}
+            <div class="alert-error">{{ error }}</div>
+            {% endif %}
+            <p style="font-family:var(--font-display); font-size:0.95rem; line-height:1.5; color:var(--text); margin-bottom:6px;">
+                Заряженный дробовик. Живые и холостые вперемешку. Диллер тасует патроны — вы решаете, в кого направить ствол.
+            </p>
+            <form method="POST" action="/api/join" class="join-form">
+                <label for="name">имя:</label>
+                <input type="text" id="name" name="name" placeholder="ВВЕДИТЕ ИМЯ..." required maxlength="20" autocomplete="off" value="{{ saved_name|default('', true) }}">
+                <button type="submit" class="btn btn-player">▸ СПУСТИТЬ КУРОК</button>
+            </form>
+            <div class="hint">// подключение к активному сеансу диллера</div>
+        </div>
+    </div>
+</body>
+</html>
