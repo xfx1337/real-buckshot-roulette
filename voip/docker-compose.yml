@@ -6,8 +6,8 @@ services:
     # Ports are bound to the en6 address only. Docker would otherwise publish
     # them on every host interface, exposing the PBX to the home LAN on en0.
     ports:
-      - "192.168.100.2:5060:5060/udp"
-      - "192.168.100.2:10000-10050:10000-10050/udp"
+      - "5060:5060/udp"
+      - "10000-10050:10000-10050/udp"
       # AMI, for scripts/phone_digits.py. Loopback only.
       - "127.0.0.1:5038:5038/tcp"
     volumes:
@@ -16,3 +16,4 @@ services:
       - ./etc/rtp.conf:/etc/asterisk/rtp.conf:ro
       - ./etc/modules.conf:/etc/asterisk/modules.conf:ro
       - ./etc/manager.conf:/etc/asterisk/manager.conf:ro
+      - ./sounds/asterisk_sounds:/var/lib/asterisk/sounds/en

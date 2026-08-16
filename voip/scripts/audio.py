@@ -33,9 +33,11 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 
-# What plays the file. afplay ships with macOS and follows the default output
-# device, so plugging into the jack is all the routing that is needed.
-PLAYER = "/usr/bin/afplay"
+import sys
+
+# What plays the file. afplay ships with macOS. ffplay is used on Windows.
+is_win = sys.platform == "win32"
+PLAYER = ["ffplay", "-nodisp", "-autoexit", "-loglevel", "quiet"] if is_win else ["/usr/bin/afplay"]
 
 
 class AudioError(RuntimeError):
@@ -131,7 +133,7 @@ class Player:
 
         try:
             process = subprocess.Popen(
-                [PLAYER, str(path)],
+                PLAYER + [str(path)],
                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                 stdin=subprocess.DEVNULL,
             )
@@ -178,7 +180,7 @@ class Player:
             # Looping: start the file again and keep watching the new process.
             try:
                 process = subprocess.Popen(
-                    [PLAYER, str(playing.path)],
+                    PLAYER + [str(playing.path)],
                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                     stdin=subprocess.DEVNULL,
                 )

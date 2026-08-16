@@ -53,25 +53,25 @@ def _check(name: str, label: str, state: str, detail: str, **extra) -> dict:
 # ── the address the transport binds to ──────────────────────────────────
 
 def check_network() -> dict:
+    is_win = sys.platform == "win32"
     try:
-        out = subprocess.run(["ifconfig"], capture_output=True, text=True,
-                             timeout=5).stdout
+        cmd = ["ipconfig"] if is_win else ["ifconfig"]
+        out = subprocess.run(cmd, capture_output=True, text=True, timeout=5).stdout
     except (OSError, subprocess.SubprocessError) as exc:
         return _check("network", "Сеть", DOWN, f"не удалось прочитать интерфейсы: {exc}")
 
-    if re.search(rf"inet {re.escape(PBX_IP)}\b", out):
+    # Support both Windows and Linux/macOS output formats
+    if re.search(rf"(inet |IPv4 Address.*: ){re.escape(PBX_IP)}\b", out):
         return _check("network", "Сеть", OK, f"{PBX_IP} поднят")
 
-    # A near miss is worth naming: the interface is in the right subnet but
-    # carries the wrong address, which is the state this machine boots into.
-    others = re.findall(r"inet (192\.168\.100\.\d+)", out)
+    others = re.findall(r"(?:inet |IPv4 Address.*: )(192\.168\.100\.\d+)", out)
     if others:
         return _check("network", "Сеть", DOWN,
                       f"{PBX_IP} отсутствует, вместо него {', '.join(others)}. "
-                      f"Поднять: sudo ifconfig en8 alias {PBX_IP} 255.255.255.255")
+                      f"Поднять: sudo ifconfig en8 alias {PBX_IP} 255.255.255.255 (на Windows настройте адаптер)")
     return _check("network", "Сеть", DOWN,
                   f"{PBX_IP} не поднят ни на одном интерфейсе. "
-                  f"Поднять: sudo ifconfig en8 alias {PBX_IP} 255.255.255.255")
+                  f"Поднять: sudo ifconfig en8 alias {PBX_IP} 255.255.255.255 (на Windows настройте адаптер)")
 
 
 # ── Asterisk ────────────────────────────────────────────────────────────
@@ -79,11 +79,15 @@ def check_network() -> dict:
 def _cli(command: str, timeout: float = 6.0) -> str | None:
     """Run one Asterisk CLI command. None if the PBX is not answering."""
     try:
-        result = subprocess.run([ASTERISK, "-C", str(CONF), "-rx", command],
-                                capture_output=True, text=True, timeout=timeout)
+        is_win = sys.platform == "win32"
+        if is_win:
+            cmd = ["docker", "exec", "backshot-pbx", "asterisk", "-rx", command]
+        else:
+            cmd = [ASTERISK, "-C", str(CONF), "-rx", command]
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
     except (OSError, subprocess.SubprocessError):
         return None
-    if "Unable to connect" in result.stdout or result.returncode != 0:
+    if "Unable to connect" in result.stdout or "No such container" in result.stderr or result.returncode != 0:
         return None
     return result.stdout
 
@@ -142,16 +146,17 @@ def check_ami() -> dict:
 # ── the gateway ─────────────────────────────────────────────────────────
 
 def check_gateway_ping() -> dict:
+    is_win = sys.platform == "win32"
     try:
-        result = subprocess.run(["ping", "-c", "1", "-W", "1000", GATEWAY_IP],
-                                capture_output=True, text=True, timeout=5)
+        cmd = ["ping", "-n", "1", "-w", "1000", GATEWAY_IP] if is_win else ["ping", "-c", "1", "-W", "1000", GATEWAY_IP]
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
     except (OSError, subprocess.SubprocessError) as exc:
         return _check("gateway", "Шлюз", DOWN, f"проверка не выполнена: {exc}")
 
     if result.returncode != 0:
         return _check("gateway", "Шлюз", DOWN, f"{GATEWAY_IP} не отвечает на ping")
 
-    match = re.search(r"time=([\d.]+) ms", result.stdout)
+    match = re.search(r"time[=<]([\d.]+)\s*ms", result.stdout, re.IGNORECASE)
     latency = f", {match.group(1)} мс" if match else ""
     return _check("gateway", "Шлюз", OK, f"{GATEWAY_IP} отвечает{latency}")
 
