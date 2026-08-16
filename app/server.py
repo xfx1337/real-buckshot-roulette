@@ -4014,6 +4014,45 @@ async def voip_audio_stop(request: Request):
         raise _voip_fail(exc)
 
 
+@app.api_route("/api/voip/audio-config", methods=["GET", "POST"], tags=["VoIP"], include_in_schema=False)
+async def voip_audio_config(request: Request):
+    """Get or set the analog noise configuration."""
+    config_file = voip_service.VOIP_ROOT / "etc" / "audio_config.json"
+    if request.method == "POST":
+        body = await request.json()
+        config_file.parent.mkdir(parents=True, exist_ok=True)
+        config = {
+            "enabled": bool(body.get("enabled", False)),
+            "level": float(body.get("level", 0.015)),
+            "dist": float(body.get("dist", 1.0)),
+            "hp": int(body.get("hp", 300)),
+            "lp": int(body.get("lp", 3400)),
+            "crush": float(body.get("crush", 0.0)),
+            "vibrato": float(body.get("vibrato", 0.0)),
+            "tremolo": float(body.get("tremolo", 0.0)),
+            "echo": float(body.get("echo", 0.0))
+        }
+        config_file.write_text(json.dumps(config))
+        return {"ok": True}
+    else:
+        if config_file.exists():
+            try:
+                data = json.loads(config_file.read_text())
+                return {
+                    "enabled": bool(data.get("enabled", False)),
+                    "level": float(data.get("level", 0.015)),
+                    "dist": float(data.get("dist", 1.0)),
+                    "hp": int(data.get("hp", 300)),
+                    "lp": int(data.get("lp", 3400)),
+                    "crush": float(data.get("crush", 0.0)),
+                    "vibrato": float(data.get("vibrato", 0.0)),
+                    "tremolo": float(data.get("tremolo", 0.0)),
+                    "echo": float(data.get("echo", 0.0))
+                }
+            except Exception:
+                pass
+        return {"enabled": False, "level": 0.015, "dist": 1.0, "hp": 300, "lp": 3400, "crush": 0.0, "vibrato": 0.0, "tremolo": 0.0, "echo": 0.0}
+
 @app.get("/api/voip/audio", tags=["VoIP"], summary="Что играет и куда", include_in_schema=False)
 async def voip_audio_state():
     return await asyncio.to_thread(voip_service.audio_state)

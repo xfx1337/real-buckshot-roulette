@@ -5661,6 +5661,50 @@
                                     <button class="btn btn-plate plate-yellow btn-small" onclick="voipResetPorts()">СБРОСИТЬ ПОРТЫ</button>
                                     <button class="btn btn-danger btn-small" onclick="voipReboot()">ПЕРЕЗАГРУЗИТЬ ШЛЮЗ</button>
                                 </div>
+                                <div style="margin-top: 24px; border-top: 1px solid var(--border-light); padding-top: 16px;">
+                                    <h4 style="margin: 0 0 12px 0; font-size: 11px; color: var(--text-faint);">АНАЛОГОВАЯ ЛИНИЯ</h4>
+                                    <label style="display:flex; align-items:center; gap:8px; margin-bottom:12px;">
+                                        <input type="checkbox" id="voip-noise-on" onchange="voipSaveAudioConfig()">
+                                        <span>Включить фильтр старого телефона</span>
+                                    </label>
+                                    
+                                    <div id="voip-noise-controls" style="margin-left: 24px; display: flex; flex-direction: column; gap: 8px;">
+                                        <div style="display:flex; align-items:center; gap:10px;">
+                                            <span style="font-size:11px; color:var(--text-dim); width: 120px;">Громкость помех</span>
+                                            <input type="range" id="voip-noise-level" min="0" max="0.1" step="0.005" value="0.015" onchange="voipSaveAudioConfig()" style="flex:1;">
+                                        </div>
+                                        <div style="display:flex; align-items:center; gap:10px;">
+                                            <span style="font-size:11px; color:var(--text-dim); width: 120px;">Перегруз / Хрип</span>
+                                            <input type="range" id="voip-noise-dist" min="1" max="15" step="0.5" value="1" onchange="voipSaveAudioConfig()" style="flex:1;">
+                                        </div>
+                                        <div style="display:flex; align-items:center; gap:10px;">
+                                            <span style="font-size:11px; color:var(--text-dim); width: 120px;">Срез НЧ (глухость)</span>
+                                            <input type="range" id="voip-noise-hp" min="10" max="1000" step="10" value="300" oninput="document.getElementById('voip-noise-hp-val').textContent=this.value+' Гц'" onchange="voipSaveAudioConfig()" style="flex:1;">
+                                            <span id="voip-noise-hp-val" style="font-family:var(--font-mono); font-size:11px; color:var(--green); width:45px; text-align:right;">300 Гц</span>
+                                        </div>
+                                        <div style="display:flex; align-items:center; gap:10px;">
+                                            <span style="font-size:11px; color:var(--text-dim); width: 120px;">Срез ВЧ (писклявость)</span>
+                                            <input type="range" id="voip-noise-lp" min="1000" max="10000" step="100" value="3400" oninput="document.getElementById('voip-noise-lp-val').textContent=this.value+' Гц'" onchange="voipSaveAudioConfig()" style="flex:1;">
+                                            <span id="voip-noise-lp-val" style="font-family:var(--font-mono); font-size:11px; color:var(--green); width:45px; text-align:right;">3400 Гц</span>
+                                        </div>
+                                        <div style="display:flex; align-items:center; gap:10px;">
+                                            <span style="font-size:11px; color:var(--text-dim); width: 120px;">Цифровой хруст</span>
+                                            <input type="range" id="voip-noise-crush" min="0" max="1" step="0.1" value="0" onchange="voipSaveAudioConfig()" style="flex:1;">
+                                        </div>
+                                        <div style="display:flex; align-items:center; gap:10px;">
+                                            <span style="font-size:11px; color:var(--text-dim); width: 120px;">Плавающий звук</span>
+                                            <input type="range" id="voip-noise-vibrato" min="0" max="1" step="0.1" value="0" onchange="voipSaveAudioConfig()" style="flex:1;">
+                                        </div>
+                                        <div style="display:flex; align-items:center; gap:10px;">
+                                            <span style="font-size:11px; color:var(--text-dim); width: 120px;">Дрожание контакта</span>
+                                            <input type="range" id="voip-noise-tremolo" min="0" max="1" step="0.1" value="0" onchange="voipSaveAudioConfig()" style="flex:1;">
+                                        </div>
+                                        <div style="display:flex; align-items:center; gap:10px;">
+                                            <span style="font-size:11px; color:var(--text-dim); width: 120px;">Эхо линии</span>
+                                            <input type="range" id="voip-noise-echo" min="0" max="1" step="0.1" value="0" onchange="voipSaveAudioConfig()" style="flex:1;">
+                                        </div>
+                                    </div>
+                                </div>
                                 <!-- Прогресс висит здесь, а не в отдельном месте: вызов
                                      длится полминуты, перезагрузка две, и без разбивки
                                      интерфейс может сказать только «работаю», что
@@ -9612,6 +9656,7 @@
             voipRefreshState();
             voipLoadHealth();
             voipLoadSlots();
+            voipLoadAudioConfig();
             if (!voipWs || voipWs.readyState > 1) voipConnect();
             if (!voipHealthTimer) {
                 // Опрос по времени, а не по событиям: упавшая АТС или пропавший адрес
@@ -9878,6 +9923,70 @@
                          + 'а несохранённые во flash настройки откатятся.')) return;
             try { await voipPost('/api/voip/reboot'); } catch (e) { alert(e.message); }
         }
+
+        async function voipLoadAudioConfig() {
+            try {
+                const data = await voipApi('/api/voip/audio-config');
+                const cb = document.getElementById('voip-noise-on');
+                if (cb) cb.checked = data.enabled === true;
+                
+                const slLevel = document.getElementById('voip-noise-level');
+                if (slLevel && data.level !== undefined) slLevel.value = data.level;
+                
+                const slDist = document.getElementById('voip-noise-dist');
+                if (slDist && data.dist !== undefined) slDist.value = data.dist;
+                
+                const slHp = document.getElementById('voip-noise-hp');
+                const valHp = document.getElementById('voip-noise-hp-val');
+                if (slHp && data.hp !== undefined) {
+                    slHp.value = data.hp;
+                    if (valHp) valHp.textContent = data.hp + ' Гц';
+                }
+                
+                const slLp = document.getElementById('voip-noise-lp');
+                const valLp = document.getElementById('voip-noise-lp-val');
+                if (slLp && data.lp !== undefined) {
+                    slLp.value = data.lp;
+                    if (valLp) valLp.textContent = data.lp + ' Гц';
+                }
+
+                const slCrush = document.getElementById('voip-noise-crush');
+                if (slCrush && data.crush !== undefined) slCrush.value = data.crush;
+
+                const slVibrato = document.getElementById('voip-noise-vibrato');
+                if (slVibrato && data.vibrato !== undefined) slVibrato.value = data.vibrato;
+
+                const slTremolo = document.getElementById('voip-noise-tremolo');
+                if (slTremolo && data.tremolo !== undefined) slTremolo.value = data.tremolo;
+
+                const slEcho = document.getElementById('voip-noise-echo');
+                if (slEcho && data.echo !== undefined) slEcho.value = data.echo;
+            } catch (e) {}
+        }
+
+        async function voipSaveAudioConfig() {
+            const cb = document.getElementById('voip-noise-on');
+            if (!cb) return;
+            const payload = {
+                enabled: cb.checked,
+                level: parseFloat(document.getElementById('voip-noise-level')?.value || 0.015),
+                dist: parseFloat(document.getElementById('voip-noise-dist')?.value || 1.0),
+                hp: parseInt(document.getElementById('voip-noise-hp')?.value || 300),
+                lp: parseInt(document.getElementById('voip-noise-lp')?.value || 3400),
+                crush: parseFloat(document.getElementById('voip-noise-crush')?.value || 0.0),
+                vibrato: parseFloat(document.getElementById('voip-noise-vibrato')?.value || 0.0),
+                tremolo: parseFloat(document.getElementById('voip-noise-tremolo')?.value || 0.0),
+                echo: parseFloat(document.getElementById('voip-noise-echo')?.value || 0.0)
+            };
+            try {
+                await fetch('/api/voip/audio-config', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify(payload)
+                });
+            } catch (e) { alert(e.message); }
+        }
+
 
     </script>
 
