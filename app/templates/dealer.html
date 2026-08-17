@@ -5784,6 +5784,18 @@
                                             <button class="btn btn-small btn-tiny" onclick="testServerAudio('game')"
                                                 title="Проверить вывод">▶</button>
                                         </div>
+                                        <!-- Канал 'video' серверного движка. Раньше его здесь не было,
+                                             хотя движок его поднимает: он открывался на системное
+                                             устройство по умолчанию и настроить его было негде.
+                                             Через него идёт голос, отправленный «в колонку». -->
+                                        <div class="scfg-row aud-out-row">
+                                            <label for="aud-srv-video">Голос и ролики</label>
+                                            <select id="aud-srv-video" onchange="onServerDeviceChange('video', this)">
+                                                <option value="">Системное по умолчанию</option>
+                                            </select>
+                                            <button class="btn btn-small btn-tiny" onclick="testServerAudio('video')"
+                                                title="Проверить вывод">▶</button>
+                                        </div>
                                         <p class="scfg-note" id="aud-server-note">Загрузка…</p>
                                     </section>
 
@@ -5867,6 +5879,58 @@
                              разговор с ней: загрузить запись, послушать, утвердить. -->
                         <div class="cfg-pane" data-cfgpane="voice" hidden>
                             <p class="scfg-note" id="vc-farm-note" style="margin-bottom:12px;">Загрузка…</p>
+
+                            <!-- ── ПОДКЛЮЧЕНИЕ К ФЕРМЕ ──
+                                 Машина с видеокартой стоит на домашнем адресе, который
+                                 меняется. Раньше это правилось руками в ~/.ssh/config на
+                                 столе; здесь то же самое, но из панели: адрес, пароль
+                                 один раз — и ключ уезжает на ферму сам.
+
+                                 Пароль никуда не сохраняется, а ручка отвечает только
+                                 на запросы с самого игрового компьютера. -->
+                            <section class="cfg-block" style="margin-bottom:14px;">
+                                <div class="cfg-block-head"><span>МАШИНА С ВИДЕОКАРТОЙ</span>
+                                    <button class="btn btn-small btn-tiny" onclick="refreshFarmConfig()"
+                                        title="Обновить">⟲</button>
+                                </div>
+                                <p class="scfg-note" id="fc-current" style="margin-top:0;">Загрузка…</p>
+                                <div class="scfg-row" style="gap:8px;flex-wrap:wrap;">
+                                    <input id="fc-host" type="text" placeholder="адрес, например 192.0.2.10"
+                                        style="flex:2 1 200px;min-width:160px;">
+                                    <input id="fc-user" type="text" placeholder="пользователь" value="boomchick93"
+                                        style="flex:1 1 110px;min-width:100px;">
+                                    <input id="fc-port" type="number" placeholder="22" value="22"
+                                        style="flex:0 1 70px;min-width:60px;">
+                                </div>
+                                <div class="scfg-row" style="gap:8px;margin-top:8px;flex-wrap:wrap;">
+                                    <input id="fc-pass" type="password" placeholder="пароль от фермы (не сохраняется)"
+                                        style="flex:2 1 220px;min-width:180px;"
+                                        onkeydown="if(event.key==='Enter')connectFarm()">
+                                    <button class="btn btn-small" id="fc-connect" onclick="connectFarm()">
+                                        Подключиться</button>
+                                </div>
+                                <p class="scfg-note" id="fc-msg"></p>
+                            </section>
+
+                            <!-- ── ВЫГРУЗКА ГОТОВЫХ ──
+                                 Ночная пачка оставляет на ферме по архиву на голос.
+                                 Здесь они перечислены, и одной кнопкой переезжают в
+                                 tts/cache/, откуда игра их и читает. -->
+                            <section class="cfg-block" style="margin-bottom:14px;">
+                                <div class="cfg-block-head"><span>ГОТОВЫ НА ФЕРМЕ</span>
+                                    <button class="btn btn-small btn-tiny" onclick="refreshCollected()"
+                                        title="Обновить">⟲</button>
+                                </div>
+                                <div id="fc-collected" class="cfg-list">
+                                    <p class="scfg-note">Загрузка…</p>
+                                </div>
+                                <div class="scfg-row" style="margin-top:8px;">
+                                    <button class="btn btn-small" id="fc-fetch-all" onclick="fetchAllVoices()">
+                                        Забрать все за стол</button>
+                                </div>
+                                <p class="scfg-note" id="fc-fetch-msg"></p>
+                            </section>
+
                             <div class="cfg-cols">
                                 <div class="cfg-col">
                                     <!-- Готовые голоса: те, которыми игра умеет говорить сейчас. -->
@@ -5951,6 +6015,8 @@
                                         <p class="scfg-note" style="margin-top:8px;">
                                             Ждать примерно минуту: фраза считается на ферме и приезжает
                                             сюда файлом. Словарь это не трогает.
+                                            Готовая фраза появится ниже — её можно слушать здесь или
+                                            отправить в трубку, на телевизор или в колонку.
                                         </p>
                                         <p class="scfg-note" id="vc-msg">&nbsp;</p>
                                     </section>
@@ -6187,6 +6253,8 @@
                 loadAudioTab();
             } else if (name === 'voice') {
                 refreshVoicePanel();
+                refreshFarmConfig();
+                refreshCollected();
             } else if (name === 'test') {
                 loadTestMode();
             }
@@ -7541,6 +7609,23 @@
         // Python играет звук сам, минуя браузер: не нужен ни secure context, ни
         // разрешение на медиа, ни жест для автоплея, а устройство выбирается по имени.
         // Браузерный тракт остаётся рабочим — переключатель возвращает его в любой момент.
+        // Один выпадающий список устройств серверного звука. Вынесено отдельно,
+        // потому что каналов теперь несколько, а правило про исчезнувшее
+        // устройство одно на всех: если выбранного имени в списке нет (наушники
+        // отключили, колонку выдернули), его надо дорисовать пометкой, а не
+        // молча дать select съехать на «по умолчанию» — тогда выбор потерян, и
+        // узнается об этом посреди игры.
+        function fillServerDevices(sel, devices, want) {
+            if (!sel) return;
+            sel.innerHTML = '<option value="">Системное по умолчанию</option>'
+                + devices.map(x => `<option value="${x.name}">${x.name}</option>`).join('');
+            if (want && !devices.some(x => x.name === want)) {
+                sel.innerHTML += `<option value="${want}">⚠ ${want} (недоступно)</option>`;
+            }
+            sel.value = want;
+            sel.disabled = false;
+        }
+
         async function refreshServerAudio() {
             const note = document.getElementById('aud-server-note');
             const box = document.getElementById('aud-server-box');
@@ -7561,7 +7646,11 @@
             // Библиотек нет — предлагать переключение бессмысленно.
             if (eng.error) {
                 box.classList.add('unsupported');
-                chk.disabled = true; sel.disabled = true;
+                chk.disabled = true;
+                for (const id of ['aud-srv-game', 'aud-srv-video']) {
+                    const el = document.getElementById(id);
+                    if (el) el.disabled = true;
+                }
                 note.textContent = 'Серверный звук недоступен: ' + eng.error
                     + '. Установите зависимости: pip install sounddevice soundfile';
                 return;
@@ -7571,16 +7660,9 @@
             chk.checked = d.mode === 'server';
 
             const devices = d.devices || [];
-            const want = (d.outputs && d.outputs.game) || '';
-            sel.innerHTML = '<option value="">Системное по умолчанию</option>'
-                + devices.map(x => `<option value="${x.name}">${x.name}</option>`).join('');
-            // Устройство могло исчезнуть (наушники отключили) — показываем это явно,
-            // иначе select молча съедет на «по умолчанию» и выбор будет потерян.
-            if (want && !devices.some(x => x.name === want)) {
-                sel.innerHTML += `<option value="${want}">⚠ ${want} (недоступно)</option>`;
-            }
-            sel.value = want;
-            sel.disabled = false;
+            fillServerDevices(sel, devices, (d.outputs && d.outputs.game) || '');
+            fillServerDevices(document.getElementById('aud-srv-video'), devices,
+                (d.outputs && d.outputs.video) || '');
 
             const gameCh = (eng.channels && eng.channels.game) || {};
             let msg;
@@ -7772,6 +7854,183 @@
         // того, что установлено на ферме, а не от того, что знает браузер.
         let voiceEngines = [];
 
+        // ── подключение к машине с видеокартой ──────────────────────────
+        //
+        // Ферма живёт на домашнем адресе, который меняется, и до сих пор
+        // переезд лечился правкой ~/.ssh/config на столе. Здесь то же самое
+        // делает панель: записывает адрес и увозит на ферму ключ.
+        //
+        // Пароль отсюда уходит один раз и только на сервер, который передаёт
+        // его ssh-copy-id и забывает. Поле чистится сразу после ответа, чтобы
+        // он не остался висеть в открытой вкладке до конца вечера.
+
+        async function refreshFarmConfig() {
+            const note = document.getElementById('fc-current');
+            if (!note) return;
+            try {
+                const r = await fetch('/api/voices/farm/config');
+                if (r.status === 403) {
+                    note.textContent = '✗ Настройка фермы доступна только с игрового '
+                        + 'компьютера — эта вкладка открыта с другой машины';
+                    return;
+                }
+                const d = await r.json();
+                if (!d.configured) {
+                    note.textContent = 'Ферма ещё не настроена — впишите адрес ниже';
+                    return;
+                }
+                const port = d.port && d.port !== 22 ? ':' + d.port : '';
+                note.textContent = 'Сейчас: ' + (d.user || '?') + '@' + (d.host || '?')
+                    + port + (d.key_exists ? ' (ключ есть)' : ' — ключа нет');
+                const host = document.getElementById('fc-host');
+                const user = document.getElementById('fc-user');
+                if (host && !host.value) host.value = d.host || '';
+                if (user && d.user) user.value = d.user;
+            } catch (e) {
+                note.textContent = '✗ ' + e.message;
+            }
+        }
+
+        async function connectFarm() {
+            const msg = document.getElementById('fc-msg');
+            const button = document.getElementById('fc-connect');
+            const pass = document.getElementById('fc-pass');
+            const host = document.getElementById('fc-host').value.trim();
+            if (!host) { msg.textContent = 'Впишите адрес фермы'; return; }
+            if (!pass.value) { msg.textContent = 'Нужен пароль — он никуда не сохраняется'; return; }
+
+            button.disabled = true;
+            msg.textContent = 'Ставлю ключ на ' + host + '…';
+            try {
+                const r = await fetch('/api/voices/farm/connect', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                        host: host,
+                        user: document.getElementById('fc-user').value.trim(),
+                        port: parseInt(document.getElementById('fc-port').value || '22', 10),
+                        password: pass.value,
+                    }),
+                });
+                const d = await r.json();
+                if (!r.ok) throw new Error(d.detail || 'не вышло');
+                // Отпечаток показываем всегда. Ключ, сменившийся вместе с
+                // адресом, — обычное дело для переехавшей машины; ключ,
+                // сменившийся сам по себе, — признак того, что отвечает
+                // кто-то другой, и отличить одно от другого может только
+                // человек за столом.
+                msg.textContent = '✓ Подключено: ' + d.hostname
+                    + ' — ключ ' + d.fingerprint;
+                refreshFarmConfig();
+                refreshCollected();
+                refreshVoicePanel();
+            } catch (e) {
+                msg.textContent = '✗ ' + e.message;
+            } finally {
+                pass.value = '';
+                button.disabled = false;
+            }
+        }
+
+        // ── выгрузка готовых голосов ────────────────────────────────────
+
+        function humanSize(bytes) {
+            if (!bytes) return '';
+            const mb = bytes / 1048576;
+            return mb >= 1024 ? (mb / 1024).toFixed(1) + ' ГБ' : mb.toFixed(0) + ' МБ';
+        }
+
+        async function refreshCollected() {
+            const box = document.getElementById('fc-collected');
+            if (!box) return;
+            try {
+                const r = await fetch('/api/voices/farm/collected');
+                const d = await r.json();
+                const list = d.voices || [];
+                if (!list.length) {
+                    box.innerHTML = '<p class="scfg-note">'
+                        + (d.error ? '✗ ' + d.error : 'Готовых архивов нет')
+                        + '</p>';
+                    return;
+                }
+                const total = list.reduce((sum, v) => sum + (v.size || 0), 0);
+                box.innerHTML = list.map(v =>
+                    '<div class="cfg-row"><span>' + v.voice + '</span>'
+                    + '<span class="scfg-note">' + humanSize(v.size)
+                    + (v.installed ? ' · уже за столом' : '') + '</span></div>'
+                ).join('') + '<p class="scfg-note">Всего ' + list.length
+                    + ' — ' + humanSize(total) + '</p>';
+            } catch (e) {
+                box.innerHTML = '<p class="scfg-note">✗ ' + e.message + '</p>';
+            }
+        }
+
+        // Идёт ли выгрузка — по данным сервера, а не по памяти этой вкладки.
+        //
+        // Раньше плашка «выгружаю…» была текстом, поставленным перед запросом,
+        // и жила ровно до F5: обновление страницы стирало её, а выгрузка при
+        // этом продолжалась в потоке сервера. Панель показывала покой посреди
+        // часовой работы. Теперь состояние спрашивается, и любая вкладка —
+        // хоть открытая только что — видит одно и то же.
+        async function refreshFetchAllState() {
+            const msg = document.getElementById('fc-fetch-msg');
+            const button = document.getElementById('fc-fetch-all');
+            if (!msg || !button) return false;
+            let d;
+            try {
+                const r = await fetch('/api/voices/farm/fetch-all?t=' + Date.now());
+                d = await r.json();
+            } catch (e) {
+                return false;
+            }
+            if (!d.running) {
+                button.disabled = false;
+                return false;
+            }
+            // Кнопку держим нажатой: сервер второй запуск всё равно отклонит,
+            // но объяснить это заранее лучше, чем ошибкой после нажатия.
+            button.disabled = true;
+            const where = d.voice
+                ? ' Сейчас: ' + d.voice + (d.total ? ' (' + d.index + ' из ' + d.total + ')' : '')
+                : '';
+            msg.textContent = 'Выгружаю… это долго: голос — сотня мегабайт, '
+                + 'связь рвётся и докачивается кусками.' + where
+                + ' Вкладку можно закрыть — выгрузка идёт на сервере.';
+            return true;
+        }
+
+        async function fetchAllVoices() {
+            const msg = document.getElementById('fc-fetch-msg');
+            const button = document.getElementById('fc-fetch-all');
+            button.disabled = true;
+            // Ни таймаута, ни опроса: сотня мегабайт по рвущейся связи, и так
+            // двадцать пять раз. Ответ приходит один раз в конце, а до тех пор
+            // о ходе дела рассказывает refreshFetchAllState по опросу.
+            msg.textContent = 'Выгружаю… это долго: голос — сотня мегабайт, '
+                + 'связь рвётся и докачивается кусками. Вкладку можно закрыть — '
+                + 'выгрузка идёт на сервере.';
+            try {
+                const r = await fetch('/api/voices/farm/fetch-all', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({}),
+                });
+                const d = await r.json();
+                if (!r.ok) throw new Error(d.detail || 'не вышло');
+                const ok = (d.installed || []).length;
+                const bad = d.failed || [];
+                msg.textContent = '✓ Поставлено ' + ok + ' из ' + d.total
+                    + (bad.length ? ' — не вышло: '
+                        + bad.map(f => f.voice + ' (' + f.error + ')').join(', ') : '');
+                refreshCollected();
+                refreshVoicePanel();
+            } catch (e) {
+                msg.textContent = '✗ ' + e.message;
+            } finally {
+                button.disabled = false;
+            }
+        }
+
         async function refreshVoicePanel() {
             // Опрашиваем ферму только пока вкладка голосов на виду: цикл
             // перезапускает сам себя по таймеру, и без этой проверки он
@@ -7797,7 +8056,14 @@
                 // Пока что-то считается — перечитывать само. Пять секунд:
                 // каждый опрос теперь поднимает своё ssh-соединение, и чаще
                 // этого спрашивать значит держать ферму занятой опросом.
-                const busy = (d.jobs || []).some(j => j.busy);
+                //
+                // Выгрузка считается работой наравне с генерацией, хотя ферма
+                // о ней не знает: качает эта машина, и в d.jobs её не видно.
+                // Без этого цикл засыпал ровно тогда, когда часовая выгрузка
+                // была единственным, что происходит, и плашка переставала
+                // обновляться на полпути.
+                const fetching = await refreshFetchAllState();
+                const busy = fetching || (d.jobs || []).some(j => j.busy);
                 if (voicePollTimer) clearTimeout(voicePollTimer);
                 voicePollTimer = busy ? setTimeout(refreshVoicePanel, 5000) : null;
             } catch (e) {
@@ -7820,6 +8086,12 @@
                             + ' Проверьте, что она включена — пробую снова.</p>';
                     }
                 }
+
+                // Выгрузка спрашивается и здесь: качает эта машина, к своему
+                // серверу связь есть, и оборванная ферма — не повод скрывать
+                // плашку. Ровно в этот момент она обычно и нужна: связь рвётся
+                // как раз посреди долгого скачивания.
+                refreshFetchAllState();
 
                 // Один обрыв не должен останавливать всё: без этого панель
                 // замирает на том, что успела показать, и голос выглядит
@@ -8041,18 +8313,72 @@
             const box = document.getElementById('vc-spoken');
             if (!box) return;
             const row = document.createElement('div');
-            row.style.cssText = 'display:flex; align-items:center; gap:8px; margin-top:4px;';
+            row.style.cssText = 'display:flex; align-items:center; gap:8px; margin-top:6px; flex-wrap:wrap;';
             const player = document.createElement('audio');
             player.controls = true;
-            player.style.cssText = 'height:30px; flex:0 0 220px;';
+            player.style.cssText = 'height:30px; flex:0 0 200px;';
             player.src = '/api/voices/spoken/' + encodeURIComponent(file);
             const caption = document.createElement('span');
             caption.className = 'scfg-note';
-            caption.style.cssText = 'flex:1; font-size:11px;';
+            caption.style.cssText = 'flex:1 1 120px; min-width:0; font-size:11px;';
             // textContent, а не innerHTML: текст фразы пришёл из поля ввода.
             caption.textContent = name + ': ' + text;
-            row.append(player, caption);
+            row.append(player, caption, spokenOutputs(file));
             box.prepend(row);
+        }
+
+        // Куда проиграть уже готовую фразу. Три кнопки, а не выпадашка: это три
+        // разных места в комнате, и дилер обычно жмёт их подряд — послушать
+        // одну и ту же реплику в трубке, потом с телевизора, — а не выбирает
+        // одно из трёх однажды.
+        //
+        // Кнопки живут под каждой фразой, а не под полем ввода, потому что
+        // фраза переживает своё создание: файл никуда не девается, и вернуться
+        // к вчерашней формулировке значит нажать её кнопку, а не набрать текст
+        // заново и ждать ферму.
+        const SPOKEN_OUTPUTS = [
+            { where: 'phone', label: 'В ТРУБКУ', hint: 'Снимите трубку заранее — гудков не будет' },
+            { where: 'tv', label: 'НА ТВ', hint: 'Через динамики телевизора' },
+            { where: 'speaker', label: 'В КОЛОНКУ', hint: 'Канал «Голос и ролики» серверного звука' },
+        ];
+
+        function spokenOutputs(file) {
+            const group = document.createElement('span');
+            group.style.cssText = 'display:flex; gap:4px; flex:0 0 auto;';
+            for (const out of SPOKEN_OUTPUTS) {
+                const button = document.createElement('button');
+                button.className = 'btn btn-small btn-tiny';
+                button.textContent = out.label;
+                button.title = out.hint;
+                button.onclick = () => playSpokenTo(file, out.where, button);
+                group.append(button);
+            }
+            return group;
+        }
+
+        // Нажатие блокирует свою кнопку на время запроса. Трубка отвечает не
+        // мгновенно — поднять линию это доли секунды, но заметные, — и второе
+        // нажатие поверх первого оборвало бы первую фразу на середине.
+        async function playSpokenTo(file, where, button) {
+            const was = button.textContent;
+            button.disabled = true;
+            try {
+                const r = await fetch('/api/voices/spoken/play', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ file, where }),
+                });
+                if (!r.ok) {
+                    const err = await r.json().catch(() => ({}));
+                    throw new Error(err.detail || ('HTTP ' + r.status));
+                }
+                button.textContent = '▶';
+                setTimeout(() => { button.textContent = was; }, 1200);
+            } catch (e) {
+                voiceMsg('✗ ' + e.message, false);
+            } finally {
+                button.disabled = false;
+            }
         }
 
         function generateVoice(name) {
@@ -8208,7 +8534,9 @@
                     const err = await r.json().catch(() => ({}));
                     throw new Error(err.detail || ('HTTP ' + r.status));
                 }
-                audioMsg((channel === 'phone' ? '✓ Трубка → ' : '✓ Серверный звук → ')
+                const CHANNEL_LABELS = { phone: 'Трубка', video: 'Голос и ролики',
+                                         game: 'Игра и эффекты' };
+                audioMsg('✓ ' + (CHANNEL_LABELS[channel] || channel) + ' → '
                     + (sel.value || 'системное по умолчанию'), true);
             } catch (e) {
                 audioMsg('✗ ' + e.message, false);

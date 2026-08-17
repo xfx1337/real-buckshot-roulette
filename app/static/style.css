@@ -609,10 +609,19 @@ body {
    ячейки, не экрана). Поэтому имя и заряды ужимаются вместе с ячейкой: на
    800×600 восемь секций читаются так же, как две. */
 .mp-layout {
+    /* Оверскан кинескопа съедает края картинки: физическая маска трубки уже
+       развёртки, и сколько именно уходит под ободок — зависит от телевизора.
+       Поэтому вся сетка живёт внутри safe-area в 6% от каждой стороны: то, что
+       на VGA-мониторе выглядит полем, на трубке ровно и есть край стекла.
+       Величина настраивается через --tv-overscan (дилер может подогнать под
+       конкретный аппарат). */
+    --tv-overscan: 6%;
     width: 100%;
     height: 100vh;
     background: #000;
     position: relative;
+    padding: var(--tv-overscan);
+    box-sizing: border-box;
 }
 
 .mp-grid {
@@ -621,8 +630,7 @@ body {
     grid-template-rows: repeat(var(--mp-rows, 1), minmax(0, 1fr));
     width: 100%;
     height: 100%;
-    gap: 4px;
-    padding: 4px;
+    gap: 8px;
     box-sizing: border-box;
 }
 
@@ -636,26 +644,41 @@ body {
     min-width: 0;
     min-height: 0;
     overflow: hidden;
-    background: #0b0b0b;
-    border: 1px solid rgba(225, 218, 198, 0.35);
+    /* Люминофор: ячейка не чёрный прямоугольник, а тлеющее зелёное поле —
+       как незасвеченный участок трубки между строками развёртки. */
+    background:
+        radial-gradient(120% 100% at 50% 45%, rgba(63, 239, 106, 0.07) 0%, rgba(63, 239, 106, 0.02) 55%, rgba(0, 0, 0, 0) 100%),
+        #050b06;
+    border: 1px solid var(--green-dim);
+    box-shadow: inset 0 0 3cqmin rgba(63, 239, 106, 0.06);
     box-sizing: border-box;
 }
 
-/* Имя игрока — плашка в углу ячейки, как подпись камеры «CAM1 [REC]». */
+/* Активная секция — тот, чей сейчас ход: рамка разгорается, чтобы через
+   комнату было видно, кого ждут, не вчитываясь в подпись. */
+.mp-slot.active-turn {
+    border-color: var(--green);
+    box-shadow:
+        inset 0 0 4cqmin rgba(63, 239, 106, 0.14),
+        0 0 1.5cqmin rgba(63, 239, 106, 0.25);
+}
+
+/* Имя игрока — подпись под зарядами, как титр телеметрии на мониторе
+   наблюдения. Раньше плашка висела сверху и отъедала место у зарядов; теперь
+   она в нижней полосе, а заряды занимают всё, что осталось. */
 .mp-slot-name {
     position: absolute;
-    top: 4cqmin;
+    bottom: 4cqmin;
     left: 4cqmin;
     right: 4cqmin;
-    background: rgba(0, 0, 0, 0.7);
-    border: 1px solid rgba(255, 255, 255, 0.2);
-    padding: 1.5cqmin 2.5cqmin;
     font-family: var(--font-mono);
-    font-size: 7cqmin;
+    font-size: 8cqmin;
     line-height: 1.1;
-    letter-spacing: 1px;
-    color: var(--text-bright);
-    text-align: left;
+    letter-spacing: 2px;
+    color: var(--green);
+    text-shadow: 0 0 1.5cqmin var(--green-glow);
+    text-align: center;
+    text-transform: uppercase;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -667,17 +690,17 @@ body {
     animation: terminalBlink 1.2s step-end infinite;
 }
 
-/* Статус хода — вторая строка под именем, тем же шрифтом плашки. */
+/* Статус хода — строка над именем, тем же шрифтом. */
 .mp-slot-turn {
     position: absolute;
-    top: 14cqmin;
+    bottom: 14cqmin;
     left: 4cqmin;
     right: 4cqmin;
     font-family: var(--font-mono);
-    font-size: 5.5cqmin;
+    font-size: 6cqmin;
     line-height: 1.1;
-    letter-spacing: 1px;
-    text-align: left;
+    letter-spacing: 2px;
+    text-align: center;
     color: transparent;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -686,19 +709,29 @@ body {
 }
 
 /* Заряды по центру ячейки. Держат пропорцию 1:2 и ужимаются по ширине, когда
-   зарядов много, а ячейка узкая — ряд никогда не переносится. */
+   зарядов много, а ячейка узкая — ряд никогда не переносится.
+
+   Ряд занимает всю ячейку выше нижней полосы с подписью. Так заряд не
+   подлезает под текст и не упирается в край ячейки — именно это на трубке
+   читалось как «не помещается». */
 .mp-slot-bolts {
     display: flex;
     align-items: center;
     justify-content: center;
     flex-wrap: nowrap;
-    gap: 2cqmin;
-    width: 100%;
-    height: 100%;
-    padding: 24cqmin 5cqmin 8cqmin;
+    gap: 2.5cqmin;
+    position: absolute;
+    top: 5cqmin;
+    left: 5cqmin;
+    right: 5cqmin;
+    bottom: 19cqmin;
     box-sizing: border-box;
 }
 
+/* Заряд держит 1:2 и упирается в ту сторону ячейки, которая кончится раньше:
+   по высоте — когда зарядов мало, по ширине — когда их семь в узкой секции.
+   Во втором случае ряд ужимается по ширине, и над ним остаётся воздух: это
+   плата за пропорцию 1:2 в ячейке 4:3, а не ошибка раскладки. */
 .mp-slot-bolts .lightning-bolt {
     height: 100%;
     width: auto;
@@ -709,17 +742,28 @@ body {
     min-width: 0;
 }
 
-/* Пустой слот: место под игрока зарезервировано, но никто не занял. */
-.mp-slot.empty { background: #070707; }
+/* Пустой слот: место под игрока зарезервировано, но никто не занял. Трубка
+   тут не светится — поле почти погашено. */
+.mp-slot.empty {
+    background: #040604;
+    border-color: rgba(63, 239, 106, 0.12);
+    box-shadow: none;
+}
 .mp-slot.empty .mp-slot-name {
-    color: var(--text-faint, #6b6455);
-    background: rgba(0, 0, 0, 0.5);
+    color: var(--green-dim);
+    text-shadow: none;
+    letter-spacing: 3px;
 }
 
 /* Выбывший игрок: ячейка гаснет, но с экрана не пропадает — сетка не прыгает. */
-.mp-slot.dead { background: #0a0505; }
+.mp-slot.dead {
+    background: #0a0404;
+    border-color: var(--red);
+    box-shadow: inset 0 0 3cqmin rgba(122, 31, 31, 0.25);
+}
 .mp-slot.dead .mp-slot-name {
     color: var(--red-bright, #c45050);
+    text-shadow: 0 0 1.5cqmin rgba(122, 31, 31, 0.6);
     text-decoration: line-through;
 }
 

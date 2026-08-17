@@ -762,6 +762,23 @@
         } catch (e) { console.warn('audio test failed', e); }
     }
 
+    // Реплика информатора, которую дилер захотел услышать из телевизора, а не
+    // из трубки. Играется здесь, а не на сервере, по той же причине, что и
+    // ролики: динамики телевизора выбраны на этом экране через setSinkId, и с
+    // серверной стороны до них не дотянуться.
+    //
+    // Канал 'video' — тот же, что у роликов: это голос, а не эффект стола.
+    function playSpokenPhrase(url) {
+        if (!url) return;
+        try {
+            const a = new Audio(url);
+            a.volume = 1.0;
+            const start = () => a.play().catch(err => console.warn('spoken play error', err));
+            if (window.AudioOutput) window.AudioOutput.register(a, 'video').then(start, start);
+            else start();
+        } catch (e) { console.warn('spoken playback failed', e); }
+    }
+
     function handleVideoCommand(cmd) {
         switch (cmd.action) {
             case 'play':
@@ -822,6 +839,10 @@
                 // Оператор проверяет, на какое устройство уходит канал с этого
                 // экрана: 'video' — динамики, 'game' — наушники.
                 playChannelTest(cmd.channel || 'video');
+                break;
+            case 'speak':
+                // Дилер прослушивает фразу через динамики телевизора.
+                playSpokenPhrase(cmd.url);
                 break;
             case 'cctv':
                 // Manual toggle from the dealer button — force CCTV on/off now.
@@ -2249,7 +2270,7 @@
 
             if (!p) {
                 slot.classList.add('empty');
-                slot.classList.remove('dead');
+                slot.classList.remove('dead', 'active-turn');
                 turnEl.textContent = '';
                 turnEl.style.color = 'transparent';
                 nameEl.textContent = 'СВОБОДНО';
@@ -2261,6 +2282,10 @@
 
             slot.classList.remove('empty');
             slot.classList.toggle('dead', !p.alive);
+            // Разгорающаяся рамка у того, чей ход: цвет секции целиком, а не
+            // только подписи — через комнату рамку видно раньше текста.
+            slot.classList.toggle(
+                'active-turn', p.alive && p.number === data.current_player_number);
 
             const isMe = p.number === data.my_number;
             nameEl.textContent = p.name;

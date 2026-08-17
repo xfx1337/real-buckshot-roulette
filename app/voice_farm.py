@@ -314,7 +314,102 @@ def _remote_size(remote: str) -> int:
         raise FarmError(f"на ферме нет файла {remote}")
 
 
+# Where a batch run leaves its finished archives. tts/remote.archive() writes
+# one into the voice's own job directory, and scripts/farm_batch.py copies it
+# here so that a whole overnight run is one directory rather than a hunt through
+# twenty-five job folders.
+REMOTE_COLLECTED = f"{REMOTE_WORK}/.collected"
+
+
 # ── what the panel asks for ─────────────────────────────────────────────
+
+def collected() -> dict:
+    """Every finished archive on the farm, with its size.
+
+    Read from the batch's collected directory and from the job directories
+    both, because a voice generated one at a time through the panel never
+    passes through the batch. Listing them together is what lets the panel show
+    one list of "ready to bring home" whatever produced it.
+    """
+    if not configured():
+        return {"voices": [], "configured": False}
+
+    # One `ls -l` over both directories rather than a round trip each: this is
+    # polled by a panel and the link is slow enough that the difference shows.
+    listing = _run(
+        ["ssh", *SSH_OPTIONS, HOST,
+         f"ls -l {REMOTE_COLLECTED}/*.zip {REMOTE_WORK}/*/*.zip 2>/dev/null || true"],
+        QUICK_TIMEOUT, "список готовых голосов")
+
+    found: dict[str, dict] = {}
+    for line in _decode(listing.stdout).splitlines():
+        parts = line.split()
+        if len(parts) < 9:
+            continue
+        try:
+            size = int(parts[4])
+        except ValueError:
+            continue
+        path = parts[-1]
+        name = Path(path).stem
+        # The collected copy wins over the job-directory original: they are the
+        # same bytes, and listing a voice twice would have the panel offer to
+        # download it twice.
+        if name not in found or REMOTE_COLLECTED in path:
+            found[name] = {"voice": name, "size": size, "path": path}
+
+    installed = {entry["name"] if isinstance(entry, dict) else entry
+                 for entry in engine.voices()}
+    for name, entry in found.items():
+        entry["installed"] = name in installed
+
+    return {"voices": sorted(found.values(), key=lambda v: v["voice"]),
+            "configured": True}
+
+
+def fetch_all(names: list[str] | None = None, *, on_progress=None) -> dict:
+    """Bring every finished voice home, one after another.
+
+    Sequential rather than parallel, and not for simplicity: the link to this
+    farm drops large downloads partway through, which _pull works around by
+    resuming in small pieces. Two of those at once share the same bad link and
+    each makes the other's chunks fail more often.
+
+    One voice that fails does not stop the rest. A download that dies is a
+    download to repeat, and the others are unrelated work — so failures are
+    collected and reported at the end rather than raised.
+    """
+    if not configured():
+        raise FarmError("ферма не настроена")
+
+    available = {entry["voice"]: entry for entry in collected()["voices"]}
+    wanted = list(names) if names else sorted(available)
+
+    done, failed = [], []
+    for index, name in enumerate(wanted, 1):
+        if name not in available:
+            failed.append({"voice": name, "error": "нет архива на ферме"})
+            continue
+        if on_progress:
+            on_progress({"stage": "downloading", "voice": name,
+                         "index": index, "total": len(wanted)})
+        try:
+            result = fetch(name, remote_zip=available[name]["path"])
+            done.append(result)
+        except FarmError as exc:
+            failed.append({"voice": name, "error": str(exc)})
+        except OSError as exc:
+            # Не только ферма умеет ломаться. Диск заполнился на сотом
+            # мегабайте, каталог выгрузки убрали из-под работающей закачки,
+            # права на cache/ не те — всё это OSError, и всё это раньше летело
+            # мимо, роняя запрос целиком: панель получала «Internal Server
+            # Error» вместо имени голоса и причины, а голоса, стоявшие в
+            # очереди после сломавшегося, не выгружались вовсе.
+            failed.append({"voice": name, "error": f"локальная ошибка: {exc}"})
+
+    return {"ok": not failed, "installed": done, "failed": failed,
+            "total": len(wanted)}
+
 
 def health() -> dict:
     """Whether the far machine is there, and what it can do."""
@@ -417,7 +512,15 @@ def speak(name: str, text: str) -> dict:
     # Named from the text's hash so asking for the same line twice reuses one
     # filename instead of accumulating copies, and so the name is safe by
     # construction — the text is Russian and arbitrary.
-    out_name = f"{engine.key(text)}.wav"
+    #
+    # The extension is engine.FORMAT and not ".wav", and the difference was
+    # audible. engine.convert() always encodes AAC; ffmpeg picks the container
+    # from the name it is given, so a target called ".wav" produced AAC inside a
+    # RIFF container. ffprobe calls that file valid and no browser will play it:
+    # the panel showed 0:00 and stayed silent. The corpus never hit this because
+    # it has always been written as FORMAT — only the single-phrase path named
+    # its own file, and named it wrong.
+    out_name = f"{engine.key(text)}.{engine.FORMAT}"
     answer = _remote("speak", {"name": name, "text": text,
                                     "out": out_name},
                           timeout=SPEAK_TIMEOUT)
@@ -451,13 +554,18 @@ def forget(name: str) -> dict:
 
 # ── bringing a finished voice home ──────────────────────────────────────
 
-def fetch(name: str) -> dict:
+def fetch(name: str, *, remote_zip: str | None = None) -> dict:
     """Download a finished voice and install it into tts/cache/.
 
     Unpacked through a temporary directory and moved into place at the end: a
     download that dies half way must not leave a voice that looks installed but
     is missing the phrases after the break, because nothing at the table would
     notice until a player was already holding the receiver.
+
+    `remote_zip` says where the archive is, for callers that already know. A
+    voice generated one at a time leaves its archive in the job directory, which
+    is the default here; a voice from an overnight batch is also copied to the
+    collected directory, and collected() reports the path it actually found.
     """
     name = _valid_name(name)
 
@@ -466,7 +574,7 @@ def fetch(name: str) -> dict:
     staging.mkdir(parents=True, exist_ok=True)
     local_zip = staging / f"{name}.zip"
     try:
-        _pull(f"{REMOTE_WORK}/{name}/{name}.zip", local_zip)
+        _pull(remote_zip or f"{REMOTE_WORK}/{name}/{name}.zip", local_zip)
 
         with zipfile.ZipFile(local_zip) as zf:
             for entry in zf.namelist():

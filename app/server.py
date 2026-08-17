@@ -40,7 +40,7 @@ from app.game_engine import (
 from app import sound_config
 from app import video_config
 from app import audio_engine
-from app import memes, test_mode, tts_bridge, voice_farm, voip_service
+from app import farm_connect, memes, test_mode, tts_bridge, voice_farm, voip_service
 
 import tts
 from app.sound_director import director as sound_director, loop_for_state
@@ -2730,17 +2730,26 @@ async def get_targeting_logs(lines: int = 100):
 
 # ── TV Video API ──
 
-async def broadcast_tv(msg: dict):
-    """Send a video command to all connected TV screens."""
+async def broadcast_tv(msg: dict) -> int:
+    """Send a video command to all connected TV screens.
+
+    Returns how many screens actually took it. Almost every caller ignores the
+    number — a command to a room with no television on is not an error worth
+    reporting — but a command the operator pressed and expects to *hear* is,
+    and that caller needs to tell "played" from "played to nobody".
+    """
     data = json.dumps(msg, ensure_ascii=False)
     dead = []
+    sent = 0
     for ws in tv_ws_list:
         try:
             await ws.send_text(data)
+            sent += 1
         except Exception:
             dead.append(ws)
     for ws in dead:
         tv_ws_list.remove(ws)
+    return sent
 
 
 # ── инструкция к дисковому набору ───────────────────────────────────────
@@ -3899,6 +3908,160 @@ async def voices_fetch(request: Request):
         raise HTTPException(502, str(exc))
 
 
+@app.get("/api/voices/farm/config", tags=["VoIP"], summary="Куда сейчас смотрит ферма", include_in_schema=False)
+async def voices_farm_config(request: Request):
+    """Адрес, на который настроен алиас gpufarm, для показа в форме."""
+    try:
+        farm_connect.local_only(request.client.host if request.client else None)
+        return await asyncio.to_thread(farm_connect.current)
+    except farm_connect.ConnectError as exc:
+        raise HTTPException(403, str(exc))
+
+
+@app.post("/api/voices/farm/connect", tags=["VoIP"], summary="Подключиться к ферме", include_in_schema=False)
+async def voices_farm_connect(request: Request):
+    """Поставить ключ на машину с видеокартой и записать её адрес.
+
+    Пароль приходит сюда, уходит в ssh-copy-id и на этом заканчивается: он не
+    пишется ни в конфиг, ни в лог, ни в ответ. Ручка доступна только с самого
+    игрового компьютера — см. farm_connect.local_only.
+    """
+    farm_connect.local_only(request.client.host if request.client else None)
+
+    data = await request.json()
+    try:
+        result = await asyncio.to_thread(
+            farm_connect.connect,
+            str(data.get("host", "")),
+            str(data.get("user", "")) or "boomchick93",
+            int(data.get("port", 22) or 22),
+            str(data.get("password", "")),
+        )
+    except farm_connect.ConnectError as exc:
+        raise HTTPException(400, str(exc))
+    except ValueError:
+        raise HTTPException(400, "порт должен быть числом")
+
+    # voice_farm читает адрес один раз при импорте, а мы его только что
+    # поменяли: без этого панель продолжит стучаться по старому.
+    voice_farm.HOST = result["alias"]
+    return result
+
+
+@app.get("/api/voices/farm/collected", tags=["VoIP"], summary="Готовые архивы на ферме", include_in_schema=False)
+async def voices_farm_collected():
+    """Что уже синтезировано и лежит на ферме готовым к выгрузке."""
+    try:
+        return await asyncio.to_thread(voice_farm.collected)
+    except voice_farm.FarmError as exc:
+        return {"voices": [], "configured": voice_farm.configured(),
+                "error": str(exc)}
+
+
+# Что выгрузка делает прямо сейчас, на стороне сервера.
+#
+# Держится здесь, а не в браузере, потому что в браузере оно не пережило ни
+# одного обновления страницы. Плашка «выгружаю…» была текстом в переменной той
+# вкладки, которая нажала кнопку: F5 стирал её, вкладка на другом экране про
+# выгрузку не знала вовсе, а сама выгрузка при этом продолжала идти в потоке
+# сервера. Панель показывала покой посреди часовой работы — и предлагала нажать
+# кнопку ещё раз.
+#
+# Под локом: пишет рабочий поток fetch_all, читают обработчики запросов.
+_fetch_all_lock = threading.Lock()
+_fetch_all_state: dict = {"running": False}
+
+
+def _fetch_all_snapshot() -> dict:
+    with _fetch_all_lock:
+        return dict(_fetch_all_state)
+
+
+@app.get("/api/voices/farm/fetch-all", tags=["VoIP"], summary="Идёт ли выгрузка голосов", include_in_schema=False)
+async def voices_farm_fetch_all_status():
+    """Что выгружается сейчас — чтобы панель узнала это после перезагрузки.
+
+    Отдельная ручка, а не поле в /collected: обновляется чаще и стоит дешевле —
+    здесь нет ни одного похода по ssh, только чтение того, что записал рабочий
+    поток.
+    """
+    return _fetch_all_snapshot()
+
+
+@app.post("/api/voices/farm/fetch-all", tags=["VoIP"], summary="Забрать все голоса", include_in_schema=False)
+async def voices_farm_fetch_all(request: Request):
+    """Скачать готовые голоса с фермы и разложить в tts/cache/.
+
+    Долгая ручка: голос — это сотня мегабайт по связи, которая рвётся, и
+    двадцать пять таких голосов идут часами. Ответ приходит один раз в конце и
+    перечисляет, что встало и что не вышло; пока он не пришёл, о ходе дела
+    рассказывает GET на этот же адрес.
+
+    Второй запуск поверх идущего отклоняется. Две выгрузки делят одну рвущуюся
+    связь и мешают друг другу — _pull для того и тянет файл кусками, — а
+    выглядит это как «нажал ещё раз, стало медленнее».
+    """
+    data = await request.json() if await request.body() else {}
+    names = data.get("voices") or None
+
+    with _fetch_all_lock:
+        if _fetch_all_state.get("running"):
+            raise HTTPException(409, "Выгрузка уже идёт — дождитесь её конца")
+        _fetch_all_state.clear()
+        _fetch_all_state.update(running=True, voice="", index=0,
+                                total=len(names) if names else 0,
+                                started=time.time())
+
+    def progress(event: dict) -> None:
+        with _fetch_all_lock:
+            _fetch_all_state.update(voice=event.get("voice", ""),
+                                    index=event.get("index", 0),
+                                    total=event.get("total", 0))
+
+    def run() -> dict:
+        return voice_farm.fetch_all(names, on_progress=progress)
+
+    try:
+        result = await asyncio.to_thread(run)
+    except voice_farm.FarmError as exc:
+        with _fetch_all_lock:
+            _fetch_all_state.update(running=False, error=str(exc),
+                                    finished=time.time())
+        raise HTTPException(502, str(exc))
+    except BaseException:
+        # Что угодно ещё — обрыв, отмена, ошибка в распаковке. Флаг обязан
+        # сняться, иначе панель до перезапуска сервера будет уверять, что
+        # выгрузка идёт, и не даст начать новую.
+        with _fetch_all_lock:
+            _fetch_all_state.update(running=False, finished=time.time())
+        raise
+
+    with _fetch_all_lock:
+        _fetch_all_state.update(running=False, finished=time.time(),
+                                installed=len(result.get("installed", [])),
+                                failed=result.get("failed", []),
+                                total=result.get("total", 0))
+    return result
+
+
+def _spoken_media_type(filename: str) -> str:
+    """Чем на самом деле является озвученная фраза.
+
+    Одним значением обойтись нельзя: в .spoken/ лежат и старые файлы, названные
+    .wav в те времена, когда фразе давали это расширение независимо от кодека,
+    и новые .m4a. Отдавать всё как audio/wav — то, из-за чего фразы не играли:
+    внутри почти всегда AAC, и браузер, которому сказали ждать RIFF, замолкает
+    без сообщения об ошибке.
+    """
+    return {
+        ".m4a": "audio/mp4",
+        ".mp4": "audio/mp4",
+        ".wav": "audio/wav",
+        ".ogg": "audio/ogg",
+        ".mp3": "audio/mpeg",
+    }.get(Path(filename).suffix.lower(), "application/octet-stream")
+
+
 @app.get("/api/voices/spoken/{filename}", tags=["VoIP"], summary="Проиграть озвученную фразу", include_in_schema=False)
 async def voices_spoken_file(filename: str):
     """Отдать браузеру фразу, которую уже забрали с фермы.
@@ -3914,7 +4077,98 @@ async def voices_spoken_file(filename: str):
     path = voice_farm.spoken_dir() / safe
     if not path.is_file():
         raise HTTPException(404, "Нет такой фразы — озвучьте её заново")
-    return FileResponse(path, media_type="audio/wav", filename=safe)
+    # Тип по расширению, а не «audio/wav» на всё подряд. Фразы кодируются в
+    # AAC (tts/engine.convert), и объявленный wav заставлял браузер разбирать
+    # их как RIFF: плеер показывал 0:00 и молчал, не сказав ни слова об ошибке.
+    return FileResponse(path, media_type=_spoken_media_type(safe), filename=safe)
+
+
+@app.post("/api/voices/spoken/play", tags=["VoIP"], summary="Проиграть фразу на выбранный выход", include_in_schema=False)
+async def voices_spoken_play(request: Request):
+    """Отправить уже озвученную фразу в трубку, на телевизор или в колонку.
+
+    Отдельно от /api/voices/speak, а не параметром к нему, потому что фраза
+    переживает своё создание: файл лежит в .spoken/, и обычный ход — послушать
+    одну и ту же реплику сперва в панели, потом в трубке, потом решить, что она
+    громче звучит из колонки. Каждое из этих нажатий приходит сюда, а считалась
+    фраза один раз.
+
+    Три выхода — это три разных тракта, а не три устройства одного:
+
+      phone   капсюль трубки. Идёт через voip_service, потому что снятая трубка
+              это состояние линии, а не просто выход звука: тем же путём ходит
+              вся остальная озвучка информатора.
+      speaker колонка у стола, через серверный движок. Канал по умолчанию
+              'video', а не 'game': это голос, и он должен идти туда же, куда
+              ролики, а не туда, где гремят выстрелы — на игровом канале
+              реплику информатора глушит музыка стола. Канал можно указать
+              явно, если оператор развёл их иначе.
+      tv      динамики телевизора. Играет не эта машина, а браузер телеэкрана:
+              его звук уходит на своё устройство через setSinkId, и дотянуться
+              до него отсюда можно только командой по вебсокету.
+    """
+    data = await request.json()
+    filename = str(data.get("file", "")).strip()
+    where = str(data.get("where", "phone")).strip()
+
+    if not filename:
+        raise HTTPException(400, "Не указан файл фразы")
+    # Тот же разбор пути, что и в выдаче файла: имя пришло от браузера.
+    safe = Path(filename).name
+    path = voice_farm.spoken_dir() / safe
+    if not path.is_file():
+        raise HTTPException(404, "Нет такой фразы — озвучьте её заново")
+
+    if where == "phone":
+        _voip_ensure_started()
+        extension = str(data.get("extension", "")).strip() or tts_bridge.extension()
+
+        def to_phone() -> dict:
+            # Без КПВ: трубку под эту проверку снимают заранее, и гудки перед
+            # репликой заставили бы дилера ждать их впустую.
+            voip_service.play_generated(extension, name=path.stem, path=path,
+                                        detail="проба фразы", ringback=False)
+            return {"ok": True, "where": "phone", "extension": extension}
+
+        try:
+            return await asyncio.to_thread(to_phone)
+        except voip_service.VoipError as exc:
+            raise _voip_fail(exc)
+
+    if where == "speaker":
+        if not audio_engine.available():
+            # Две разные беды под одним available(): библиотек нет вовсе, или
+            # они есть и ни один канал не открылся. Лечатся по-разному, поэтому
+            # и говорятся по-разному.
+            raise HTTPException(
+                409,
+                "Серверный звук недоступен: "
+                + (audio_engine.import_error()
+                   or "ни один канал не открыт — выберите устройство "
+                      "в разделе «Серверный звук» на вкладке звука"))
+        channel = str(data.get("channel", "")).strip() or "video"
+        if channel not in sound_config.OUTPUT_CHANNELS:
+            raise HTTPException(404, f"Неизвестный канал: {channel}")
+        ok = await asyncio.to_thread(
+            audio_engine.play, path, channel, sound_director.master_volume,
+            "__spoken__")
+        if not ok:
+            raise HTTPException(
+                409, f"Канал {channel!r} закрыт или файл не читается — "
+                     "выберите для него устройство во вкладке звука")
+        return {"ok": True, "where": "speaker", "channel": channel}
+
+    if where == "tv":
+        # Телевизору отдаём адрес, а не файл: у него свой sink, и играть должен
+        # он сам. Если ни один экран не подключён, сказать об этом стоит здесь —
+        # иначе нажатие выглядит удавшимся, а в комнате тихо.
+        sent = await broadcast_tv({"action": "speak",
+                                   "url": f"/api/voices/spoken/{quote(safe)}"})
+        if sent == 0:
+            raise HTTPException(409, "Ни один телевизор не подключён")
+        return {"ok": True, "where": "tv", "screens": sent}
+
+    raise HTTPException(400, f"Неизвестный выход: {where!r}")
 
 
 @app.delete("/api/voices/{name}", tags=["VoIP"], summary="Забыть голос в работе", include_in_schema=False)

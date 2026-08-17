@@ -175,9 +175,17 @@ def cmd_speak(request: dict) -> dict:
 
     # Named by the caller so it can fetch a specific one back, and sanitised
     # here because it becomes a path on this machine.
-    out_name = Path(str(request.get("out", "phrase.wav"))).name
-    if not out_name.endswith(".wav"):
-        out_name += ".wav"
+    #
+    # The extension has to be engine.FORMAT, and forcing ".wav" here is what
+    # made auditioned phrases silent. synthesise() ends in engine.convert(),
+    # which always encodes AAC and lets ffmpeg choose the container from the
+    # name — so a target ending ".wav" produced AAC inside a RIFF header. That
+    # file probes as valid and plays in nothing: the dealer's panel showed a
+    # zero-length track and no error. Every other path through this file writes
+    # FORMAT already; only the single phrase named its own file.
+    out_name = Path(str(request.get("out", "phrase"))).name
+    if not out_name.endswith(f".{engine.FORMAT}"):
+        out_name = f"{Path(out_name).stem}.{engine.FORMAT}"
 
     target = jobs.dir_for(name) / out_name
     synthesise(name, text, target)
