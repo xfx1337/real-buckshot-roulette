@@ -33,9 +33,11 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 
-# What plays the file. afplay ships with macOS and follows the default output
-# device, so plugging into the jack is all the routing that is needed.
-PLAYER = "/usr/bin/afplay"
+import sys
+
+# What plays the file. afplay ships with macOS. ffplay is used on Windows.
+is_win = sys.platform == "win32"
+PLAYER = ["ffplay", "-nodisp", "-autoexit", "-loglevel", "quiet"] if is_win else ["/usr/bin/afplay"]
 
 
 class AudioError(RuntimeError):
@@ -130,8 +132,60 @@ class Player:
         self.stop(reason="replaced")
 
         try:
+            cmd = PLAYER + [str(path)]
+            
+            # Read noise configuration
+            config_file = ROOT / "etc" / "audio_config.json"
+            noise_enabled = False
+            noise_level = 0.015
+            dist = 1.0
+            hp = 300
+            lp = 3400
+            crush_lvl = 0.0
+            vibrato_lvl = 0.0
+            tremolo_lvl = 0.0
+            echo_lvl = 0.0
+            if config_file.exists():
+                try:
+                    import json
+                    cfg = json.loads(config_file.read_text())
+                    noise_enabled = cfg.get("enabled", False)
+                    noise_level = cfg.get("level", 0.015)
+                    dist = cfg.get("dist", 1.0)
+                    hp = cfg.get("hp", 300)
+                    lp = cfg.get("lp", 3400)
+                    crush_lvl = float(cfg.get("crush", 0.0))
+                    vibrato_lvl = float(cfg.get("vibrato", 0.0))
+                    tremolo_lvl = float(cfg.get("tremolo", 0.0))
+                    echo_lvl = float(cfg.get("echo", 0.0))
+                except Exception:
+                    pass
+
+            if noise_enabled:
+                player_bin = "ffplay"
+                comp_vol = 1.0 / dist if dist > 0 else 1.0
+                
+                voice_filters = []
+                voice_filters.append(f"volume={dist}")
+                voice_filters.append("asoftclip=type=hard")
+                voice_filters.append(f"volume={comp_vol:.3f}")
+                voice_filters.append(f"highpass=f={hp}")
+                voice_filters.append(f"lowpass=f={lp}")
+                if crush_lvl > 0:
+                    voice_filters.append(f"acrusher=bits=8:mix={crush_lvl:.2f}")
+                if vibrato_lvl > 0:
+                    voice_filters.append(f"vibrato=f=4:d={vibrato_lvl:.2f}")
+                if tremolo_lvl > 0:
+                    voice_filters.append(f"tremolo=f=12:d={tremolo_lvl:.2f}")
+                if echo_lvl > 0:
+                    voice_filters.append(f"aecho=1.0:0.8:100:{echo_lvl * 0.8:.2f}")
+                    
+                voice_chain = ",".join(voice_filters)
+                filter_str = f"anoisesrc=c=pink:a={noise_level}[noise];[in]{voice_chain}[voice];[voice][noise]amix=inputs=2:duration=first"
+                cmd = [player_bin, "-nodisp", "-autoexit", "-loglevel", "quiet", "-af", filter_str, str(path)]
+
             process = subprocess.Popen(
-                [PLAYER, str(path)],
+                cmd,
                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                 stdin=subprocess.DEVNULL,
             )
@@ -177,8 +231,59 @@ class Player:
 
             # Looping: start the file again and keep watching the new process.
             try:
+                cmd = PLAYER + [str(playing.path)]
+                
+                # Check noise configuration on loop restart as well
+                config_file = ROOT / "etc" / "audio_config.json"
+                noise_enabled = False
+                noise_level = 0.015
+                dist = 1.0
+                hp = 300
+                lp = 3400
+                crush_lvl = 0.0
+                vibrato_lvl = 0.0
+                tremolo_lvl = 0.0
+                echo_lvl = 0.0
+                if config_file.exists():
+                    try:
+                        import json
+                        cfg = json.loads(config_file.read_text())
+                        noise_enabled = cfg.get("enabled", False)
+                        noise_level = cfg.get("level", 0.015)
+                        dist = cfg.get("dist", 1.0)
+                        hp = cfg.get("hp", 300)
+                        lp = cfg.get("lp", 3400)
+                        crush_lvl = float(cfg.get("crush", 0.0))
+                        vibrato_lvl = float(cfg.get("vibrato", 0.0))
+                        tremolo_lvl = float(cfg.get("tremolo", 0.0))
+                        echo_lvl = float(cfg.get("echo", 0.0))
+                    except Exception:
+                        pass
+                        
+                if noise_enabled:
+                    player_bin = "ffplay"
+                    comp_vol = 1.0 / dist if dist > 0 else 1.0
+                    voice_filters = []
+                    voice_filters.append(f"volume={dist}")
+                    voice_filters.append("asoftclip=type=hard")
+                    voice_filters.append(f"volume={comp_vol:.3f}")
+                    voice_filters.append(f"highpass=f={hp}")
+                    voice_filters.append(f"lowpass=f={lp}")
+                    if crush_lvl > 0:
+                        voice_filters.append(f"acrusher=bits=8:mix={crush_lvl:.2f}")
+                    if vibrato_lvl > 0:
+                        voice_filters.append(f"vibrato=f=4:d={vibrato_lvl:.2f}")
+                    if tremolo_lvl > 0:
+                        voice_filters.append(f"tremolo=f=12:d={tremolo_lvl:.2f}")
+                    if echo_lvl > 0:
+                        voice_filters.append(f"aecho=1.0:0.8:100:{echo_lvl * 0.8:.2f}")
+                        
+                    voice_chain = ",".join(voice_filters)
+                    filter_str = f"anoisesrc=c=pink:a={noise_level}[noise];[in]{voice_chain}[voice];[voice][noise]amix=inputs=2:duration=first"
+                    cmd = [player_bin, "-nodisp", "-autoexit", "-loglevel", "quiet", "-af", filter_str, str(playing.path)]
+
                 process = subprocess.Popen(
-                    [PLAYER, str(playing.path)],
+                    cmd,
                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                     stdin=subprocess.DEVNULL,
                 )

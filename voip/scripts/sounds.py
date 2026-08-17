@@ -20,12 +20,14 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
+import sys
+
 ROOT = Path(__file__).resolve().parent.parent
 SOURCE_DIR = ROOT / "sounds"
 CONVERTED_DIR = SOURCE_DIR / "converted"
 
-# Where Asterisk looks. Playback(foo) with no path reads from here.
-ASTERISK_SOUNDS = Path("/opt/homebrew/var/lib/asterisk/sounds/en")
+is_win = sys.platform == "win32"
+ASTERISK_SOUNDS = ROOT / "sounds" / "asterisk_sounds" if is_win else Path("/opt/homebrew/var/lib/asterisk/sounds/en")
 
 SOURCE_SUFFIXES = {".mp3", ".wav", ".m4a", ".aac", ".ogg", ".opus",
                    ".flac", ".aiff", ".aif", ".wma", ".mp4"}

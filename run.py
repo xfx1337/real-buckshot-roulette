@@ -24,6 +24,9 @@ import platform
 import socket
 import subprocess
 import sys
+import io
+sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
+sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8')
 import threading
 import time
 import webbrowser
@@ -206,9 +209,9 @@ def main() -> None:
     port = args.port or int(cfg["server"]["port"])
     ip = lan_ip()
 
-    print("───────────────────────────────────────────────")
+    print("-----------------------------------------------")
     print("  Buckshot Roulette IRL — запуск без Docker")
-    print("───────────────────────────────────────────────")
+    print("-----------------------------------------------")
     print(f"▸ Python:  {platform.python_version()}  ({sys.executable})")
     print(f"▸ LAN-IP:  {ip}")
 
